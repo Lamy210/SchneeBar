@@ -5,6 +5,7 @@ public enum WidgetSettingsFixture {
         WidgetDescriptor(
             id: "developer.activity",
             displayName: "Developer Activity",
+            defaultIsEnabled: true,
             defaultOrder: 0,
             defaultRepresentation: .normal,
             visibilityPolicy: .whenNotNominal,
@@ -13,6 +14,7 @@ public enum WidgetSettingsFixture {
         WidgetDescriptor(
             id: "system.cpu",
             displayName: "CPU",
+            defaultIsEnabled: true,
             defaultOrder: 100,
             defaultRepresentation: .normal,
             visibilityPolicy: .always,
@@ -21,6 +23,7 @@ public enum WidgetSettingsFixture {
         WidgetDescriptor(
             id: "system.clock",
             displayName: "Clock",
+            defaultIsEnabled: false,
             defaultOrder: 200,
             defaultRepresentation: .compact,
             visibilityPolicy: .always,
