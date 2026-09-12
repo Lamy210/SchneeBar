@@ -6,11 +6,14 @@ import SwiftUI
 
 @MainActor
 final class MenuBarController: NSObject {
+    private static let activityWidgetID: WidgetID = "developer.activity"
+
     private let statusItem: NSStatusItem
     private let popover: NSPopover
     private let runtimeModel: WidgetRuntimeModel
     private let widgetEngine: WidgetEngine
     private var refreshTask: Task<Void, Never>?
+    private var immediateActivityRefreshTask: Task<Void, Never>?
 
     init(
         runtimeModel: WidgetRuntimeModel,
@@ -48,6 +51,32 @@ final class MenuBarController: NSObject {
 
     deinit {
         refreshTask?.cancel()
+        immediateActivityRefreshTask?.cancel()
+    }
+
+    func refreshActivityNow() {
+        immediateActivityRefreshTask?.cancel()
+        let engine = widgetEngine
+        let model = runtimeModel
+
+        immediateActivityRefreshTask = Task { @MainActor [weak self] in
+            let descriptors = await engine.descriptors()
+            guard let activityDescriptor = descriptors.first(where: {
+                $0.id == Self.activityWidgetID
+            }) else {
+                return
+            }
+
+            let configuration = await engine.currentConfiguration()
+            guard configuration.isEnabled(activityDescriptor) else {
+                return
+            }
+
+            _ = await engine.refresh(id: Self.activityWidgetID)
+            let snapshots = await engine.orderedVisibleSnapshots()
+            model.snapshots = snapshots
+            self?.apply(snapshots: snapshots)
+        }
     }
 
     @objc
