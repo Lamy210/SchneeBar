@@ -39,6 +39,30 @@ private actor FlakyWidgetProvider: WidgetProvider {
     }
 }
 
+private actor CountingWidgetProvider: WidgetProvider {
+    nonisolated let descriptor = WidgetDescriptor(
+        id: "counting",
+        displayName: "Counting",
+        refreshPolicy: .interval(10)
+    )
+
+    private var calls = 0
+
+    func snapshot() async throws -> WidgetSnapshot {
+        calls += 1
+        return makeSnapshot(
+            descriptor: descriptor,
+            severity: .nominal,
+            priority: .normal,
+            text: "count \(calls)"
+        )
+    }
+
+    func callCount() -> Int {
+        calls
+    }
+}
+
 @Test
 func widgetVisibilityPoliciesUseSeverity() {
     #expect(WidgetVisibilityPolicy.always.isVisible(for: .nominal))
@@ -127,6 +151,23 @@ func widgetEnginePreservesLastKnownGoodSnapshotAfterProviderFailure() async {
 
     #expect(first?.content().text == "working")
     #expect(second == first)
+}
+
+@Test
+func widgetEngineRefreshesOnlyWhenPolicyIsDue() async {
+    let provider = CountingWidgetProvider()
+    let engine = WidgetEngine(providers: [provider])
+    let start = Date(timeIntervalSince1970: 1_000)
+
+    _ = await engine.refreshDue(at: start)
+    #expect(await provider.callCount() == 1)
+    #expect(await engine.secondsUntilNextRefresh(at: start) == 10)
+
+    _ = await engine.refreshDue(at: start.addingTimeInterval(5))
+    #expect(await provider.callCount() == 1)
+
+    _ = await engine.refreshDue(at: start.addingTimeInterval(10))
+    #expect(await provider.callCount() == 2)
 }
 
 private func makeSnapshot(
