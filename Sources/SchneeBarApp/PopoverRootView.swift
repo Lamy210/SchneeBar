@@ -18,7 +18,27 @@ struct PopoverRootView: View {
                 Divider()
                     .padding(.horizontal, 12)
 
-                ActivityPopoverView(items: activityModel.items)
+                if let selectedItem = activityModel.selectedItem {
+                    ActivityDetailView(
+                        item: selectedItem,
+                        detail: activityModel.detail,
+                        isLoading: activityModel.detailIsLoading,
+                        errorMessage: activityModel.detailErrorMessage,
+                        onBack: {
+                            activityModel.dismissDetail()
+                        },
+                        onRetry: {
+                            activityModel.retryDetail()
+                        }
+                    )
+                } else {
+                    ActivityPopoverView(
+                        items: activityModel.items,
+                        onInspect: { item in
+                            activityModel.requestDetail(for: item)
+                        }
+                    )
+                }
             }
 
             Divider()

@@ -28,6 +28,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let activityRuntimeModel = ActivityRuntimeModel()
 
     let githubRuntimeModel: GitHubConnectionsRuntimeModel
+    private let workflowJobService: GitHubWorkflowJobService
 
     private var menuBarController: MenuBarController?
 
@@ -38,6 +39,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             credentialStore: credentialStore
         )
         let workflowRunService = GitHubWorkflowRunService(
+            sessionCoordinator: sessionCoordinator
+        )
+        workflowJobService = GitHubWorkflowJobService(
             sessionCoordinator: sessionCoordinator
         )
         let activityProvider = GitHubActivityProvider(
@@ -56,6 +60,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let githubRuntimeModel = githubRuntimeModel
         let activityRuntimeModel = activityRuntimeModel
+        let workflowJobService = workflowJobService
+
+        activityRuntimeModel.configureDetailLoader { item in
+            try await githubRuntimeModel.loadActivityDetail(
+                for: item,
+                jobService: workflowJobService
+            )
+        }
+
         menuBarController = MenuBarController(
             runtimeModel: runtimeModel,
             activityRuntimeModel: activityRuntimeModel,

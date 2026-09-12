@@ -175,6 +175,26 @@ private func activityRoot(
 }
 
 @MainActor
+private func activityDetailRoot(appearance: SnapshotAppearance) -> some View {
+    ZStack {
+        appearance.background
+
+        ActivityDetailView(
+            item: ActivityDetailFixture.item,
+            detail: ActivityDetailFixture.detail,
+            isLoading: false,
+            errorMessage: nil,
+            onBack: {},
+            onRetry: {},
+            surfaceStyle: .deterministic
+        )
+        .padding(24)
+    }
+    .frame(width: 400)
+    .environment(\.colorScheme, appearance.colorScheme)
+}
+
+@MainActor
 private func widgetRoot(
     scenario: WidgetFixtureScenario,
     appearance: SnapshotAppearance
@@ -308,6 +328,15 @@ private func run() throws {
                 outputDirectory: outputDirectory
             )
         }
+    }
+
+    for appearance in SnapshotAppearance.allCases {
+        try render(
+            rootView: activityDetailRoot(appearance: appearance),
+            appearance: appearance,
+            filename: "activity-detail-failed-\(appearance.rawValue).png",
+            outputDirectory: outputDirectory
+        )
     }
 
     for scenario in WidgetFixtureScenario.allCases {
