@@ -3,14 +3,14 @@ import SwiftUI
 
 public struct WidgetSettingsView: View {
     private let descriptors: [WidgetDescriptor]
-    private let configuration: WidgetConfiguration
+    private let configuration: SchneeBarCore.WidgetConfiguration
     private let onSetEnabled: (WidgetDescriptor, Bool) -> Void
     private let onSetRepresentation: (WidgetDescriptor, WidgetRepresentationKind?) -> Void
     private let onMove: (WidgetID, Int) -> Void
 
     public init(
         descriptors: [WidgetDescriptor],
-        configuration: WidgetConfiguration,
+        configuration: SchneeBarCore.WidgetConfiguration,
         onSetEnabled: @escaping (WidgetDescriptor, Bool) -> Void,
         onSetRepresentation: @escaping (WidgetDescriptor, WidgetRepresentationKind?) -> Void,
         onMove: @escaping (WidgetID, Int) -> Void
