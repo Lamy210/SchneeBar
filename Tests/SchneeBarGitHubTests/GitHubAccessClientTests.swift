@@ -171,7 +171,67 @@ func inventoryAssociatesRepositoriesWithEachInstallation() async throws {
     #expect(inventory.account.identity.login == "octocat")
     #expect(inventory.installations.count == 1)
     #expect(inventory.installations[0].installation.id == 5)
+    #expect(inventory.installations[0].status == .available)
     #expect(inventory.installations[0].repositories.map(\.fullName) == ["octocat/project"])
+}
+
+@Test
+func inventorySkipsRepositoryRequestForSuspendedInstallation() async throws {
+    let transport = AccessQueueTransport([
+        AccessStubResponse(#"{"id":1,"login":"octocat","name":null,"avatar_url":null}"#),
+        AccessStubResponse(
+            #"{"total_count":1,"installations":[{"id":5,"account":{"id":10,"login":"octocat","type":"User"},"repository_selection":"selected","permissions":{"actions":"read"},"suspended_at":"2026-09-01T00:00:00Z"}]}"#
+        ),
+    ])
+    let client = GitHubAccessClient(transport: transport)
+
+    let inventory = try await client.inventory(
+        connection: try githubDotComAccessConnection(),
+        credential: GitHubCredential(accessToken: "ghu_access")
+    )
+
+    #expect(inventory.installations[0].status == .suspended)
+    #expect(inventory.installations[0].repositories.isEmpty)
+    #expect(await transport.recordedRequests().count == 2)
+}
+
+@Test
+func inventoryKeepsForbiddenInstallationWithoutFailingWholeConnection() async throws {
+    let transport = AccessQueueTransport([
+        AccessStubResponse(#"{"id":1,"login":"octocat","name":null,"avatar_url":null}"#),
+        AccessStubResponse(
+            #"{"total_count":1,"installations":[{"id":5,"account":{"id":10,"login":"octocat","type":"User"},"repository_selection":"selected","permissions":{"actions":"read"},"suspended_at":null}]}"#
+        ),
+        AccessStubResponse(#"{"message":"Forbidden"}"#, statusCode: 403),
+    ])
+    let client = GitHubAccessClient(transport: transport)
+
+    let inventory = try await client.inventory(
+        connection: try githubDotComAccessConnection(),
+        credential: GitHubCredential(accessToken: "ghu_access")
+    )
+
+    #expect(inventory.installations[0].status == .forbidden)
+    #expect(inventory.installations[0].repositories.isEmpty)
+}
+
+@Test
+func inventoryPropagatesRepository401AsConnectionAuthenticationFailure() async throws {
+    let transport = AccessQueueTransport([
+        AccessStubResponse(#"{"id":1,"login":"octocat","name":null,"avatar_url":null}"#),
+        AccessStubResponse(
+            #"{"total_count":1,"installations":[{"id":5,"account":{"id":10,"login":"octocat","type":"User"},"repository_selection":"selected","permissions":{"actions":"read"},"suspended_at":null}]}"#
+        ),
+        AccessStubResponse(#"{"message":"Bad credentials"}"#, statusCode: 401),
+    ])
+    let client = GitHubAccessClient(transport: transport)
+
+    await #expect(throws: GitHubAccessClientError.httpStatus(401)) {
+        try await client.inventory(
+            connection: try githubDotComAccessConnection(),
+            credential: GitHubCredential(accessToken: "expired")
+        )
+    }
 }
 
 @Test
