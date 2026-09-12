@@ -11,6 +11,7 @@ final class MenuBarController: NSObject {
     private let statusItem: NSStatusItem
     private let popover: NSPopover
     private let runtimeModel: WidgetRuntimeModel
+    private let activityRuntimeModel: ActivityRuntimeModel
     private let widgetEngine: WidgetEngine
     private var refreshTask: Task<Void, Never>?
     private var immediateActivityRefreshTask: Task<Void, Never>?
@@ -19,11 +20,13 @@ final class MenuBarController: NSObject {
 
     init(
         runtimeModel: WidgetRuntimeModel,
+        activityRuntimeModel: ActivityRuntimeModel,
         loadActivityItems: @escaping @Sendable () async throws -> [ActivityItem]
     ) {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         popover = NSPopover()
         self.runtimeModel = runtimeModel
+        self.activityRuntimeModel = activityRuntimeModel
         widgetEngine = WidgetEngine(providers: [
             ClockWidgetProvider(),
             CPUWidgetProvider(),
@@ -45,7 +48,10 @@ final class MenuBarController: NSObject {
         popover.behavior = .transient
         popover.animates = true
         popover.contentViewController = NSHostingController(
-            rootView: PopoverRootView(model: runtimeModel)
+            rootView: PopoverRootView(
+                model: runtimeModel,
+                activityModel: activityRuntimeModel
+            )
         )
 
         configureAndStartWidgetRuntime()
