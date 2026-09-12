@@ -31,7 +31,14 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .frame(width: 560, minHeight: 420, idealHeight: 520, maxHeight: 640)
+        .frame(
+            minWidth: 560,
+            idealWidth: 560,
+            maxWidth: 560,
+            minHeight: 420,
+            idealHeight: 520,
+            maxHeight: 640
+        )
         .padding()
     }
 }
