@@ -2,7 +2,7 @@
 
 SchneeBar is a native macOS menu-bar platform for surfacing the information and actions that matter **right now**.
 
-The project is in its bootstrap phase. The first vertical slice focuses on a native menu-bar shell, a reusable widget/design-system boundary, deterministic visual rendering, and public-repository-safe CI.
+The project is in its bootstrap phase. The first vertical slice focuses on a native menu-bar shell, clear Core / DesignSystem / Feature boundaries, deterministic visual rendering, and public-repository-safe CI.
 
 ## Product direction
 
@@ -24,30 +24,26 @@ SchneeBar is a separate product from SchneeGlass. Any future integration is opti
 - Tuist 4.203.1, pinned with mise
 - Swift Testing for unit tests
 - GitHub Actions on macOS 26
-- Deterministic Visual Harness + main-vs-PR visual report
+- Adaptive local Visual Harness + deterministic PR-base visual regression
 - CodeQL and Dependabot
 
-Xcode 27 / Swift 6.4 preview support is planned as a non-blocking canary lane, not as the production baseline.
+Xcode 27 / Swift 6.4 preview support is tracked in a non-blocking canary lane, not as the production baseline.
 
 ## Architecture
 
 SchneeBar starts as a modular monolith using Ports & Adapters:
 
 ```text
-Presentation (Menu Bar / Popovers / Settings)
-                    |
-Application (Widget / Activity / Visibility / Notifications)
-                    |
-Domain (provider-neutral models)
-                    |
-Ports
-        +-----------+-----------+
-        |                       |
-    Providers               Platform
- GitHub / System      Keychain / SQLite / Network
+App / macOS integration
+        |
+Activity Feature
+   /           \
+Core       DesignSystem
+        |
+Future provider ports/adapters
 ```
 
-Provider DTOs must not leak into SwiftUI. See [Architecture](docs/ARCHITECTURE.md).
+Production domain types stay UI-neutral, the Design System stays feature-neutral, and preview fixtures live in a dedicated development-only target. Provider DTOs must not leak into SwiftUI. See [Architecture](docs/ARCHITECTURE.md).
 
 ## Local development
 
@@ -65,13 +61,13 @@ mise exec -- tuist test
 mise exec -- tuist run SchneeBar
 ```
 
-Open the visual development harness:
+Open the visual development harness (adaptive macOS surface):
 
 ```bash
 mise exec -- tuist run SchneeBarVisualHarness
 ```
 
-Render deterministic visual scenarios:
+Render deterministic visual scenarios used by CI:
 
 ```bash
 mise exec -- tuist run SchneeBarVisualSnapshotCLI -- --output .visual/current
@@ -79,7 +75,9 @@ mise exec -- tuist run SchneeBarVisualSnapshotCLI -- --output .visual/current
 
 ## CI and visual review
 
-Every pull request builds and tests the native app. A separate Visual Regression workflow renders the same deterministic scenarios from `main` and the PR, then produces an HTML report with Before / After / Overlay views.
+Every pull request builds and tests the native app. A separate Visual Regression workflow renders deterministic scenarios from the pull request candidate and its exact base commit (`pull_request.base.sha`), then produces an HTML report with Before / After / Overlay views.
+
+The blocking-capable snapshot layer deliberately uses a deterministic surface instead of treating off-screen Liquid Glass/vibrancy rendering as a stable pixel oracle. Full adaptive-material screenshots are planned as a separate XCUITest smoke layer.
 
 See [CI & Visual Regression](docs/CI_VISUAL_REGRESSION.md).
 
@@ -90,6 +88,7 @@ This repository is public. CI is therefore designed with untrusted fork pull req
 - PR jobs receive no application/release secrets.
 - Workflow permissions default to read-only.
 - We do not execute PR code under `pull_request_target`.
+- Checkout credentials are not persisted into PR worktrees.
 - Third-party actions are pinned to immutable commit SHAs.
 - Signing, notarization, and release credentials belong only in protected release workflows/environments.
 - GitHub OAuth/App credentials must never be committed or embedded as private secrets in the public client.
