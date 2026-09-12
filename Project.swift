@@ -160,6 +160,7 @@ let project = Project(
                 .target(name: "SchneeBarGitHubKeychain"),
                 .target(name: "SchneeBarGitHubProfiles"),
                 .target(name: "SchneeBarGitHubFeature"),
+                .target(name: "SchneeBarGitHubActivityProvider"),
             ]
         ),
         .target(
