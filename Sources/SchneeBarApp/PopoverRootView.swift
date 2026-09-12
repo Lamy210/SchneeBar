@@ -1,5 +1,6 @@
 import AppKit
 import SchneeBarActivityFeature
+import SchneeBarWidgetFeature
 import SwiftUI
 
 struct PopoverRootView: View {
