@@ -110,7 +110,7 @@ let project = Project(
             deploymentTargets: deploymentTarget,
             sources: ["Sources/SchneeBarGitHubFeature/**"],
             dependencies: [
-                .target(name: "SchneeBarDesignSystem"),
+                .target(name: "SchneeBarGitHub"),
             ]
         ),
         .target(
@@ -144,6 +144,10 @@ let project = Project(
                 .target(name: "SchneeBarActivityFeature"),
                 .target(name: "SchneeBarSystemProvider"),
                 .target(name: "SchneeBarPreferences"),
+                .target(name: "SchneeBarGitHub"),
+                .target(name: "SchneeBarGitHubKeychain"),
+                .target(name: "SchneeBarGitHubProfiles"),
+                .target(name: "SchneeBarGitHubFeature"),
             ]
         ),
         .target(
