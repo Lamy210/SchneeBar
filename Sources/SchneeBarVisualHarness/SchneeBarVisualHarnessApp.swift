@@ -1,4 +1,5 @@
 import SchneeBarActivityFeature
+import SchneeBarGitHubFeature
 import SchneeBarPreviewSupport
 import SchneeBarWidgetFeature
 import SwiftUI
@@ -9,13 +10,14 @@ struct SchneeBarVisualHarnessApp: App {
         WindowGroup("SchneeBar Visual Harness") {
             VisualHarnessView()
         }
-        .defaultSize(width: 800, height: 680)
+        .defaultSize(width: 1180, height: 760)
     }
 }
 
 private struct VisualHarnessView: View {
     @State private var activityScenario: ActivityFixtureScenario = .mainFailure
     @State private var widgetScenario: WidgetFixtureScenario = .critical
+    @State private var githubScenario: GitHubConnectionsFixture = .multiConnection
     @State private var appearance: ColorScheme = .dark
 
     var body: some View {
@@ -33,6 +35,12 @@ private struct VisualHarnessView: View {
                     }
                 }
 
+                Picker("GitHub", selection: $githubScenario) {
+                    ForEach(GitHubConnectionsFixture.allCases, id: \.rawValue) { scenario in
+                        Text(scenario.rawValue).tag(scenario)
+                    }
+                }
+
                 Picker("Appearance", selection: $appearance) {
                     Text("Light").tag(ColorScheme.light)
                     Text("Dark").tag(ColorScheme.dark)
@@ -40,18 +48,32 @@ private struct VisualHarnessView: View {
                 .pickerStyle(.segmented)
             }
             .formStyle(.grouped)
-            .frame(width: 260)
+            .frame(width: 280)
 
             ScrollView {
-                VStack(spacing: 16) {
+                VStack(spacing: 20) {
                     WidgetOverviewView(snapshots: widgetScenario.snapshots)
+                        .frame(maxWidth: 400)
 
                     ActivityPopoverView(items: activityScenario.items)
+                        .frame(maxWidth: 400)
+
+                    Form {
+                        GitHubConnectionsView(
+                            connections: githubScenario.connections,
+                            onAdd: {},
+                            onRefresh: { _ in },
+                            onManage: { _ in },
+                            onSetEnabled: { _, _ in }
+                        )
+                    }
+                    .formStyle(.grouped)
+                    .frame(width: 660)
                 }
                 .padding(24)
             }
             .environment(\.colorScheme, appearance)
-            .frame(maxWidth: 400)
+            .frame(maxWidth: 700)
 
             Spacer()
         }
