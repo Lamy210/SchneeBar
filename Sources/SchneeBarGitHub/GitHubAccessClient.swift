@@ -107,16 +107,27 @@ public struct GitHubRepositoryAccess: Equatable, Sendable, Identifiable {
     }
 }
 
+public enum GitHubInstallationAccessStatus: String, Equatable, Sendable {
+    case available
+    case suspended
+    case forbidden
+    case notFound
+    case unavailable
+}
+
 public struct GitHubInstallationAccess: Equatable, Sendable {
     public let installation: GitHubInstallation
     public let repositories: [GitHubRepositoryAccess]
+    public let status: GitHubInstallationAccessStatus
 
     public init(
         installation: GitHubInstallation,
-        repositories: [GitHubRepositoryAccess]
+        repositories: [GitHubRepositoryAccess],
+        status: GitHubInstallationAccessStatus = .available
     ) {
         self.installation = installation
         self.repositories = repositories
+        self.status = status
     }
 }
 
@@ -299,17 +310,68 @@ public struct GitHubAccessClient: Sendable {
         installationAccess.reserveCapacity(accessibleInstallations.count)
 
         for installation in accessibleInstallations {
-            let accessibleRepositories = try await repositories(
-                installationID: installation.id,
-                connection: connection,
-                credential: credential
-            )
-            installationAccess.append(
-                GitHubInstallationAccess(
-                    installation: installation,
-                    repositories: accessibleRepositories
+            if installation.isSuspended {
+                installationAccess.append(
+                    GitHubInstallationAccess(
+                        installation: installation,
+                        repositories: [],
+                        status: .suspended
+                    )
                 )
-            )
+                continue
+            }
+
+            do {
+                let accessibleRepositories = try await repositories(
+                    installationID: installation.id,
+                    connection: connection,
+                    credential: credential
+                )
+                installationAccess.append(
+                    GitHubInstallationAccess(
+                        installation: installation,
+                        repositories: accessibleRepositories,
+                        status: .available
+                    )
+                )
+            } catch let error as GitHubAccessClientError {
+                switch error {
+                case .httpStatus(401):
+                    throw error
+                case .httpStatus(403):
+                    installationAccess.append(
+                        GitHubInstallationAccess(
+                            installation: installation,
+                            repositories: [],
+                            status: .forbidden
+                        )
+                    )
+                case .httpStatus(404):
+                    installationAccess.append(
+                        GitHubInstallationAccess(
+                            installation: installation,
+                            repositories: [],
+                            status: .notFound
+                        )
+                    )
+                default:
+                    installationAccess.append(
+                        GitHubInstallationAccess(
+                            installation: installation,
+                            repositories: [],
+                            status: .unavailable
+                        )
+                    )
+                }
+            } catch {
+                installationAccess.append(
+                    GitHubInstallationAccess(
+                        installation: installation,
+                        repositories: [],
+                        status: .unavailable
+                    )
+                )
+            }
         }
 
         return GitHubAccessInventory(
