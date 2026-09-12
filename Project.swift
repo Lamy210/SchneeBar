@@ -39,6 +39,17 @@ let project = Project(
             ]
         ),
         .target(
+            name: "SchneeBarSystemProvider",
+            destinations: .macOS,
+            product: .staticFramework,
+            bundleId: "dev.lamy.schneebar.system-provider",
+            deploymentTargets: deploymentTarget,
+            sources: ["Sources/SchneeBarSystemProvider/**"],
+            dependencies: [
+                .target(name: "SchneeBarCore"),
+            ]
+        ),
+        .target(
             name: "SchneeBarPreviewSupport",
             destinations: .macOS,
             product: .staticFramework,
@@ -64,6 +75,7 @@ let project = Project(
             sources: ["Sources/SchneeBarApp/**"],
             dependencies: [
                 .target(name: "SchneeBarActivityFeature"),
+                .target(name: "SchneeBarSystemProvider"),
             ]
         ),
         .target(
@@ -104,6 +116,17 @@ let project = Project(
             sources: ["Tests/SchneeBarCoreTests/**"],
             dependencies: [
                 .target(name: "SchneeBarCore"),
+            ]
+        ),
+        .target(
+            name: "SchneeBarSystemProviderTests",
+            destinations: .macOS,
+            product: .unitTests,
+            bundleId: "dev.lamy.schneebar.system-provider-tests",
+            deploymentTargets: deploymentTarget,
+            sources: ["Tests/SchneeBarSystemProviderTests/**"],
+            dependencies: [
+                .target(name: "SchneeBarSystemProvider"),
             ]
         ),
     ]
