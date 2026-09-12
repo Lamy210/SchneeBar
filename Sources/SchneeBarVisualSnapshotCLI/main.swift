@@ -1,6 +1,7 @@
 import AppKit
 import Foundation
 import SchneeBarActivityFeature
+import SchneeBarGitHubFeature
 import SchneeBarPreviewSupport
 import SchneeBarWidgetFeature
 import SwiftUI
@@ -170,6 +171,31 @@ private func widgetSettingsRoot(appearance: SnapshotAppearance) -> some View {
 }
 
 @MainActor
+private func githubConnectionsRoot(
+    fixture: GitHubConnectionsFixture,
+    appearance: SnapshotAppearance
+) -> some View {
+    ZStack {
+        appearance.background
+
+        Form {
+            GitHubConnectionsView(
+                connections: fixture.connections,
+                onAdd: {},
+                onRefresh: { _ in },
+                onManage: { _ in },
+                onSetEnabled: { _, _ in }
+            )
+        }
+        .formStyle(.grouped)
+        .frame(width: 620)
+        .padding(24)
+    }
+    .frame(width: 680)
+    .environment(\.colorScheme, appearance.colorScheme)
+}
+
+@MainActor
 private func run() throws {
     guard let outputIndex = CommandLine.arguments.firstIndex(of: "--output"),
           CommandLine.arguments.indices.contains(outputIndex + 1)
@@ -217,6 +243,19 @@ private func run() throws {
             width: 620,
             initialHeight: 760
         )
+    }
+
+    for fixture in GitHubConnectionsFixture.allCases {
+        for appearance in SnapshotAppearance.allCases {
+            try render(
+                rootView: githubConnectionsRoot(fixture: fixture, appearance: appearance),
+                appearance: appearance,
+                filename: "github-connections-\(fixture.rawValue)-\(appearance.rawValue).png",
+                outputDirectory: outputDirectory,
+                width: 680,
+                initialHeight: 820
+            )
+        }
     }
 }
 
