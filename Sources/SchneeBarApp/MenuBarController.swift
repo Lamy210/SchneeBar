@@ -61,14 +61,16 @@ final class MenuBarController: NSObject {
 
     private func startWidgetRefreshLoop() {
         refreshTask?.cancel()
+        let engine = widgetEngine
+
         refreshTask = Task { [weak self] in
-            guard let self else { return }
-
             while !Task.isCancelled {
-                let snapshots = await widgetEngine.refreshDue()
-                apply(snapshots: snapshots)
+                guard self != nil else { return }
 
-                let delay = await widgetEngine.secondsUntilNextRefresh(maximum: 30)
+                let snapshots = await engine.refreshDue()
+                self?.apply(snapshots: snapshots)
+
+                let delay = await engine.secondsUntilNextRefresh(maximum: 30)
                 let sleepSeconds = max(1, Int64(delay.rounded(.up)))
 
                 do {
