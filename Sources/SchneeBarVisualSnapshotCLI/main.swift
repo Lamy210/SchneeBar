@@ -261,6 +261,28 @@ private func githubOnboardingRoot(
 }
 
 @MainActor
+private func githubManagementRoot(appearance: SnapshotAppearance) -> some View {
+    ZStack {
+        appearance.background
+
+        GitHubConnectionManagementView(
+            model: GitHubConnectionManagementFixture.model,
+            selectionMode: .constant(.selected),
+            selectedRepositoryIDs: .constant(
+                GitHubConnectionManagementFixture.selectedRepositoryIDs
+            ),
+            onRefresh: {},
+            onSave: {},
+            onDisconnect: {},
+            onCancel: {}
+        )
+        .padding(24)
+    }
+    .frame(width: 760)
+    .environment(\.colorScheme, appearance.colorScheme)
+}
+
+@MainActor
 private func run() throws {
     guard let outputIndex = CommandLine.arguments.firstIndex(of: "--output"),
           CommandLine.arguments.indices.contains(outputIndex + 1)
@@ -334,6 +356,17 @@ private func run() throws {
                 initialHeight: 720
             )
         }
+    }
+
+    for appearance in SnapshotAppearance.allCases {
+        try render(
+            rootView: githubManagementRoot(appearance: appearance),
+            appearance: appearance,
+            filename: "github-management-selected-\(appearance.rawValue).png",
+            outputDirectory: outputDirectory,
+            width: 760,
+            initialHeight: 820
+        )
     }
 }
 

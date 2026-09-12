@@ -7,7 +7,9 @@ struct SettingsView: View {
     @Bindable var githubModel: GitHubConnectionsRuntimeModel
 
     @Environment(\.openURL) private var openURL
-    @State private var pendingDisconnectID: UUID?
+    @State private var managingConnectionID: UUID?
+    @State private var managementSelectionMode: GitHubRepositorySelectionPresentationMode = .allAccessible
+    @State private var managementSelectedRepositoryIDs: Set<Int64> = []
 
     var body: some View {
         Form {
@@ -40,9 +42,7 @@ struct SettingsView: View {
                         await githubModel.refresh(profileID: id)
                     }
                 },
-                onManage: { id in
-                    pendingDisconnectID = id
-                },
+                onManage: presentManagement,
                 onSetEnabled: { id, isEnabled in
                     githubModel.setEnabled(isEnabled, profileID: id)
                 }
@@ -74,32 +74,74 @@ struct SettingsView: View {
             )
             .interactiveDismissDisabled(githubModel.onboardingIsActive)
         }
-        .confirmationDialog(
-            "Manage GitHub Connection",
-            isPresented: Binding(
-                get: { pendingDisconnectID != nil },
-                set: { isPresented in
-                    if !isPresented {
-                        pendingDisconnectID = nil
-                    }
-                }
-            ),
-            titleVisibility: .visible
-        ) {
-            if let id = pendingDisconnectID {
-                Button("Disconnect", role: .destructive) {
-                    pendingDisconnectID = nil
-                    Task { @MainActor in
-                        await githubModel.disconnect(profileID: id)
-                    }
-                }
+        .sheet(isPresented: managementIsPresented) {
+            if let id = managingConnectionID,
+               let managementModel = githubModel.managementModel(profileID: id)
+            {
+                GitHubConnectionManagementView(
+                    model: managementModel,
+                    selectionMode: $managementSelectionMode,
+                    selectedRepositoryIDs: $managementSelectedRepositoryIDs,
+                    onRefresh: {
+                        Task { @MainActor in
+                            await githubModel.refresh(profileID: id)
+                        }
+                    },
+                    onSave: {
+                        Task { @MainActor in
+                            let saved = await githubModel.saveValidatedRepositorySelection(
+                                profileID: id,
+                                mode: managementSelectionMode,
+                                selectedRepositoryIDs: managementSelectedRepositoryIDs
+                            )
+                            if saved {
+                                dismissManagement()
+                            }
+                        }
+                    },
+                    onDisconnect: {
+                        Task { @MainActor in
+                            await githubModel.disconnect(profileID: id)
+                            dismissManagement()
+                        }
+                    },
+                    onCancel: dismissManagement
+                )
+            } else {
+                ContentUnavailableView(
+                    "Connection unavailable",
+                    systemImage: "exclamationmark.triangle",
+                    description: Text("Close this sheet and refresh the GitHub connection list.")
+                )
+                .frame(minWidth: 520, minHeight: 320)
             }
-            Button("Cancel", role: .cancel) {
-                pendingDisconnectID = nil
-            }
-        } message: {
-            Text("Disconnecting removes the stored credential from macOS Keychain and deletes this local SchneeBar connection profile. It does not uninstall the GitHub App.")
         }
+    }
+
+    private var managementIsPresented: Binding<Bool> {
+        Binding(
+            get: { managingConnectionID != nil },
+            set: { isPresented in
+                if !isPresented {
+                    dismissManagement()
+                }
+            }
+        )
+    }
+
+    private func presentManagement(_ id: UUID) {
+        guard let mode = githubModel.repositorySelectionMode(profileID: id) else {
+            return
+        }
+        managementSelectionMode = mode
+        managementSelectedRepositoryIDs = githubModel.selectedRepositoryIDs(profileID: id)
+        managingConnectionID = id
+    }
+
+    private func dismissManagement() {
+        managingConnectionID = nil
+        managementSelectionMode = .allAccessible
+        managementSelectedRepositoryIDs = []
     }
 
     private var bundledGitHubClientID: String? {
