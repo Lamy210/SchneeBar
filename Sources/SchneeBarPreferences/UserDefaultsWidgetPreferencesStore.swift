@@ -22,11 +22,41 @@ public actor UserDefaultsWidgetPreferencesStore: WidgetPreferencesStore {
             return WidgetConfiguration()
         }
 
-        return try JSONDecoder().decode(WidgetConfiguration.self, from: data)
+        let decoder = JSONDecoder()
+        do {
+            let payload = try decoder.decode(PersistedWidgetConfiguration.self, from: data)
+            guard payload.schemaVersion == PersistedWidgetConfiguration.currentSchemaVersion else {
+                throw StoreError.unsupportedSchemaVersion(payload.schemaVersion)
+            }
+            return payload.configuration
+        } catch let payloadError {
+            // Development builds before the versioned envelope persisted the
+            // configuration directly. Keep this one-way migration so early
+            // adopters do not lose their local preferences.
+            if let legacyConfiguration = try? decoder.decode(WidgetConfiguration.self, from: data) {
+                return legacyConfiguration
+            }
+            throw payloadError
+        }
     }
 
     public func save(_ configuration: WidgetConfiguration) async throws {
-        let data = try JSONEncoder().encode(configuration)
+        let payload = PersistedWidgetConfiguration(
+            schemaVersion: PersistedWidgetConfiguration.currentSchemaVersion,
+            configuration: configuration
+        )
+        let data = try JSONEncoder().encode(payload)
         defaults.set(data, forKey: key)
     }
+}
+
+private struct PersistedWidgetConfiguration: Codable {
+    static let currentSchemaVersion = 1
+
+    let schemaVersion: Int
+    let configuration: WidgetConfiguration
+}
+
+private enum StoreError: Error {
+    case unsupportedSchemaVersion(Int)
 }
