@@ -1,4 +1,3 @@
-import SchneeBarDesignSystem
 import SwiftUI
 
 public enum GitHubConnectionPresentationStatus: Equatable, Sendable {
@@ -37,11 +36,11 @@ public enum GitHubConnectionPresentationStatus: Equatable, Sendable {
         case .connected:
             return "checkmark.circle.fill"
         case .syncing:
-            return "arrow.trianglehead.2.clockwise.rotate.90"
+            return "arrow.triangle.2.circlepath"
         case .authenticationRequired, .ssoRequired:
             return "person.crop.circle.badge.exclamationmark"
         case .networkUnavailable:
-            return "network.slash"
+            return "wifi.slash"
         case .suspended:
             return "pause.circle.fill"
         case .untestedServer:
@@ -137,7 +136,7 @@ public struct GitHubConnectionsView: View {
 
     private var emptyState: some View {
         HStack(alignment: .top, spacing: 12) {
-            Image(systemName: "point.3.connected.trianglepath.dotted")
+            Image(systemName: "link")
                 .font(.title2)
                 .foregroundStyle(.secondary)
                 .frame(width: 28)
