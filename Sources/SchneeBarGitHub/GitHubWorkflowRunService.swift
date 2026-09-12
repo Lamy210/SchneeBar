@@ -1,6 +1,16 @@
 import Foundation
 
-public struct GitHubWorkflowRunService: Sendable {
+public protocol GitHubWorkflowRunLoading: Sendable {
+    func workflowRuns(
+        connection: GitHubConnection,
+        identity: GitHubAccountIdentity,
+        clientID: String?,
+        repository: GitHubRepositoryAccess,
+        query: GitHubWorkflowRunQuery
+    ) async throws -> [GitHubWorkflowRun]
+}
+
+public struct GitHubWorkflowRunService: GitHubWorkflowRunLoading, Sendable {
     private let sessionCoordinator: GitHubConnectionSessionCoordinator
     private let actionsClient: GitHubActionsClient
 
