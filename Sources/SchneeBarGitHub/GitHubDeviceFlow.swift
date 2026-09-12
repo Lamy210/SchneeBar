@@ -35,6 +35,7 @@ public enum GitHubDeviceFlowError: Error, Equatable, Sendable {
     case missingRefreshToken
     case httpStatus(Int)
     case invalidResponse
+    case untrustedVerificationURI
     case deviceFlowDisabled
     case incorrectClientCredentials
     case incorrectDeviceCode
@@ -70,19 +71,32 @@ public struct GitHubDeviceFlowClient: Sendable {
             url: url,
             parameters: ["client_id": clientID]
         )
-        guard let verificationURI = URL(string: response.verificationURI),
-              !response.deviceCode.isEmpty,
-              !response.userCode.isEmpty
+        if let error = response.error {
+            throw mappedOAuthError(code: error, description: response.errorDescription)
+        }
+
+        guard let deviceCode = response.deviceCode,
+              let userCode = response.userCode,
+              let rawVerificationURI = response.verificationURI,
+              !deviceCode.isEmpty,
+              !userCode.isEmpty
         else {
             throw GitHubDeviceFlowError.invalidResponse
         }
 
+        let verificationURI = try validatedVerificationURI(
+            rawVerificationURI,
+            authenticationBaseURL: endpoints.authenticationBaseURL
+        )
+        let expiresIn = max(1, response.expiresIn ?? 900)
+        let interval = max(1, response.interval ?? 5)
+
         return GitHubDeviceAuthorizationSession(
-            deviceCode: response.deviceCode,
-            userCode: response.userCode,
+            deviceCode: deviceCode,
+            userCode: userCode,
             verificationURI: verificationURI,
-            expiresAt: now().addingTimeInterval(TimeInterval(max(1, response.expiresIn))),
-            pollInterval: TimeInterval(max(1, response.interval))
+            expiresAt: now().addingTimeInterval(TimeInterval(expiresIn)),
+            pollInterval: TimeInterval(interval)
         )
     }
 
@@ -170,7 +184,7 @@ public struct GitHubDeviceFlowClient: Sendable {
         case "authorization_pending":
             return .pending(retryAfter: session.pollInterval)
         case "slow_down":
-            let interval = payload.interval.map(TimeInterval.init)
+            let interval = payload.interval.map { TimeInterval($0) }
                 ?? (session.pollInterval + 5)
             return .slowDown(retryAfter: max(1, interval))
         case "expired_token", "token_expired":
@@ -228,6 +242,29 @@ public struct GitHubDeviceFlowClient: Sendable {
         return trimmed
     }
 
+    private func validatedVerificationURI(
+        _ rawValue: String,
+        authenticationBaseURL: URL
+    ) throws -> URL {
+        guard let url = URL(string: rawValue),
+              let verification = URLComponents(url: url, resolvingAgainstBaseURL: false),
+              let expected = URLComponents(
+                  url: authenticationBaseURL,
+                  resolvingAgainstBaseURL: false
+              ),
+              verification.scheme?.lowercased() == "https",
+              verification.host?.lowercased() == expected.host?.lowercased(),
+              effectiveHTTPSPort(verification.port) == effectiveHTTPSPort(expected.port)
+        else {
+            throw GitHubDeviceFlowError.untrustedVerificationURI
+        }
+        return url
+    }
+
+    private func effectiveHTTPSPort(_ port: Int?) -> Int {
+        port ?? 443
+    }
+
     private func postForm<Response: Decodable>(
         url: URL,
         parameters: [String: String]
@@ -263,11 +300,13 @@ public struct GitHubDeviceFlowClient: Sendable {
 }
 
 private struct DeviceCodePayload: Decodable {
-    let deviceCode: String
-    let userCode: String
-    let verificationURI: String
-    let expiresIn: Int
-    let interval: Int
+    let deviceCode: String?
+    let userCode: String?
+    let verificationURI: String?
+    let expiresIn: Int?
+    let interval: Int?
+    let error: String?
+    let errorDescription: String?
 
     private enum CodingKeys: String, CodingKey {
         case deviceCode = "device_code"
@@ -275,6 +314,8 @@ private struct DeviceCodePayload: Decodable {
         case verificationURI = "verification_uri"
         case expiresIn = "expires_in"
         case interval
+        case error
+        case errorDescription = "error_description"
     }
 }
 
