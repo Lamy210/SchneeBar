@@ -44,10 +44,6 @@ final class GitHubConnectionsRuntimeModel {
         self.enterpriseDiscovery = enterpriseDiscovery
     }
 
-    deinit {
-        onboardingTask?.cancel()
-    }
-
     var connectionCards: [GitHubConnectionCardModel] {
         profiles.map { profile in
             GitHubConnectionCardModel(
@@ -58,7 +54,7 @@ final class GitHubConnectionsRuntimeModel {
                 deploymentLabel: deploymentLabel(for: profile.connection),
                 repositorySelectionLabel: repositorySelectionLabel(for: profile),
                 status: statusByConnectionID[profile.id]
-                    ?? (profile.isEnabled ? .syncing : .unavailable),
+                    ?? (profile.isEnabled ? .syncing : .disabled),
                 isEnabled: profile.isEnabled
             )
         }
@@ -72,10 +68,14 @@ final class GitHubConnectionsRuntimeModel {
             return
         }
 
-        for profile in profiles where profile.isEnabled {
-            statusByConnectionID[profile.id] = .syncing
-            Task { @MainActor [weak self] in
-                await self?.refresh(profileID: profile.id)
+        for profile in profiles {
+            if profile.isEnabled {
+                statusByConnectionID[profile.id] = .syncing
+                Task { @MainActor [weak self] in
+                    await self?.refresh(profileID: profile.id)
+                }
+            } else {
+                statusByConnectionID[profile.id] = .disabled
             }
         }
     }
@@ -129,7 +129,6 @@ final class GitHubConnectionsRuntimeModel {
                     connection: connection,
                     credential: credential
                 )
-                try Task.checkCancellation()
 
                 let now = Date.now
                 let profile = GitHubConnectionProfile(
@@ -142,7 +141,17 @@ final class GitHubConnectionsRuntimeModel {
                     createdAt: now,
                     lastConnectedAt: now
                 )
-                try await profileStore.save(profile)
+
+                do {
+                    try Task.checkCancellation()
+                    try await profileStore.save(profile)
+                } catch {
+                    try? await sessionCoordinator.disconnect(
+                        connection: connection,
+                        identity: session.account.identity
+                    )
+                    throw error
+                }
 
                 upsert(profile)
                 statusByConnectionID[profile.id] = presentationStatus(for: session.inventory)
@@ -161,7 +170,7 @@ final class GitHubConnectionsRuntimeModel {
     func refresh(profileID: UUID) async {
         guard let profile = profiles.first(where: { $0.id == profileID }) else { return }
         guard profile.isEnabled else {
-            statusByConnectionID[profileID] = .unavailable
+            statusByConnectionID[profileID] = .disabled
             return
         }
 
@@ -180,7 +189,7 @@ final class GitHubConnectionsRuntimeModel {
             upsert(updated)
         } catch GitHubConnectionSessionError.credentialNotFound,
                 GitHubConnectionSessionError.reauthenticationRequired,
-                GitHubConnectionSessionError.accountMismatch {
+                GitHubConnectionSessionError.accountMismatch(_, _) {
             statusByConnectionID[profileID] = .authenticationRequired
         } catch let error as URLError where error.code == .notConnectedToInternet
             || error.code == .cannotFindHost
@@ -209,7 +218,7 @@ final class GitHubConnectionsRuntimeModel {
                 await self?.refresh(profileID: profileID)
             }
         } else {
-            statusByConnectionID[profileID] = .unavailable
+            statusByConnectionID[profileID] = .disabled
         }
     }
 
@@ -333,9 +342,15 @@ final class GitHubConnectionsRuntimeModel {
             return "GitHub authorization was denied."
         case GitHubDeviceAuthorizationWaitError.expired:
             return "The GitHub authorization code expired. Request a new code."
-        case GitHubEndpointError.invalidURL,
-             GitHubEndpointError.httpsRequired,
-             GitHubEndpointError.unexpectedHost:
+        case GitHubEndpointResolverError.httpsRequired,
+             GitHubEndpointResolverError.missingHost,
+             GitHubEndpointResolverError.credentialsNotAllowed,
+             GitHubEndpointResolverError.queryOrFragmentNotAllowed,
+             GitHubEndpointResolverError.pathNotAllowed,
+             GitHubEndpointResolverError.nonStandardPortNotAllowed,
+             GitHubEndpointResolverError.invalidGitHubDotComHost,
+             GitHubEndpointResolverError.invalidGHEHost,
+             RuntimeError.invalidServerURL:
             return "The GitHub server URL is invalid or unsupported."
         case let GitHubEnterpriseServerDiscoveryError.httpStatus(status):
             return "GitHub Enterprise Server discovery failed with HTTP \(status)."
