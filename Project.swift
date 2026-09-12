@@ -73,6 +73,25 @@ let project = Project(
             ]
         ),
         .target(
+            name: "SchneeBarGitHub",
+            destinations: .macOS,
+            product: .staticFramework,
+            bundleId: "dev.lamy.schneebar.github",
+            deploymentTargets: deploymentTarget,
+            sources: ["Sources/SchneeBarGitHub/**"]
+        ),
+        .target(
+            name: "SchneeBarGitHubKeychain",
+            destinations: .macOS,
+            product: .staticFramework,
+            bundleId: "dev.lamy.schneebar.github-keychain",
+            deploymentTargets: deploymentTarget,
+            sources: ["Sources/SchneeBarGitHubKeychain/**"],
+            dependencies: [
+                .target(name: "SchneeBarGitHub"),
+            ]
+        ),
+        .target(
             name: "SchneeBarPreviewSupport",
             destinations: .macOS,
             product: .staticFramework,
@@ -178,6 +197,29 @@ let project = Project(
             dependencies: [
                 .target(name: "SchneeBarCore"),
                 .target(name: "SchneeBarPreferences"),
+            ]
+        ),
+        .target(
+            name: "SchneeBarGitHubTests",
+            destinations: .macOS,
+            product: .unitTests,
+            bundleId: "dev.lamy.schneebar.github-tests",
+            deploymentTargets: deploymentTarget,
+            sources: ["Tests/SchneeBarGitHubTests/**"],
+            dependencies: [
+                .target(name: "SchneeBarGitHub"),
+            ]
+        ),
+        .target(
+            name: "SchneeBarGitHubKeychainTests",
+            destinations: .macOS,
+            product: .unitTests,
+            bundleId: "dev.lamy.schneebar.github-keychain-tests",
+            deploymentTargets: deploymentTarget,
+            sources: ["Tests/SchneeBarGitHubKeychainTests/**"],
+            dependencies: [
+                .target(name: "SchneeBarGitHub"),
+                .target(name: "SchneeBarGitHubKeychain"),
             ]
         ),
     ]
