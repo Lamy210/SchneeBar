@@ -41,6 +41,18 @@ func resolvesEnterpriseServerEndpoints() throws {
     #expect(endpoints.authenticationBaseURL.absoluteString == "https://github.internal.example")
 }
 
+@Test
+func preservesExplicitEnterpriseServerHTTPSPort() throws {
+    let endpoints = try GitHubEndpointResolver.resolve(
+        deploymentKind: .enterpriseServer,
+        webBaseURL: #require(URL(string: "https://github.internal.example:8443"))
+    )
+
+    #expect(endpoints.webBaseURL.absoluteString == "https://github.internal.example:8443")
+    #expect(endpoints.restBaseURL.absoluteString == "https://github.internal.example:8443/api/v3")
+    #expect(endpoints.graphQLURL.absoluteString == "https://github.internal.example:8443/api/graphql")
+}
+
 @Test(arguments: [
     "http://github.internal.example",
     "https://user:password@github.internal.example",
@@ -52,6 +64,24 @@ func rejectsUnsafeOrAmbiguousEnterpriseServerURLs(rawURL: String) throws {
     #expect(throws: GitHubEndpointResolverError.self) {
         try GitHubEndpointResolver.resolve(
             deploymentKind: .enterpriseServer,
+            webBaseURL: url
+        )
+    }
+}
+
+@Test(arguments: [
+    (GitHubDeploymentKind.githubDotCom, "https://github.com:8443"),
+    (GitHubDeploymentKind.gheDotCom, "https://acme.ghe.com:8443"),
+])
+func rejectsNonStandardPortsForHostedGitHub(
+    deploymentKind: GitHubDeploymentKind,
+    rawURL: String
+) throws {
+    let url = try #require(URL(string: rawURL))
+
+    #expect(throws: GitHubEndpointResolverError.nonStandardPortNotAllowed) {
+        try GitHubEndpointResolver.resolve(
+            deploymentKind: deploymentKind,
             webBaseURL: url
         )
     }
