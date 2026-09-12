@@ -47,6 +47,50 @@ private enum SnapshotAppearance: String, CaseIterable {
     }
 }
 
+private enum GitHubOnboardingSnapshotScenario: String, CaseIterable {
+    case configuration
+    case waiting
+    case failure
+
+    var draft: GitHubConnectionDraft {
+        switch self {
+        case .configuration, .waiting:
+            GitHubConnectionDraft(
+                deploymentKind: .githubDotCom,
+                displayName: "GitHub.com",
+                serverURL: "https://github.com",
+                clientID: "Iv1.public-client-id"
+            )
+        case .failure:
+            GitHubConnectionDraft(
+                deploymentKind: .enterpriseServer,
+                displayName: "Internal GitHub",
+                serverURL: "https://github.internal.example:8443",
+                clientID: "Iv1.enterprise-client"
+            )
+        }
+    }
+
+    var phase: GitHubConnectionOnboardingPhase {
+        switch self {
+        case .configuration:
+            return .configuration
+        case .waiting:
+            return .waitingForAuthorization(
+                GitHubDeviceAuthorizationPresentation(
+                    userCode: "ABCD-EFGH",
+                    verificationURI: URL(string: "https://github.com/login/device")!,
+                    expiresAt: Date(timeIntervalSince1970: 2_000)
+                )
+            )
+        case .failure:
+            return .failed(
+                message: "Could not reach the GitHub Enterprise Server. Check VPN and server URL."
+            )
+        }
+    }
+}
+
 private enum SnapshotError: Error {
     case missingOutputDirectory
     case cannotCreateBitmap
@@ -196,6 +240,27 @@ private func githubConnectionsRoot(
 }
 
 @MainActor
+private func githubOnboardingRoot(
+    scenario: GitHubOnboardingSnapshotScenario,
+    appearance: SnapshotAppearance
+) -> some View {
+    ZStack {
+        appearance.background
+
+        GitHubConnectionOnboardingView(
+            draft: .constant(scenario.draft),
+            phase: scenario.phase,
+            onConnect: {},
+            onOpenVerificationPage: { _ in },
+            onCancel: {}
+        )
+        .padding(24)
+    }
+    .frame(width: 580)
+    .environment(\.colorScheme, appearance.colorScheme)
+}
+
+@MainActor
 private func run() throws {
     guard let outputIndex = CommandLine.arguments.firstIndex(of: "--output"),
           CommandLine.arguments.indices.contains(outputIndex + 1)
@@ -254,6 +319,19 @@ private func run() throws {
                 outputDirectory: outputDirectory,
                 width: 680,
                 initialHeight: 820
+            )
+        }
+    }
+
+    for scenario in GitHubOnboardingSnapshotScenario.allCases {
+        for appearance in SnapshotAppearance.allCases {
+            try render(
+                rootView: githubOnboardingRoot(scenario: scenario, appearance: appearance),
+                appearance: appearance,
+                filename: "github-onboarding-\(scenario.rawValue)-\(appearance.rawValue).png",
+                outputDirectory: outputDirectory,
+                width: 580,
+                initialHeight: 720
             )
         }
     }
