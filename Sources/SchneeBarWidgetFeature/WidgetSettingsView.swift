@@ -35,6 +35,10 @@ public struct WidgetSettingsView: View {
                     widgetRow(descriptor, index: index)
                 }
             }
+
+            Text("Critical and attention states may temporarily move ahead of your manual order.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
     }
 
@@ -45,7 +49,7 @@ public struct WidgetSettingsView: View {
                 Toggle(
                     descriptor.displayName,
                     isOn: Binding(
-                        get: { configuration.isEnabled(descriptor.id) },
+                        get: { configuration.isEnabled(descriptor) },
                         set: { onSetEnabled(descriptor, $0) }
                     )
                 )
@@ -85,7 +89,7 @@ public struct WidgetSettingsView: View {
                 Text("Normal").tag(WidgetRepresentationKind.normal as WidgetRepresentationKind?)
             }
             .pickerStyle(.segmented)
-            .disabled(!configuration.isEnabled(descriptor.id))
+            .disabled(!configuration.isEnabled(descriptor))
 
             Text("Critical states automatically use the critical representation when available.")
                 .font(.caption)
