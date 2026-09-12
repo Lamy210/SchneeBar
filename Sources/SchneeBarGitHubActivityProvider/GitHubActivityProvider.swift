@@ -29,13 +29,19 @@ public struct GitHubRepositoryActivityFailure: Equatable, Sendable {
 public struct GitHubActivityLoadResult: Equatable, Sendable {
     public let items: [ActivityItem]
     public let failures: [GitHubRepositoryActivityFailure]
+    public let successfulRepositoryCount: Int
+    public let attemptedRepositoryCount: Int
 
     public init(
         items: [ActivityItem],
-        failures: [GitHubRepositoryActivityFailure]
+        failures: [GitHubRepositoryActivityFailure],
+        successfulRepositoryCount: Int,
+        attemptedRepositoryCount: Int
     ) {
         self.items = items
         self.failures = failures
+        self.successfulRepositoryCount = successfulRepositoryCount
+        self.attemptedRepositoryCount = attemptedRepositoryCount
     }
 }
 
@@ -62,7 +68,7 @@ public struct GitHubActivityProvider: Sendable {
         inventory: GitHubAccessInventory
     ) async -> GitHubActivityLoadResult {
         guard profile.isEnabled else {
-            return GitHubActivityLoadResult(items: [], failures: [])
+            return emptyResult()
         }
 
         let repositories = monitoredRepositories(
@@ -70,7 +76,7 @@ public struct GitHubActivityProvider: Sendable {
             inventory: inventory
         )
         guard !repositories.isEmpty else {
-            return GitHubActivityLoadResult(items: [], failures: [])
+            return emptyResult()
         }
 
         let outcomes = await loadRepositories(
@@ -80,10 +86,12 @@ public struct GitHubActivityProvider: Sendable {
 
         var activities: [GitHubWorkflowActivity] = []
         var failures: [GitHubRepositoryActivityFailure] = []
+        var successfulRepositoryCount = 0
 
         for outcome in outcomes {
             switch outcome {
             case let .success(repositoryActivities):
+                successfulRepositoryCount += 1
                 activities.append(contentsOf: repositoryActivities)
             case let .failure(failure):
                 failures.append(failure)
@@ -100,7 +108,18 @@ public struct GitHubActivityProvider: Sendable {
 
         return GitHubActivityLoadResult(
             items: activities.map(makeActivityItem),
-            failures: failures
+            failures: failures,
+            successfulRepositoryCount: successfulRepositoryCount,
+            attemptedRepositoryCount: repositories.count
+        )
+    }
+
+    private func emptyResult() -> GitHubActivityLoadResult {
+        GitHubActivityLoadResult(
+            items: [],
+            failures: [],
+            successfulRepositoryCount: 0,
+            attemptedRepositoryCount: 0
         )
     }
 
