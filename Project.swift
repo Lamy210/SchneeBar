@@ -24,7 +24,27 @@ let project = Project(
             product: .staticFramework,
             bundleId: "dev.lamy.schneebar.design-system",
             deploymentTargets: deploymentTarget,
-            sources: ["Sources/SchneeBarDesignSystem/**"],
+            sources: ["Sources/SchneeBarDesignSystem/**"]
+        ),
+        .target(
+            name: "SchneeBarActivityFeature",
+            destinations: .macOS,
+            product: .staticFramework,
+            bundleId: "dev.lamy.schneebar.activity-feature",
+            deploymentTargets: deploymentTarget,
+            sources: ["Sources/SchneeBarActivityFeature/**"],
+            dependencies: [
+                .target(name: "SchneeBarCore"),
+                .target(name: "SchneeBarDesignSystem"),
+            ]
+        ),
+        .target(
+            name: "SchneeBarPreviewSupport",
+            destinations: .macOS,
+            product: .staticFramework,
+            bundleId: "dev.lamy.schneebar.preview-support",
+            deploymentTargets: deploymentTarget,
+            sources: ["Sources/SchneeBarPreviewSupport/**"],
             dependencies: [
                 .target(name: "SchneeBarCore"),
             ]
@@ -43,8 +63,7 @@ let project = Project(
             ),
             sources: ["Sources/SchneeBarApp/**"],
             dependencies: [
-                .target(name: "SchneeBarCore"),
-                .target(name: "SchneeBarDesignSystem"),
+                .target(name: "SchneeBarActivityFeature"),
             ]
         ),
         .target(
@@ -60,8 +79,8 @@ let project = Project(
             ),
             sources: ["Sources/SchneeBarVisualHarness/**"],
             dependencies: [
-                .target(name: "SchneeBarCore"),
-                .target(name: "SchneeBarDesignSystem"),
+                .target(name: "SchneeBarActivityFeature"),
+                .target(name: "SchneeBarPreviewSupport"),
             ]
         ),
         .target(
@@ -72,8 +91,8 @@ let project = Project(
             deploymentTargets: deploymentTarget,
             sources: ["Sources/SchneeBarVisualSnapshotCLI/**"],
             dependencies: [
-                .target(name: "SchneeBarCore"),
-                .target(name: "SchneeBarDesignSystem"),
+                .target(name: "SchneeBarActivityFeature"),
+                .target(name: "SchneeBarPreviewSupport"),
             ]
         ),
         .target(
