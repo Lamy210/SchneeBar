@@ -59,11 +59,12 @@ public actor WidgetEngine {
         maximum: TimeInterval = 60
     ) -> TimeInterval {
         let intervals = providers.compactMap { id, provider -> TimeInterval? in
-            guard let snapshot = snapshots[id] else { return 0 }
-            guard let interval = provider.descriptor.refreshPolicy.interval(for: snapshot.severity) else {
+            guard let lastAttempted = lastAttemptedAt[id] else { return 0 }
+
+            let severity = snapshots[id]?.severity ?? .unavailable
+            guard let interval = provider.descriptor.refreshPolicy.interval(for: severity) else {
                 return nil
             }
-            guard let lastAttempted = lastAttemptedAt[id] else { return 0 }
 
             let next = lastAttempted.addingTimeInterval(interval)
             return max(0, next.timeIntervalSince(now))
@@ -93,11 +94,12 @@ public actor WidgetEngine {
 
     private func isRefreshDue(id: WidgetID, at now: Date) -> Bool {
         guard let provider = providers[id] else { return false }
-        guard let snapshot = snapshots[id] else { return true }
-        guard let interval = provider.descriptor.refreshPolicy.interval(for: snapshot.severity) else {
+        guard let lastAttempted = lastAttemptedAt[id] else { return true }
+
+        let severity = snapshots[id]?.severity ?? .unavailable
+        guard let interval = provider.descriptor.refreshPolicy.interval(for: severity) else {
             return false
         }
-        guard let lastAttempted = lastAttemptedAt[id] else { return true }
 
         return now.timeIntervalSince(lastAttempted) >= interval
     }
