@@ -1,5 +1,5 @@
-import SchneeBarCore
-import SchneeBarDesignSystem
+import SchneeBarActivityFeature
+import SchneeBarPreviewSupport
 import SwiftUI
 
 @main
