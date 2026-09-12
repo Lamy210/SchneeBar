@@ -10,7 +10,7 @@ struct SchneeBarVisualHarnessApp: App {
         WindowGroup("SchneeBar Visual Harness") {
             VisualHarnessView()
         }
-        .defaultSize(width: 1180, height: 760)
+        .defaultSize(width: 1180, height: 840)
     }
 }
 
@@ -18,6 +18,8 @@ private struct VisualHarnessView: View {
     @State private var activityScenario: ActivityFixtureScenario = .mainFailure
     @State private var widgetScenario: WidgetFixtureScenario = .critical
     @State private var githubScenario: GitHubConnectionsFixture = .multiConnection
+    @State private var managementMode: GitHubRepositorySelectionPresentationMode = .selected
+    @State private var managementSelectedIDs = GitHubConnectionManagementFixture.selectedRepositoryIDs
     @State private var appearance: ColorScheme = .dark
 
     var body: some View {
@@ -38,6 +40,12 @@ private struct VisualHarnessView: View {
                 Picker("GitHub", selection: $githubScenario) {
                     ForEach(GitHubConnectionsFixture.allCases, id: \.rawValue) { scenario in
                         Text(scenario.rawValue).tag(scenario)
+                    }
+                }
+
+                Picker("Repository scope", selection: $managementMode) {
+                    ForEach(GitHubRepositorySelectionPresentationMode.allCases, id: \.self) { mode in
+                        Text(mode.label).tag(mode)
                     }
                 }
 
@@ -69,11 +77,22 @@ private struct VisualHarnessView: View {
                     }
                     .formStyle(.grouped)
                     .frame(width: 660)
+
+                    GitHubConnectionManagementView(
+                        model: GitHubConnectionManagementFixture.model,
+                        selectionMode: $managementMode,
+                        selectedRepositoryIDs: $managementSelectedIDs,
+                        onRefresh: {},
+                        onSave: {},
+                        onDisconnect: {},
+                        onCancel: {}
+                    )
+                    .frame(width: 700)
                 }
                 .padding(24)
             }
             .environment(\.colorScheme, appearance)
-            .frame(maxWidth: 700)
+            .frame(maxWidth: 740)
 
             Spacer()
         }
