@@ -1,6 +1,4 @@
 import AppKit
-import SchneeBarCore
-import SchneeBarDesignSystem
 import SwiftUI
 
 @MainActor
@@ -25,11 +23,7 @@ final class MenuBarController: NSObject {
 
         popover.behavior = .transient
         popover.animates = true
-        popover.contentViewController = NSHostingController(
-            rootView: ActivityPopoverView(
-                items: ActivityFixtureScenario.running.items
-            )
-        )
+        popover.contentViewController = NSHostingController(rootView: PopoverRootView())
     }
 
     @objc
