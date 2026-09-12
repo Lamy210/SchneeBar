@@ -1,7 +1,7 @@
 import Foundation
 import SchneeBarGitHubFeature
 
-public enum GitHubConnectionsFixture: String, CaseIterable, Sendable {
+public enum GitHubConnectionsFixture: String, CaseIterable, Hashable, Sendable {
     case empty
     case multiConnection
     case needsAttention
