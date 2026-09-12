@@ -1,5 +1,6 @@
 import AppKit
 import SchneeBarGitHub
+import SchneeBarGitHubActivityProvider
 import SchneeBarGitHubKeychain
 import SchneeBarGitHubProfiles
 import SchneeBarPreferences
@@ -35,16 +36,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let sessionCoordinator = GitHubConnectionSessionCoordinator(
             credentialStore: credentialStore
         )
+        let workflowRunService = GitHubWorkflowRunService(
+            sessionCoordinator: sessionCoordinator
+        )
+        let activityProvider = GitHubActivityProvider(
+            workflowRunLoader: workflowRunService
+        )
         githubRuntimeModel = GitHubConnectionsRuntimeModel(
             profileStore: profileStore,
-            sessionCoordinator: sessionCoordinator
+            sessionCoordinator: sessionCoordinator,
+            activityProvider: activityProvider
         )
         super.init()
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApplication.shared.setActivationPolicy(.accessory)
-        menuBarController = MenuBarController(runtimeModel: runtimeModel)
+
+        let githubRuntimeModel = githubRuntimeModel
+        menuBarController = MenuBarController(
+            runtimeModel: runtimeModel,
+            loadActivityItems: {
+                try await githubRuntimeModel.loadActivityItems()
+            }
+        )
 
         Task { @MainActor [weak self] in
             await self?.githubRuntimeModel.load()
