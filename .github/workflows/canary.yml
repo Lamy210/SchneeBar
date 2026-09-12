@@ -1,20 +1,18 @@
-name: CI
+name: Toolchain Canary
 
 on:
-  pull_request:
-  push:
-    branches: [main]
+  workflow_dispatch:
+  schedule:
+    - cron: "41 17 * * 4"
 
 permissions:
   contents: read
 
-concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
-
 jobs:
-  build-and-test:
-    runs-on: macos-26
+  xcode-27-preview:
+    # Preview runner/toolchain: signal only, never a release or merge gate.
+    continue-on-error: true
+    runs-on: xcode-27
     timeout-minutes: 30
 
     steps:
@@ -28,13 +26,11 @@ jobs:
         with:
           version: "2026.9.5"
           github_token: ""
-          cache_save: ${{ github.event_name != 'pull_request' }}
-
-      - name: Select Xcode 26.6
-        run: sudo xcode-select -s /Applications/Xcode_26.6.app/Contents/Developer
+          cache_save: false
 
       - name: Toolchain
         run: |
+          sw_vers
           xcodebuild -version
           swift --version
           tuist version
@@ -42,8 +38,8 @@ jobs:
       - name: Generate project
         run: tuist generate
 
-      - name: Build
+      - name: Build preview compatibility
         run: tuist build -- -skipMacroValidation CODE_SIGNING_ALLOWED=NO
 
-      - name: Test
+      - name: Test preview compatibility
         run: tuist test -- -skipMacroValidation CODE_SIGNING_ALLOWED=NO

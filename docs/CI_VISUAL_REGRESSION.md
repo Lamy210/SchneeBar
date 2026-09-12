@@ -19,6 +19,8 @@ Scenarios currently cover:
 - mixed Enterprise/GitHub contexts
 - light/dark appearances
 
+Snapshots use an explicit, deterministic light/dark backdrop. This keeps transparent/glass content readable in arbitrary artifact viewers and gives macOS 26 glass/material effects a stable surface to composite against.
+
 The PR workflow checks out both the PR and `main`, renders both versions on the same macOS/Xcode runner, then generates an HTML report with:
 
 - Before image
@@ -35,6 +37,10 @@ The first PR cannot render a `main` baseline because the renderer does not exist
 ## Why the initial report does not fail on a changed pixel
 
 The first goal is reviewability and renderer stability. macOS rasterization tolerance needs empirical data before a pixel/perceptual threshold becomes a required check. Once stable, a later ADR can introduce a blocking threshold or a fixed self-hosted Mac visual runner.
+
+## Toolchain lanes
+
+The required lane is pinned to Xcode 26.6 / Swift 6.3 on `macos-26`. A separate scheduled `xcode-27` public-preview canary is intentionally non-blocking. Preview runner failures are compatibility signals, never release or merge gates.
 
 ## Future layers
 

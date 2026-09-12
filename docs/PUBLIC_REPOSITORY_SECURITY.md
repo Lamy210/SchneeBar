@@ -7,6 +7,9 @@ SchneeBar is public. Pull-request code from forks must be treated as untrusted.
 - Default workflow permissions are `contents: read`.
 - PR workflows do not receive release/signing/GitHub application secrets.
 - Do not run untrusted PR code from a privileged `pull_request_target` workflow.
+- Checkout credentials are not persisted into the working copy.
+- The mise setup action does not expose the automatic `GITHUB_TOKEN` to later build/test steps.
+- PR jobs do not save shared tool caches.
 - Actions are pinned to full immutable commit SHAs, with version comments for reviewability.
 - Dependabot tracks Action updates.
 - Release signing/notarization must live in a separate protected workflow/environment.
@@ -31,10 +34,11 @@ Tests must use fictional hosts and sanitized fixtures. Never copy real customer/
 ## Supply chain
 
 - Pin CI actions by SHA.
-- Pin developer tools (`.mise.toml`).
+- Pin developer tools (`.mise.toml`) and CI's mise bootstrap version.
 - Keep third-party runtime dependencies minimal.
 - Review dependency permission/network behavior before addition.
 - Use Dependabot and CodeQL.
+- Preview toolchains run in a non-blocking canary and never receive release credentials.
 
 ## Repository settings to enable manually
 

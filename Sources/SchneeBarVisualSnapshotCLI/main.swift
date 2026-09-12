@@ -21,6 +21,28 @@ private enum SnapshotAppearance: String, CaseIterable {
         case .dark: .darkAqua
         }
     }
+
+    var background: LinearGradient {
+        let colors: [Color]
+        switch self {
+        case .light:
+            colors = [
+                Color(red: 0.94, green: 0.96, blue: 1.00),
+                Color(red: 0.82, green: 0.88, blue: 0.97),
+            ]
+        case .dark:
+            colors = [
+                Color(red: 0.08, green: 0.10, blue: 0.16),
+                Color(red: 0.16, green: 0.20, blue: 0.30),
+            ]
+        }
+
+        return LinearGradient(
+            colors: colors,
+            startPoint: .topLeading,
+            endPoint: .bottomTrailing
+        )
+    }
 }
 
 private enum SnapshotError: Error {
@@ -37,10 +59,17 @@ private func render(
 ) throws {
     NSApplication.shared.appearance = NSAppearance(named: appearance.appKitAppearance)
 
-    let root = ActivityPopoverView(items: scenario.items)
-        .environment(\.colorScheme, appearance.colorScheme)
-        .padding(24)
-        .frame(width: 400)
+    // Render against a deterministic opaque backdrop. This both exercises
+    // macOS 26 glass/material compositing and keeps light/dark text readable
+    // when the PNG is viewed in CI reports with arbitrary page backgrounds.
+    let root = ZStack {
+        appearance.background
+
+        ActivityPopoverView(items: scenario.items)
+            .padding(24)
+    }
+    .frame(width: 400)
+    .environment(\.colorScheme, appearance.colorScheme)
 
     let hostingView = NSHostingView(rootView: root)
     hostingView.frame = NSRect(x: 0, y: 0, width: 400, height: 520)
