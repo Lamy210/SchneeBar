@@ -18,6 +18,9 @@ public struct ActivitySummary: Equatable, Sendable {
         if running > 0 {
             return "CI ●\(running)"
         }
+        if waiting > 0 {
+            return "CI ◷\(waiting)"
+        }
         return "CI ✓"
     }
 }
