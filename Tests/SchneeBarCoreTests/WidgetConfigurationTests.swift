@@ -7,13 +7,14 @@ func widgetConfigurationUsesDescriptorDefaultsWithoutPreference() {
     let descriptor = WidgetDescriptor(
         id: "system.clock",
         displayName: "Clock",
+        defaultIsEnabled: false,
         defaultOrder: 200,
         defaultRepresentation: .compact
     )
     let snapshot = makeConfigurationSnapshot(descriptor: descriptor, severity: .nominal)
     let configuration = WidgetConfiguration()
 
-    #expect(configuration.isEnabled(descriptor.id))
+    #expect(!configuration.isEnabled(descriptor))
     #expect(configuration.order(for: descriptor) == 200)
     #expect(configuration.representation(for: snapshot) == .compact)
 }
@@ -33,9 +34,23 @@ func widgetConfigurationAllowsPerWidgetOverrides() {
     configuration.setOrder(7, for: descriptor)
     configuration.setRepresentation(.compact, for: descriptor)
 
-    #expect(!configuration.isEnabled(descriptor.id))
+    #expect(!configuration.isEnabled(descriptor))
     #expect(configuration.order(for: descriptor) == 7)
     #expect(configuration.representation(for: snapshot) == .compact)
+}
+
+@Test
+func explicitPreferenceCanEnableAWidgetThatDefaultsOff() {
+    let descriptor = WidgetDescriptor(
+        id: "system.clock",
+        displayName: "Clock",
+        defaultIsEnabled: false
+    )
+    var configuration = WidgetConfiguration()
+
+    configuration.setEnabled(true, for: descriptor)
+
+    #expect(configuration.isEnabled(descriptor))
 }
 
 @Test
