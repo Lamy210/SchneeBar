@@ -57,14 +57,16 @@ private func render<Content: View>(
     rootView: Content,
     appearance: SnapshotAppearance,
     filename: String,
-    outputDirectory: URL
+    outputDirectory: URL,
+    width: CGFloat = 400,
+    initialHeight: CGFloat = 620
 ) throws {
     let nsAppearance = NSAppearance(named: appearance.appKitAppearance)
     NSApplication.shared.appearance = nsAppearance
 
     let hostingView = NSHostingView(rootView: rootView)
     hostingView.appearance = nsAppearance
-    hostingView.frame = NSRect(x: 0, y: 0, width: 400, height: 620)
+    hostingView.frame = NSRect(x: 0, y: 0, width: width, height: initialHeight)
 
     let window = NSWindow(
         contentRect: hostingView.frame,
@@ -146,6 +148,28 @@ private func widgetRoot(
 }
 
 @MainActor
+private func widgetSettingsRoot(appearance: SnapshotAppearance) -> some View {
+    ZStack {
+        appearance.background
+
+        Form {
+            WidgetSettingsView(
+                descriptors: WidgetSettingsFixture.descriptors,
+                configuration: WidgetSettingsFixture.configured,
+                onSetEnabled: { _, _ in },
+                onSetRepresentation: { _, _ in },
+                onMove: { _, _ in }
+            )
+        }
+        .formStyle(.grouped)
+        .frame(width: 560)
+        .padding(24)
+    }
+    .frame(width: 620)
+    .environment(\.colorScheme, appearance.colorScheme)
+}
+
+@MainActor
 private func run() throws {
     guard let outputIndex = CommandLine.arguments.firstIndex(of: "--output"),
           CommandLine.arguments.indices.contains(outputIndex + 1)
@@ -182,6 +206,17 @@ private func run() throws {
                 outputDirectory: outputDirectory
             )
         }
+    }
+
+    for appearance in SnapshotAppearance.allCases {
+        try render(
+            rootView: widgetSettingsRoot(appearance: appearance),
+            appearance: appearance,
+            filename: "widget-settings-\(appearance.rawValue).png",
+            outputDirectory: outputDirectory,
+            width: 620,
+            initialHeight: 760
+        )
     }
 }
 
