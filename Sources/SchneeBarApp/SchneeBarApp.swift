@@ -1,4 +1,7 @@
 import AppKit
+import SchneeBarGitHub
+import SchneeBarGitHubKeychain
+import SchneeBarGitHubProfiles
 import SchneeBarPreferences
 import SwiftUI
 
@@ -8,7 +11,10 @@ struct SchneeBarApp: App {
 
     var body: some Scene {
         Settings {
-            SettingsView(model: appDelegate.runtimeModel)
+            SettingsView(
+                model: appDelegate.runtimeModel,
+                githubModel: appDelegate.githubRuntimeModel
+            )
         }
     }
 }
@@ -19,10 +25,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         preferencesStore: UserDefaultsWidgetPreferencesStore()
     )
 
+    let githubRuntimeModel: GitHubConnectionsRuntimeModel
+
     private var menuBarController: MenuBarController?
+
+    override init() {
+        let credentialStore = KeychainGitHubCredentialStore()
+        let profileStore = ApplicationSupportGitHubConnectionProfileStore()
+        let sessionCoordinator = GitHubConnectionSessionCoordinator(
+            credentialStore: credentialStore
+        )
+        githubRuntimeModel = GitHubConnectionsRuntimeModel(
+            profileStore: profileStore,
+            sessionCoordinator: sessionCoordinator
+        )
+        super.init()
+    }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApplication.shared.setActivationPolicy(.accessory)
         menuBarController = MenuBarController(runtimeModel: runtimeModel)
+
+        Task { @MainActor [weak self] in
+            await self?.githubRuntimeModel.load()
+        }
     }
 }
