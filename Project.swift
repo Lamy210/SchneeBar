@@ -62,6 +62,17 @@ let project = Project(
             ]
         ),
         .target(
+            name: "SchneeBarPreferences",
+            destinations: .macOS,
+            product: .staticFramework,
+            bundleId: "dev.lamy.schneebar.preferences",
+            deploymentTargets: deploymentTarget,
+            sources: ["Sources/SchneeBarPreferences/**"],
+            dependencies: [
+                .target(name: "SchneeBarCore"),
+            ]
+        ),
+        .target(
             name: "SchneeBarPreviewSupport",
             destinations: .macOS,
             product: .staticFramework,
@@ -90,6 +101,7 @@ let project = Project(
                 .target(name: "SchneeBarWidgetFeature"),
                 .target(name: "SchneeBarActivityFeature"),
                 .target(name: "SchneeBarSystemProvider"),
+                .target(name: "SchneeBarPreferences"),
             ]
         ),
         .target(
@@ -154,6 +166,18 @@ let project = Project(
             sources: ["Tests/SchneeBarSystemProviderTests/**"],
             dependencies: [
                 .target(name: "SchneeBarSystemProvider"),
+            ]
+        ),
+        .target(
+            name: "SchneeBarPreferencesTests",
+            destinations: .macOS,
+            product: .unitTests,
+            bundleId: "dev.lamy.schneebar.preferences-tests",
+            deploymentTargets: deploymentTarget,
+            sources: ["Tests/SchneeBarPreferencesTests/**"],
+            dependencies: [
+                .target(name: "SchneeBarCore"),
+                .target(name: "SchneeBarPreferences"),
             ]
         ),
     ]
