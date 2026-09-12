@@ -137,10 +137,10 @@ public struct GitHubDeviceFlowClient: Sendable {
     public func refresh(
         connection: GitHubConnection,
         clientID: String,
-        credential: GitHubCredential
+        credential existingCredential: GitHubCredential
     ) async throws -> GitHubCredential {
         let clientID = try validatedClientID(clientID)
-        guard let refreshToken = credential.refreshToken,
+        guard let refreshToken = existingCredential.refreshToken,
               !refreshToken.isEmpty
         else {
             throw GitHubDeviceFlowError.missingRefreshToken
