@@ -1,6 +1,8 @@
 import Foundation
 import Observation
+import SchneeBarCore
 import SchneeBarGitHub
+import SchneeBarGitHubActivityProvider
 import SchneeBarGitHubFeature
 
 @MainActor
@@ -13,10 +15,16 @@ final class GitHubConnectionsRuntimeModel {
     var onboardingPhase: GitHubConnectionOnboardingPhase = .configuration
 
     @ObservationIgnored
+    var onActivitySourceChanged: (@MainActor @Sendable () -> Void)?
+
+    @ObservationIgnored
     private let profileStore: any GitHubConnectionProfileStore
 
     @ObservationIgnored
     private let sessionCoordinator: GitHubConnectionSessionCoordinator
+
+    @ObservationIgnored
+    private let activityProvider: GitHubActivityProvider
 
     @ObservationIgnored
     private let deviceFlowClient: GitHubDeviceFlowClient
@@ -28,17 +36,22 @@ final class GitHubConnectionsRuntimeModel {
     private let enterpriseDiscovery: GitHubEnterpriseServerDiscoveryClient
 
     @ObservationIgnored
+    private var inventoryByConnectionID: [UUID: GitHubAccessInventory] = [:]
+
+    @ObservationIgnored
     private var onboardingTask: Task<Void, Never>?
 
     init(
         profileStore: any GitHubConnectionProfileStore,
         sessionCoordinator: GitHubConnectionSessionCoordinator,
+        activityProvider: GitHubActivityProvider,
         deviceFlowClient: GitHubDeviceFlowClient = GitHubDeviceFlowClient(),
         authorizationWaiter: GitHubDeviceAuthorizationWaiter = GitHubDeviceAuthorizationWaiter(),
         enterpriseDiscovery: GitHubEnterpriseServerDiscoveryClient = GitHubEnterpriseServerDiscoveryClient()
     ) {
         self.profileStore = profileStore
         self.sessionCoordinator = sessionCoordinator
+        self.activityProvider = activityProvider
         self.deviceFlowClient = deviceFlowClient
         self.authorizationWaiter = authorizationWaiter
         self.enterpriseDiscovery = enterpriseDiscovery
@@ -87,6 +100,47 @@ final class GitHubConnectionsRuntimeModel {
                 statusByConnectionID[profile.id] = .disabled
             }
         }
+    }
+
+    func loadActivityItems() async throws -> [ActivityItem] {
+        var items: [ActivityItem] = []
+        var allFailures: [GitHubRepositoryActivityFailure] = []
+        var attemptedRepositoryCount = 0
+        var successfulRepositoryCount = 0
+
+        for profile in profiles where profile.isEnabled {
+            guard let inventory = inventoryByConnectionID[profile.id] else {
+                continue
+            }
+
+            let result = await activityProvider.load(
+                profile: profile,
+                inventory: inventory
+            )
+            items.append(contentsOf: result.items)
+            allFailures.append(contentsOf: result.failures)
+            attemptedRepositoryCount += result.attemptedRepositoryCount
+            successfulRepositoryCount += result.successfulRepositoryCount
+            applyActivityStatus(result, profileID: profile.id)
+        }
+
+        if attemptedRepositoryCount > 0,
+           successfulRepositoryCount == 0,
+           !allFailures.isEmpty
+        {
+            if allFailures.contains(where: { $0.reason == .authenticationRequired }) {
+                throw RuntimeError.activityAuthenticationRequired
+            }
+
+            let isTransientOutage = allFailures.allSatisfy {
+                $0.reason == .networkUnavailable || $0.reason == .unavailable
+            }
+            if isTransientOutage {
+                throw RuntimeError.activityUnavailable
+            }
+        }
+
+        return items.sorted(by: activityItemSort)
     }
 
     func beginOnboarding(defaultClientID: String? = nil) {
@@ -163,7 +217,9 @@ final class GitHubConnectionsRuntimeModel {
                 }
 
                 upsert(profile)
+                inventoryByConnectionID[profile.id] = session.inventory
                 statusByConnectionID[profile.id] = presentationStatus(for: session.inventory)
+                onActivitySourceChanged?()
                 onboardingTask = nil
                 onboardingPhase = .configuration
                 isPresentingOnboarding = false
@@ -179,7 +235,11 @@ final class GitHubConnectionsRuntimeModel {
     func refresh(profileID: UUID) async {
         guard let profile = profiles.first(where: { $0.id == profileID }) else { return }
         guard profile.isEnabled else {
+            let hadInventory = inventoryByConnectionID.removeValue(forKey: profileID) != nil
             statusByConnectionID[profileID] = .disabled
+            if hadInventory {
+                onActivitySourceChanged?()
+            }
             return
         }
 
@@ -190,16 +250,22 @@ final class GitHubConnectionsRuntimeModel {
                 identity: profile.account,
                 clientID: profile.clientID
             )
+            inventoryByConnectionID[profileID] = session.inventory
             statusByConnectionID[profileID] = presentationStatus(for: session.inventory)
 
             var updated = profile
             updated.lastConnectedAt = .now
             try await profileStore.save(updated)
             upsert(updated)
+            onActivitySourceChanged?()
         } catch GitHubConnectionSessionError.credentialNotFound,
                 GitHubConnectionSessionError.reauthenticationRequired,
                 GitHubConnectionSessionError.accountMismatch(_, _) {
+            let hadInventory = inventoryByConnectionID.removeValue(forKey: profileID) != nil
             statusByConnectionID[profileID] = .authenticationRequired
+            if hadInventory {
+                onActivitySourceChanged?()
+            }
         } catch let error as URLError where error.code == .notConnectedToInternet
             || error.code == .cannotFindHost
             || error.code == .cannotConnectToHost
@@ -227,7 +293,11 @@ final class GitHubConnectionsRuntimeModel {
                 await self?.refresh(profileID: profileID)
             }
         } else {
+            let hadInventory = inventoryByConnectionID.removeValue(forKey: profileID) != nil
             statusByConnectionID[profileID] = .disabled
+            if hadInventory {
+                onActivitySourceChanged?()
+            }
         }
     }
 
@@ -240,9 +310,61 @@ final class GitHubConnectionsRuntimeModel {
             )
             try await profileStore.delete(id: profileID)
             profiles.removeAll(where: { $0.id == profileID })
+            inventoryByConnectionID.removeValue(forKey: profileID)
             statusByConnectionID.removeValue(forKey: profileID)
+            onActivitySourceChanged?()
         } catch {
             statusByConnectionID[profileID] = .unavailable
+        }
+    }
+
+    private func applyActivityStatus(
+        _ result: GitHubActivityLoadResult,
+        profileID: UUID
+    ) {
+        guard result.attemptedRepositoryCount > 0 else { return }
+
+        if result.failures.contains(where: { $0.reason == .authenticationRequired }) {
+            statusByConnectionID[profileID] = .authenticationRequired
+            return
+        }
+
+        guard result.successfulRepositoryCount == 0,
+              !result.failures.isEmpty
+        else {
+            return
+        }
+
+        if result.failures.allSatisfy({ $0.reason == .networkUnavailable }) {
+            statusByConnectionID[profileID] = .networkUnavailable
+        } else if result.failures.allSatisfy({
+            $0.reason == .networkUnavailable || $0.reason == .unavailable
+        }) {
+            statusByConnectionID[profileID] = .unavailable
+        }
+    }
+
+    private func activityItemSort(lhs: ActivityItem, rhs: ActivityItem) -> Bool {
+        let lhsPriority = activityPriority(lhs.state)
+        let rhsPriority = activityPriority(rhs.state)
+        if lhsPriority != rhsPriority {
+            return lhsPriority < rhsPriority
+        }
+        if lhs.repository != rhs.repository {
+            return lhs.repository < rhs.repository
+        }
+        if lhs.context != rhs.context {
+            return lhs.context < rhs.context
+        }
+        return lhs.id < rhs.id
+    }
+
+    private func activityPriority(_ state: ActivityState) -> Int {
+        switch state {
+        case .failed: 0
+        case .running: 1
+        case .waiting: 2
+        case .success: 3
         }
     }
 
@@ -370,5 +492,7 @@ final class GitHubConnectionsRuntimeModel {
 
     private enum RuntimeError: Error {
         case invalidServerURL
+        case activityAuthenticationRequired
+        case activityUnavailable
     }
 }

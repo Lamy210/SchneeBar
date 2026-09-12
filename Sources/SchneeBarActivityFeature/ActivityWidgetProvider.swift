@@ -10,14 +10,16 @@ public struct ActivityWidgetProvider: WidgetProvider {
         refreshPolicy: .adaptive(active: 20, idle: 180)
     )
 
-    private let loadItems: @Sendable () async -> [ActivityItem]
+    private let loadItems: @Sendable () async throws -> [ActivityItem]
 
-    public init(loadItems: @escaping @Sendable () async -> [ActivityItem]) {
+    public init(
+        loadItems: @escaping @Sendable () async throws -> [ActivityItem]
+    ) {
         self.loadItems = loadItems
     }
 
     public func snapshot() async throws -> WidgetSnapshot {
-        let items = await loadItems()
+        let items = try await loadItems()
         let summary = ActivitySummary(items: items)
 
         let severity: WidgetSeverity
