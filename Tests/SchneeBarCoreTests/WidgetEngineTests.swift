@@ -63,6 +63,29 @@ private actor CountingWidgetProvider: WidgetProvider {
     }
 }
 
+private actor AlwaysFailingWidgetProvider: WidgetProvider {
+    nonisolated let descriptor = WidgetDescriptor(
+        id: "always-failing",
+        displayName: "Always Failing",
+        refreshPolicy: .interval(10)
+    )
+
+    private var calls = 0
+
+    func snapshot() async throws -> WidgetSnapshot {
+        calls += 1
+        throw Failure.expected
+    }
+
+    func callCount() -> Int {
+        calls
+    }
+
+    private enum Failure: Error {
+        case expected
+    }
+}
+
 @Test
 func widgetVisibilityPoliciesUseSeverity() {
     #expect(WidgetVisibilityPolicy.always.isVisible(for: .nominal))
@@ -70,6 +93,13 @@ func widgetVisibilityPoliciesUseSeverity() {
     #expect(WidgetVisibilityPolicy.whenNotNominal.isVisible(for: .active))
     #expect(!WidgetVisibilityPolicy.minimumSeverity(.attention).isVisible(for: .active))
     #expect(WidgetVisibilityPolicy.minimumSeverity(.attention).isVisible(for: .critical))
+}
+
+@Test
+func automaticRefreshIntervalsHaveOneSecondFloor() {
+    #expect(WidgetRefreshPolicy.interval(0).interval(for: .nominal) == 1)
+    #expect(WidgetRefreshPolicy.adaptive(active: 0, idle: -2).interval(for: .active) == 1)
+    #expect(WidgetRefreshPolicy.adaptive(active: 0, idle: -2).interval(for: .nominal) == 1)
 }
 
 @Test
@@ -164,6 +194,23 @@ func widgetEngineRefreshesOnlyWhenPolicyIsDue() async {
     #expect(await engine.secondsUntilNextRefresh(at: start) == 10)
 
     _ = await engine.refreshDue(at: start.addingTimeInterval(5))
+    #expect(await provider.callCount() == 1)
+
+    _ = await engine.refreshDue(at: start.addingTimeInterval(10))
+    #expect(await provider.callCount() == 2)
+}
+
+@Test
+func initialProviderFailureStillRespectsRefreshPolicy() async {
+    let provider = AlwaysFailingWidgetProvider()
+    let engine = WidgetEngine(providers: [provider])
+    let start = Date(timeIntervalSince1970: 2_000)
+
+    _ = await engine.refreshDue(at: start)
+    #expect(await provider.callCount() == 1)
+    #expect(await engine.secondsUntilNextRefresh(at: start) == 10)
+
+    _ = await engine.refreshDue(at: start.addingTimeInterval(1))
     #expect(await provider.callCount() == 1)
 
     _ = await engine.refreshDue(at: start.addingTimeInterval(10))
