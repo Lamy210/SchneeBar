@@ -39,9 +39,7 @@ public actor ApplicationSupportGitHubConnectionProfileStore: GitHubConnectionPro
         var profiles = try readProfiles()
         let originalCount = profiles.count
         profiles.removeAll(where: { $0.id == id })
-        guard profiles.count != originalCount else {
-            return
-        }
+        guard profiles.count != originalCount else { return }
         try writeProfiles(profiles)
     }
 
@@ -51,7 +49,9 @@ public actor ApplicationSupportGitHubConnectionProfileStore: GitHubConnectionPro
         }
 
         let data = try Data(contentsOf: fileURL)
-        let payload = try JSONDecoder().decode(PersistedProfiles.self, from: data)
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let payload = try decoder.decode(PersistedProfiles.self, from: data)
         guard payload.schemaVersion == PersistedProfiles.currentSchemaVersion else {
             throw GitHubConnectionProfileStoreError.unsupportedSchemaVersion(payload.schemaVersion)
         }
@@ -102,23 +102,4 @@ private struct PersistedProfiles: Codable {
 
     let schemaVersion: Int
     let profiles: [GitHubConnectionProfile]
-
-    private enum CodingKeys: String, CodingKey {
-        case schemaVersion
-        case profiles
-    }
-
-    init(schemaVersion: Int, profiles: [GitHubConnectionProfile]) {
-        self.schemaVersion = schemaVersion
-        self.profiles = profiles
-    }
-
-    init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        schemaVersion = try container.decode(Int.self, forKey: .schemaVersion)
-
-        let profileDecoder = JSONDecoder()
-        _ = profileDecoder
-        profiles = try container.decode([GitHubConnectionProfile].self, forKey: .profiles)
-    }
 }
