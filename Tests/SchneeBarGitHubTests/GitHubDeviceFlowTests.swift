@@ -91,6 +91,38 @@ func beginsDeviceFlowAgainstCustomPortGHES() async throws {
 }
 
 @Test
+func mapsDeviceFlowDisabledErrorDuringBegin() async throws {
+    let transport = QueueGitHubTransport([
+        DeviceFlowStubResponse(#"{"error":"device_flow_disabled","error_description":"Enable Device Flow"}"#)
+    ])
+    let client = GitHubDeviceFlowClient(transport: transport, now: { fixedNow })
+
+    await #expect(throws: GitHubDeviceFlowError.deviceFlowDisabled) {
+        try await client.begin(
+            connection: try githubDotComConnection(),
+            clientID: "Iv1.client"
+        )
+    }
+}
+
+@Test
+func rejectsVerificationURIFromDifferentOrigin() async throws {
+    let transport = QueueGitHubTransport([
+        DeviceFlowStubResponse(
+            #"{"device_code":"device","user_code":"ABCD-EFGH","verification_uri":"https://example.com/login/device","expires_in":900,"interval":5}"#
+        )
+    ])
+    let client = GitHubDeviceFlowClient(transport: transport, now: { fixedNow })
+
+    await #expect(throws: GitHubDeviceFlowError.untrustedVerificationURI) {
+        try await client.begin(
+            connection: try githubDotComConnection(),
+            clientID: "Iv1.client"
+        )
+    }
+}
+
+@Test
 func mapsPendingAndSlowDownPollStates() async throws {
     let transport = QueueGitHubTransport([
         DeviceFlowStubResponse(#"{"error":"authorization_pending"}"#),
@@ -211,7 +243,7 @@ func expiredSessionStopsBeforeNetworkPoll() async throws {
 }
 
 @Test
-func mapsDeviceFlowDisabledError() async throws {
+func mapsDeviceFlowDisabledErrorDuringPoll() async throws {
     let transport = QueueGitHubTransport([
         DeviceFlowStubResponse(#"{"error":"device_flow_disabled"}"#)
     ])
