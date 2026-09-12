@@ -92,6 +92,17 @@ let project = Project(
             ]
         ),
         .target(
+            name: "SchneeBarGitHubProfiles",
+            destinations: .macOS,
+            product: .staticFramework,
+            bundleId: "dev.lamy.schneebar.github-profiles",
+            deploymentTargets: deploymentTarget,
+            sources: ["Sources/SchneeBarGitHubProfiles/**"],
+            dependencies: [
+                .target(name: "SchneeBarGitHub"),
+            ]
+        ),
+        .target(
             name: "SchneeBarPreviewSupport",
             destinations: .macOS,
             product: .staticFramework,
@@ -220,6 +231,18 @@ let project = Project(
             dependencies: [
                 .target(name: "SchneeBarGitHub"),
                 .target(name: "SchneeBarGitHubKeychain"),
+            ]
+        ),
+        .target(
+            name: "SchneeBarGitHubProfilesTests",
+            destinations: .macOS,
+            product: .unitTests,
+            bundleId: "dev.lamy.schneebar.github-profiles-tests",
+            deploymentTargets: deploymentTarget,
+            sources: ["Tests/SchneeBarGitHubProfilesTests/**"],
+            dependencies: [
+                .target(name: "SchneeBarGitHub"),
+                .target(name: "SchneeBarGitHubProfiles"),
             ]
         ),
     ]
