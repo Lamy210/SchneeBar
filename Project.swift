@@ -27,6 +27,18 @@ let project = Project(
             sources: ["Sources/SchneeBarDesignSystem/**"]
         ),
         .target(
+            name: "SchneeBarWidgetFeature",
+            destinations: .macOS,
+            product: .staticFramework,
+            bundleId: "dev.lamy.schneebar.widget-feature",
+            deploymentTargets: deploymentTarget,
+            sources: ["Sources/SchneeBarWidgetFeature/**"],
+            dependencies: [
+                .target(name: "SchneeBarCore"),
+                .target(name: "SchneeBarDesignSystem"),
+            ]
+        ),
+        .target(
             name: "SchneeBarActivityFeature",
             destinations: .macOS,
             product: .staticFramework,
@@ -75,6 +87,7 @@ let project = Project(
             sources: ["Sources/SchneeBarApp/**"],
             dependencies: [
                 .target(name: "SchneeBarCore"),
+                .target(name: "SchneeBarWidgetFeature"),
                 .target(name: "SchneeBarActivityFeature"),
                 .target(name: "SchneeBarSystemProvider"),
             ]
@@ -92,6 +105,7 @@ let project = Project(
             ),
             sources: ["Sources/SchneeBarVisualHarness/**"],
             dependencies: [
+                .target(name: "SchneeBarWidgetFeature"),
                 .target(name: "SchneeBarActivityFeature"),
                 .target(name: "SchneeBarPreviewSupport"),
             ]
@@ -104,6 +118,7 @@ let project = Project(
             deploymentTargets: deploymentTarget,
             sources: ["Sources/SchneeBarVisualSnapshotCLI/**"],
             dependencies: [
+                .target(name: "SchneeBarWidgetFeature"),
                 .target(name: "SchneeBarActivityFeature"),
                 .target(name: "SchneeBarPreviewSupport"),
             ]
