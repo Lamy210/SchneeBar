@@ -10,11 +10,13 @@ private actor PreferenceCountingProvider: WidgetProvider {
     init(
         id: WidgetID,
         order: Int,
+        defaultIsEnabled: Bool = true,
         priority: WidgetPriority = .normal
     ) {
         descriptor = WidgetDescriptor(
             id: id,
             displayName: id.rawValue,
+            defaultIsEnabled: defaultIsEnabled,
             defaultOrder: order,
             visibilityPolicy: .always,
             refreshPolicy: .interval(10)
@@ -58,6 +60,28 @@ func disabledWidgetsAreNotRefreshedOrDisplayed() async {
     #expect(await enabled.callCount() == 1)
     #expect(await disabled.callCount() == 0)
     #expect(snapshots.map(\.descriptor.id.rawValue) == ["enabled"])
+}
+
+@Test
+func defaultDisabledWidgetsDoNotRefreshUntilExplicitlyEnabled() async {
+    let provider = PreferenceCountingProvider(
+        id: "opt-in",
+        order: 0,
+        defaultIsEnabled: false
+    )
+    let engine = WidgetEngine(providers: [provider])
+    let start = Date(timeIntervalSince1970: 2_000)
+
+    _ = await engine.refreshDue(at: start)
+    #expect(await provider.callCount() == 0)
+
+    var configuration = WidgetConfiguration()
+    configuration.setEnabled(true, for: provider.descriptor)
+    await engine.setConfiguration(configuration)
+
+    let snapshots = await engine.refreshDue(at: start)
+    #expect(await provider.callCount() == 1)
+    #expect(snapshots.map(\.descriptor.id.rawValue) == ["opt-in"])
 }
 
 @Test
