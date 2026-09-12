@@ -43,6 +43,10 @@ final class MenuBarController: NSObject {
         configureAndStartWidgetRuntime()
     }
 
+    deinit {
+        refreshTask?.cancel()
+    }
+
     @objc
     private func togglePopover() {
         guard let button = statusItem.button else { return }
@@ -65,8 +69,6 @@ final class MenuBarController: NSObject {
         let model = runtimeModel
 
         refreshTask = Task { @MainActor [weak self] in
-            guard let self else { return }
-
             await model.loadPreferences()
             await engine.setConfiguration(model.configuration)
             model.descriptors = await engine.descriptors()
@@ -80,8 +82,10 @@ final class MenuBarController: NSObject {
             }
 
             while !Task.isCancelled {
+                guard self != nil else { return }
+
                 let snapshots = await engine.refreshDue()
-                apply(snapshots: snapshots)
+                self?.apply(snapshots: snapshots)
 
                 let delay = await engine.secondsUntilNextRefresh(maximum: 30)
                 let sleepSeconds = max(1, Int64(delay.rounded(.up)))
