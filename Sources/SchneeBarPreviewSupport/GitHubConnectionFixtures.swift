@@ -81,3 +81,26 @@ public enum GitHubConnectionsFixture: String, CaseIterable, Hashable, Sendable {
         }
     }
 }
+
+public enum GitHubConnectionManagementFixture {
+    public static let model = GitHubConnectionManagementModel(
+        id: UUID(uuidString: "21000000-0000-0000-0000-000000000001")!,
+        displayName: "Internal GitHub",
+        host: "github.internal.example:8443",
+        accountLogin: "lamy",
+        repositories: [
+            GitHubRepositoryOptionModel(id: 101, fullName: "SchneeOrg/api-gateway", isPrivate: true),
+            GitHubRepositoryOptionModel(id: 102, fullName: "SchneeOrg/authentication-platform", isPrivate: true),
+            GitHubRepositoryOptionModel(id: 103, fullName: "SchneeOrg/design-system", isPrivate: false),
+            GitHubRepositoryOptionModel(id: 104, fullName: "SchneeOrg/mobile-app", isPrivate: true),
+            GitHubRepositoryOptionModel(id: 105, fullName: "SchneeOrg/notification-hub", isPrivate: true),
+            GitHubRepositoryOptionModel(id: 106, fullName: "SchneeOrg/realtime", isPrivate: true),
+            GitHubRepositoryOptionModel(id: 107, fullName: "SchneeOrg/schneemail", isPrivate: true),
+            GitHubRepositoryOptionModel(id: 108, fullName: "SchneeOrg/software-distribution", isPrivate: false),
+            GitHubRepositoryOptionModel(id: 109, fullName: "SchneeOrg/web-console", isPrivate: true),
+            GitHubRepositoryOptionModel(id: 110, fullName: "SchneeOrg/worker-runtime", isPrivate: true),
+        ]
+    )
+
+    public static let selectedRepositoryIDs: Set<Int64> = [101, 102, 105, 107, 108]
+}

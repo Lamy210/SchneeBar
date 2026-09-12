@@ -82,6 +82,90 @@ final class GitHubConnectionsRuntimeModel {
         }
     }
 
+    func managementModel(profileID: UUID) -> GitHubConnectionManagementModel? {
+        guard let profile = profiles.first(where: { $0.id == profileID }) else {
+            return nil
+        }
+
+        let repositories = inventoryByConnectionID[profileID]
+            .map(accessibleRepositories)
+            ?? []
+
+        return GitHubConnectionManagementModel(
+            id: profile.id,
+            displayName: profile.connection.displayName,
+            host: displayHost(for: profile.connection),
+            accountLogin: profile.account.login,
+            repositories: repositories.map {
+                GitHubRepositoryOptionModel(
+                    id: $0.id,
+                    fullName: $0.fullName,
+                    isPrivate: $0.isPrivate
+                )
+            }
+        )
+    }
+
+    func repositorySelectionMode(
+        profileID: UUID
+    ) -> GitHubRepositorySelectionPresentationMode? {
+        guard let profile = profiles.first(where: { $0.id == profileID }) else {
+            return nil
+        }
+
+        switch profile.repositorySelection {
+        case .allAccessible:
+            return .allAccessible
+        case .selected:
+            return .selected
+        }
+    }
+
+    func selectedRepositoryIDs(profileID: UUID) -> Set<Int64> {
+        guard let profile = profiles.first(where: { $0.id == profileID }) else {
+            return []
+        }
+
+        switch profile.repositorySelection {
+        case .allAccessible:
+            guard let inventory = inventoryByConnectionID[profileID] else {
+                return []
+            }
+            return Set(accessibleRepositories(inventory).map(\.id))
+        case let .selected(ids):
+            return ids
+        }
+    }
+
+    @discardableResult
+    func saveRepositorySelection(
+        profileID: UUID,
+        mode: GitHubRepositorySelectionPresentationMode,
+        selectedRepositoryIDs: Set<Int64>
+    ) async -> Bool {
+        guard var profile = profiles.first(where: { $0.id == profileID }) else {
+            return false
+        }
+
+        switch mode {
+        case .allAccessible:
+            profile.repositorySelection = .allAccessible
+        case .selected:
+            profile.repositorySelection = .selected(selectedRepositoryIDs)
+        }
+
+        do {
+            try await profileStore.save(profile)
+            upsert(profile)
+            await activityProvider.reset(connectionID: profileID)
+            onActivitySourceChanged?()
+            return true
+        } catch {
+            statusByConnectionID[profileID] = .unavailable
+            return false
+        }
+    }
+
     func load() async {
         do {
             profiles = try await profileStore.loadAll()
@@ -108,7 +192,8 @@ final class GitHubConnectionsRuntimeModel {
         var attemptedRepositoryCount = 0
         var successfulRepositoryCount = 0
 
-        for profile in profiles where profile.isEnabled {
+        let enabledProfiles = profiles.filter(\.isEnabled)
+        for profile in enabledProfiles {
             guard let inventory = inventoryByConnectionID[profile.id] else {
                 continue
             }
@@ -117,11 +202,31 @@ final class GitHubConnectionsRuntimeModel {
                 profile: profile,
                 inventory: inventory
             )
-            items.append(contentsOf: result.items)
-            allFailures.append(contentsOf: result.failures)
+
+            guard let currentProfile = profiles.first(where: { $0.id == profile.id }),
+                  currentProfile.isEnabled,
+                  currentProfile.repositorySelection == profile.repositorySelection
+            else {
+                await activityProvider.reset(connectionID: profile.id)
+                continue
+            }
+
             attemptedRepositoryCount += result.attemptedRepositoryCount
             successfulRepositoryCount += result.successfulRepositoryCount
-            applyActivityStatus(result, profileID: profile.id)
+            allFailures.append(contentsOf: result.failures)
+
+            if result.failures.contains(where: { $0.reason == .authenticationRequired }) {
+                await activityProvider.reset(connectionID: profile.id)
+                statusByConnectionID[profile.id] = .authenticationRequired
+                continue
+            }
+
+            items.append(contentsOf: result.items)
+            applyActivityStatus(
+                result,
+                profileID: profile.id,
+                inventory: inventory
+            )
         }
 
         if attemptedRepositoryCount > 0,
@@ -236,6 +341,7 @@ final class GitHubConnectionsRuntimeModel {
         guard let profile = profiles.first(where: { $0.id == profileID }) else { return }
         guard profile.isEnabled else {
             let hadInventory = inventoryByConnectionID.removeValue(forKey: profileID) != nil
+            await activityProvider.reset(connectionID: profileID)
             statusByConnectionID[profileID] = .disabled
             if hadInventory {
                 onActivitySourceChanged?()
@@ -262,6 +368,7 @@ final class GitHubConnectionsRuntimeModel {
                 GitHubConnectionSessionError.reauthenticationRequired,
                 GitHubConnectionSessionError.accountMismatch(_, _) {
             let hadInventory = inventoryByConnectionID.removeValue(forKey: profileID) != nil
+            await activityProvider.reset(connectionID: profileID)
             statusByConnectionID[profileID] = .authenticationRequired
             if hadInventory {
                 onActivitySourceChanged?()
@@ -294,6 +401,10 @@ final class GitHubConnectionsRuntimeModel {
             }
         } else {
             let hadInventory = inventoryByConnectionID.removeValue(forKey: profileID) != nil
+            let activityProvider = activityProvider
+            Task {
+                await activityProvider.reset(connectionID: profileID)
+            }
             statusByConnectionID[profileID] = .disabled
             if hadInventory {
                 onActivitySourceChanged?()
@@ -311,6 +422,7 @@ final class GitHubConnectionsRuntimeModel {
             try await profileStore.delete(id: profileID)
             profiles.removeAll(where: { $0.id == profileID })
             inventoryByConnectionID.removeValue(forKey: profileID)
+            await activityProvider.reset(connectionID: profileID)
             statusByConnectionID.removeValue(forKey: profileID)
             onActivitySourceChanged?()
         } catch {
@@ -318,27 +430,44 @@ final class GitHubConnectionsRuntimeModel {
         }
     }
 
+    private func accessibleRepositories(
+        _ inventory: GitHubAccessInventory
+    ) -> [GitHubRepositoryAccess] {
+        var seen = Set<Int64>()
+        return inventory.installations
+            .filter { $0.status == .available }
+            .flatMap(\.repositories)
+            .filter { seen.insert($0.id).inserted }
+            .sorted { lhs, rhs in
+                if lhs.fullName != rhs.fullName {
+                    return lhs.fullName < rhs.fullName
+                }
+                return lhs.id < rhs.id
+            }
+    }
+
     private func applyActivityStatus(
         _ result: GitHubActivityLoadResult,
-        profileID: UUID
+        profileID: UUID,
+        inventory: GitHubAccessInventory
     ) {
         guard result.attemptedRepositoryCount > 0 else { return }
 
-        if result.failures.contains(where: { $0.reason == .authenticationRequired }) {
-            statusByConnectionID[profileID] = .authenticationRequired
+        if result.successfulRepositoryCount > 0 {
+            statusByConnectionID[profileID] = presentationStatus(for: inventory)
             return
         }
 
-        guard result.successfulRepositoryCount == 0,
-              !result.failures.isEmpty
-        else {
-            return
-        }
+        guard !result.failures.isEmpty else { return }
 
         if result.failures.allSatisfy({ $0.reason == .networkUnavailable }) {
             statusByConnectionID[profileID] = .networkUnavailable
         } else if result.failures.allSatisfy({
             $0.reason == .networkUnavailable || $0.reason == .unavailable
+        }) {
+            statusByConnectionID[profileID] = .unavailable
+        } else if result.failures.allSatisfy({
+            $0.reason == .forbidden || $0.reason == .notFound
         }) {
             statusByConnectionID[profileID] = .unavailable
         }
