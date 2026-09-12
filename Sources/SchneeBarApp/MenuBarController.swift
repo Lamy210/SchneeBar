@@ -93,8 +93,10 @@ final class MenuBarController: NSObject {
 
         button.title = labels.isEmpty ? "" : " " + labels.joined(separator: "  ")
         button.imagePosition = labels.isEmpty ? .imageOnly : .imageLeading
-        button.accessibilityLabel = labels.isEmpty
-            ? "SchneeBar"
-            : "SchneeBar, " + labels.joined(separator: ", ")
+        button.setAccessibilityLabel(
+            labels.isEmpty
+                ? "SchneeBar"
+                : "SchneeBar, " + labels.joined(separator: ", ")
+        )
     }
 }
