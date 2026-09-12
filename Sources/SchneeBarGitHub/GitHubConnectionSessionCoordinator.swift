@@ -25,12 +25,13 @@ public enum GitHubConnectionSessionError: Error, Equatable, Sendable {
     case accountMismatch(expectedID: String, actualID: String)
 }
 
-public struct GitHubConnectionSessionCoordinator: Sendable {
+public actor GitHubConnectionSessionCoordinator {
     private let credentialStore: any GitHubCredentialStore
     private let accessClient: GitHubAccessClient
     private let deviceFlowClient: GitHubDeviceFlowClient
     private let now: @Sendable () -> Date
     private let refreshLeeway: TimeInterval
+    private var refreshTasks: [GitHubCredentialKey: Task<GitHubCredential, Error>] = [:]
 
     public init(
         credentialStore: any GitHubCredentialStore,
@@ -54,10 +55,7 @@ public struct GitHubConnectionSessionCoordinator: Sendable {
             connection: connection,
             credential: credential
         )
-        let key = GitHubCredentialKey(
-            connectionID: connection.id,
-            accountID: account.identity.id
-        )
+        let key = credentialKey(connection: connection, identity: account.identity)
 
         try await credentialStore.save(credential, for: key)
 
@@ -83,30 +81,12 @@ public struct GitHubConnectionSessionCoordinator: Sendable {
         identity: GitHubAccountIdentity,
         clientID: String? = nil
     ) async throws -> GitHubConnectionSession {
-        let key = GitHubCredentialKey(
-            connectionID: connection.id,
-            accountID: identity.id
+        let key = credentialKey(connection: connection, identity: identity)
+        let credential = try await authorizedCredential(
+            connection: connection,
+            identity: identity,
+            clientID: clientID
         )
-        guard var credential = try await credentialStore.load(for: key) else {
-            throw GitHubConnectionSessionError.credentialNotFound
-        }
-
-        if shouldRefresh(credential) {
-            guard let clientID,
-                  let refreshToken = credential.refreshToken,
-                  !refreshToken.isEmpty,
-                  refreshTokenIsUsable(credential)
-            else {
-                throw GitHubConnectionSessionError.reauthenticationRequired
-            }
-
-            credential = try await deviceFlowClient.refresh(
-                connection: connection,
-                clientID: clientID,
-                credential: credential
-            )
-            try await credentialStore.save(credential, for: key)
-        }
 
         let account: GitHubAuthenticatedAccount
         do {
@@ -147,11 +127,77 @@ public struct GitHubConnectionSessionCoordinator: Sendable {
         connection: GitHubConnection,
         identity: GitHubAccountIdentity
     ) async throws {
-        let key = GitHubCredentialKey(
+        let key = credentialKey(connection: connection, identity: identity)
+        refreshTasks[key]?.cancel()
+        refreshTasks[key] = nil
+        try await credentialStore.delete(for: key)
+    }
+
+    /// Returns a usable credential for an already-established account without
+    /// repeating identity or repository-inventory discovery. This is kept
+    /// module-internal so bearer credentials cannot leak into app/UI layers.
+    ///
+    /// Refresh-token rotation is single-flight per connection/account. GitHub
+    /// may rotate refresh tokens, so concurrent repository polling must never
+    /// send the same old refresh token more than once.
+    func authorizedCredential(
+        connection: GitHubConnection,
+        identity: GitHubAccountIdentity,
+        clientID: String? = nil
+    ) async throws -> GitHubCredential {
+        let key = credentialKey(connection: connection, identity: identity)
+
+        if let refreshTask = refreshTasks[key] {
+            return try await refreshTask.value
+        }
+
+        guard let credential = try await credentialStore.load(for: key) else {
+            throw GitHubConnectionSessionError.credentialNotFound
+        }
+
+        guard shouldRefresh(credential) else {
+            return credential
+        }
+
+        guard let clientID,
+              let refreshToken = credential.refreshToken,
+              !refreshToken.isEmpty,
+              refreshTokenIsUsable(credential)
+        else {
+            throw GitHubConnectionSessionError.reauthenticationRequired
+        }
+
+        let deviceFlowClient = self.deviceFlowClient
+        let credentialStore = self.credentialStore
+        let refreshTask = Task<GitHubCredential, Error> {
+            let refreshed = try await deviceFlowClient.refresh(
+                connection: connection,
+                clientID: clientID,
+                credential: credential
+            )
+            try await credentialStore.save(refreshed, for: key)
+            return refreshed
+        }
+        refreshTasks[key] = refreshTask
+
+        do {
+            let refreshed = try await refreshTask.value
+            refreshTasks[key] = nil
+            return refreshed
+        } catch {
+            refreshTasks[key] = nil
+            throw error
+        }
+    }
+
+    private func credentialKey(
+        connection: GitHubConnection,
+        identity: GitHubAccountIdentity
+    ) -> GitHubCredentialKey {
+        GitHubCredentialKey(
             connectionID: connection.id,
             accountID: identity.id
         )
-        try await credentialStore.delete(for: key)
     }
 
     private func shouldRefresh(_ credential: GitHubCredential) -> Bool {

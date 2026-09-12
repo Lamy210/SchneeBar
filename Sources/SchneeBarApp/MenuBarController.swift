@@ -6,20 +6,31 @@ import SwiftUI
 
 @MainActor
 final class MenuBarController: NSObject {
+    private static let activityWidgetID: WidgetID = "developer.activity"
+
     private let statusItem: NSStatusItem
     private let popover: NSPopover
     private let runtimeModel: WidgetRuntimeModel
+    private let activityRuntimeModel: ActivityRuntimeModel
     private let widgetEngine: WidgetEngine
     private var refreshTask: Task<Void, Never>?
+    private var immediateActivityRefreshTask: Task<Void, Never>?
+    private var widgetRuntimeIsConfigured = false
+    private var activityRefreshIsPending = false
 
-    init(runtimeModel: WidgetRuntimeModel) {
+    init(
+        runtimeModel: WidgetRuntimeModel,
+        activityRuntimeModel: ActivityRuntimeModel,
+        loadActivityItems: @escaping @Sendable () async throws -> [ActivityItem]
+    ) {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         popover = NSPopover()
         self.runtimeModel = runtimeModel
+        self.activityRuntimeModel = activityRuntimeModel
         widgetEngine = WidgetEngine(providers: [
             ClockWidgetProvider(),
             CPUWidgetProvider(),
-            ActivityWidgetProvider(loadItems: { [] }),
+            ActivityWidgetProvider(loadItems: loadActivityItems),
         ])
         super.init()
 
@@ -37,7 +48,10 @@ final class MenuBarController: NSObject {
         popover.behavior = .transient
         popover.animates = true
         popover.contentViewController = NSHostingController(
-            rootView: PopoverRootView(model: runtimeModel)
+            rootView: PopoverRootView(
+                model: runtimeModel,
+                activityModel: activityRuntimeModel
+            )
         )
 
         configureAndStartWidgetRuntime()
@@ -45,6 +59,38 @@ final class MenuBarController: NSObject {
 
     deinit {
         refreshTask?.cancel()
+        immediateActivityRefreshTask?.cancel()
+    }
+
+    func refreshActivityNow() {
+        guard widgetRuntimeIsConfigured else {
+            activityRefreshIsPending = true
+            return
+        }
+
+        activityRefreshIsPending = false
+        immediateActivityRefreshTask?.cancel()
+        let engine = widgetEngine
+
+        immediateActivityRefreshTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+
+            let descriptors = await engine.descriptors()
+            guard let activityDescriptor = descriptors.first(where: {
+                $0.id == Self.activityWidgetID
+            }) else {
+                return
+            }
+
+            let configuration = await engine.currentConfiguration()
+            guard configuration.isEnabled(activityDescriptor) else {
+                return
+            }
+
+            _ = await engine.refresh(id: Self.activityWidgetID)
+            let snapshots = await engine.orderedVisibleSnapshots()
+            apply(snapshots: snapshots)
+        }
     }
 
     @objc
@@ -69,9 +115,12 @@ final class MenuBarController: NSObject {
         let model = runtimeModel
 
         refreshTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+
             await model.loadPreferences()
             await engine.setConfiguration(model.configuration)
             model.descriptors = await engine.descriptors()
+            widgetRuntimeIsConfigured = true
 
             model.onConfigurationChanged = { [weak self, engine] configuration in
                 Task { @MainActor [weak self] in
@@ -81,11 +130,13 @@ final class MenuBarController: NSObject {
                 }
             }
 
-            while !Task.isCancelled {
-                guard self != nil else { return }
+            if activityRefreshIsPending {
+                refreshActivityNow()
+            }
 
+            while !Task.isCancelled {
                 let snapshots = await engine.refreshDue()
-                self?.apply(snapshots: snapshots)
+                apply(snapshots: snapshots)
 
                 let delay = await engine.secondsUntilNextRefresh(maximum: 30)
                 let sleepSeconds = max(1, Int64(delay.rounded(.up)))

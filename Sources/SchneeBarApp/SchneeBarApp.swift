@@ -1,5 +1,6 @@
 import AppKit
 import SchneeBarGitHub
+import SchneeBarGitHubActivityProvider
 import SchneeBarGitHubKeychain
 import SchneeBarGitHubProfiles
 import SchneeBarPreferences
@@ -24,6 +25,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let runtimeModel = WidgetRuntimeModel(
         preferencesStore: UserDefaultsWidgetPreferencesStore()
     )
+    let activityRuntimeModel = ActivityRuntimeModel()
 
     let githubRuntimeModel: GitHubConnectionsRuntimeModel
 
@@ -35,16 +37,38 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let sessionCoordinator = GitHubConnectionSessionCoordinator(
             credentialStore: credentialStore
         )
+        let workflowRunService = GitHubWorkflowRunService(
+            sessionCoordinator: sessionCoordinator
+        )
+        let activityProvider = GitHubActivityProvider(
+            workflowRunLoader: workflowRunService
+        )
         githubRuntimeModel = GitHubConnectionsRuntimeModel(
             profileStore: profileStore,
-            sessionCoordinator: sessionCoordinator
+            sessionCoordinator: sessionCoordinator,
+            activityProvider: activityProvider
         )
         super.init()
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApplication.shared.setActivationPolicy(.accessory)
-        menuBarController = MenuBarController(runtimeModel: runtimeModel)
+
+        let githubRuntimeModel = githubRuntimeModel
+        let activityRuntimeModel = activityRuntimeModel
+        menuBarController = MenuBarController(
+            runtimeModel: runtimeModel,
+            activityRuntimeModel: activityRuntimeModel,
+            loadActivityItems: {
+                let items = try await githubRuntimeModel.loadActivityItems()
+                await activityRuntimeModel.replace(with: items)
+                return items
+            }
+        )
+
+        githubRuntimeModel.onActivitySourceChanged = { [weak self] in
+            self?.menuBarController?.refreshActivityNow()
+        }
 
         Task { @MainActor [weak self] in
             await self?.githubRuntimeModel.load()

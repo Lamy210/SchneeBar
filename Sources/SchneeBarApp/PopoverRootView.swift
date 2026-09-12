@@ -1,19 +1,25 @@
 import AppKit
 import SchneeBarActivityFeature
+import SchneeBarCore
 import SchneeBarWidgetFeature
 import SwiftUI
 
 struct PopoverRootView: View {
+    private static let activityWidgetID: WidgetID = "developer.activity"
+
     let model: WidgetRuntimeModel
+    let activityModel: ActivityRuntimeModel
 
     var body: some View {
         VStack(spacing: 8) {
             WidgetOverviewView(snapshots: model.snapshots)
 
-            Divider()
-                .padding(.horizontal, 12)
+            if activityIsEnabled {
+                Divider()
+                    .padding(.horizontal, 12)
 
-            ActivityPopoverView(items: [])
+                ActivityPopoverView(items: activityModel.items)
+            }
 
             Divider()
                 .padding(.horizontal, 12)
@@ -35,5 +41,14 @@ struct PopoverRootView: View {
             .padding(.horizontal, 16)
             .padding(.bottom, 12)
         }
+    }
+
+    private var activityIsEnabled: Bool {
+        guard let descriptor = model.descriptors.first(where: {
+            $0.id == Self.activityWidgetID
+        }) else {
+            return false
+        }
+        return model.configuration.isEnabled(descriptor)
     }
 }

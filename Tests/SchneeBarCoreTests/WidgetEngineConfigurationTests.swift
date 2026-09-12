@@ -85,6 +85,27 @@ func defaultDisabledWidgetsDoNotRefreshUntilExplicitlyEnabled() async {
 }
 
 @Test
+func reenabledWidgetRefreshesImmediatelyEvenInsidePreviousInterval() async {
+    let provider = PreferenceCountingProvider(id: "reenabled", order: 0)
+    let engine = WidgetEngine(providers: [provider])
+    let firstAttempt = Date(timeIntervalSince1970: 3_000)
+
+    _ = await engine.refreshDue(at: firstAttempt)
+    #expect(await provider.callCount() == 1)
+
+    var disabledConfiguration = WidgetConfiguration()
+    disabledConfiguration.setEnabled(false, for: provider.descriptor)
+    await engine.setConfiguration(disabledConfiguration)
+
+    var enabledConfiguration = disabledConfiguration
+    enabledConfiguration.setEnabled(true, for: provider.descriptor)
+    await engine.setConfiguration(enabledConfiguration)
+
+    _ = await engine.refreshDue(at: firstAttempt.addingTimeInterval(1))
+    #expect(await provider.callCount() == 2)
+}
+
+@Test
 func userOrderAppliesWithinSamePriority() async {
     let first = PreferenceCountingProvider(id: "first", order: 0)
     let second = PreferenceCountingProvider(id: "second", order: 100)
