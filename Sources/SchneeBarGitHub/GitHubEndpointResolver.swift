@@ -6,6 +6,7 @@ public enum GitHubEndpointResolverError: Error, Equatable, Sendable {
     case credentialsNotAllowed
     case queryOrFragmentNotAllowed
     case pathNotAllowed
+    case nonStandardPortNotAllowed
     case invalidGitHubDotComHost
     case invalidGHEHost
 }
@@ -19,6 +20,7 @@ public enum GitHubEndpointResolver {
             webBaseURL,
             deploymentKind: deploymentKind
         )
+        let components = try requireComponents(canonicalWebURL)
         let host = try requireHost(canonicalWebURL)
 
         switch deploymentKind {
@@ -56,8 +58,18 @@ public enum GitHubEndpointResolver {
         case .enterpriseServer:
             return GitHubEndpointSet(
                 webBaseURL: canonicalWebURL,
-                restBaseURL: try makeURL(scheme: "https", host: host, path: "/api/v3"),
-                graphQLURL: try makeURL(scheme: "https", host: host, path: "/api/graphql"),
+                restBaseURL: try makeURL(
+                    scheme: "https",
+                    host: host,
+                    port: components.port,
+                    path: "/api/v3"
+                ),
+                graphQLURL: try makeURL(
+                    scheme: "https",
+                    host: host,
+                    port: components.port,
+                    path: "/api/graphql"
+                ),
                 authenticationBaseURL: canonicalWebURL
             )
         }
@@ -88,9 +100,15 @@ public enum GitHubEndpointResolver {
             throw GitHubEndpointResolverError.pathNotAllowed
         }
 
+        if deploymentKind != .enterpriseServer {
+            guard components.port == nil || components.port == 443 else {
+                throw GitHubEndpointResolverError.nonStandardPortNotAllowed
+            }
+            components.port = nil
+        }
+
         components.scheme = "https"
         components.host = components.host?.lowercased()
-        components.port = nil
         components.path = ""
         components.query = nil
         components.fragment = nil
@@ -99,6 +117,13 @@ public enum GitHubEndpointResolver {
             throw GitHubEndpointResolverError.missingHost
         }
         return canonicalURL
+    }
+
+    private static func requireComponents(_ url: URL) throws -> URLComponents {
+        guard let components = URLComponents(url: url, resolvingAgainstBaseURL: false) else {
+            throw GitHubEndpointResolverError.missingHost
+        }
+        return components
     }
 
     private static func requireHost(_ url: URL) throws -> String {
@@ -113,11 +138,13 @@ public enum GitHubEndpointResolver {
     private static func makeURL(
         scheme: String,
         host: String,
+        port: Int? = nil,
         path: String = ""
     ) throws -> URL {
         var components = URLComponents()
         components.scheme = scheme
         components.host = host
+        components.port = port
         components.path = path
 
         guard let url = components.url else {
