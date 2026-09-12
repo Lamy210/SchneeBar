@@ -4,6 +4,7 @@ public struct ActivityWidgetProvider: WidgetProvider {
     public let descriptor = WidgetDescriptor(
         id: "developer.activity",
         displayName: "Developer Activity",
+        defaultOrder: 0,
         defaultRepresentation: .normal,
         visibilityPolicy: .whenNotNominal,
         refreshPolicy: .adaptive(active: 20, idle: 180)

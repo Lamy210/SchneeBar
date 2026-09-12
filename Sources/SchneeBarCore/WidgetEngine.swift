@@ -4,11 +4,16 @@ public actor WidgetEngine {
     private var providers: [WidgetID: any WidgetProvider]
     private var snapshots: [WidgetID: WidgetSnapshot] = [:]
     private var lastAttemptedAt: [WidgetID: Date] = [:]
+    private var configuration: WidgetConfiguration
 
-    public init(providers: [any WidgetProvider] = []) {
+    public init(
+        providers: [any WidgetProvider] = [],
+        configuration: WidgetConfiguration = .init()
+    ) {
         self.providers = Dictionary(
             uniqueKeysWithValues: providers.map { ($0.descriptor.id, $0) }
         )
+        self.configuration = configuration
     }
 
     public func register(_ provider: any WidgetProvider) {
@@ -19,6 +24,27 @@ public actor WidgetEngine {
         providers.removeValue(forKey: id)
         snapshots.removeValue(forKey: id)
         lastAttemptedAt.removeValue(forKey: id)
+    }
+
+    public func setConfiguration(_ configuration: WidgetConfiguration) {
+        self.configuration = configuration
+    }
+
+    public func currentConfiguration() -> WidgetConfiguration {
+        configuration
+    }
+
+    public func descriptors() -> [WidgetDescriptor] {
+        providers.values
+            .map(\.descriptor)
+            .sorted { lhs, rhs in
+                let lhsOrder = configuration.order(for: lhs)
+                let rhsOrder = configuration.order(for: rhs)
+                if lhsOrder != rhsOrder {
+                    return lhsOrder < rhsOrder
+                }
+                return lhs.id.rawValue < rhs.id.rawValue
+            }
     }
 
     @discardableResult
@@ -40,7 +66,7 @@ public actor WidgetEngine {
 
     @discardableResult
     public func refreshAll(at attemptedAt: Date = .now) async -> [WidgetSnapshot] {
-        for id in orderedProviderIDs() {
+        for id in orderedEnabledProviderIDs() {
             _ = await refresh(id: id, at: attemptedAt)
         }
         return orderedVisibleSnapshots()
@@ -48,7 +74,7 @@ public actor WidgetEngine {
 
     @discardableResult
     public func refreshDue(at now: Date = .now) async -> [WidgetSnapshot] {
-        for id in orderedProviderIDs() where isRefreshDue(id: id, at: now) {
+        for id in orderedEnabledProviderIDs() where isRefreshDue(id: id, at: now) {
             _ = await refresh(id: id, at: now)
         }
         return orderedVisibleSnapshots()
@@ -59,6 +85,7 @@ public actor WidgetEngine {
         maximum: TimeInterval = 60
     ) -> TimeInterval {
         let intervals = providers.compactMap { id, provider -> TimeInterval? in
+            guard configuration.isEnabled(provider.descriptor) else { return nil }
             guard let lastAttempted = lastAttemptedAt[id] else { return 0 }
 
             let severity = snapshots[id]?.severity ?? .unavailable
@@ -79,21 +106,42 @@ public actor WidgetEngine {
 
     public func orderedVisibleSnapshots() -> [WidgetSnapshot] {
         snapshots.values
-            .filter(\.isVisible)
+            .filter { snapshot in
+                configuration.isEnabled(snapshot.descriptor) && snapshot.isVisible
+            }
             .sorted { lhs, rhs in
                 if lhs.priority != rhs.priority {
                     return lhs.priority > rhs.priority
                 }
+
+                let lhsOrder = configuration.order(for: lhs.descriptor)
+                let rhsOrder = configuration.order(for: rhs.descriptor)
+                if lhsOrder != rhsOrder {
+                    return lhsOrder < rhsOrder
+                }
+
                 return lhs.descriptor.id.rawValue < rhs.descriptor.id.rawValue
             }
     }
 
-    private func orderedProviderIDs() -> [WidgetID] {
-        providers.keys.sorted(by: { $0.rawValue < $1.rawValue })
+    private func orderedEnabledProviderIDs() -> [WidgetID] {
+        providers.values
+            .map(\.descriptor)
+            .filter { configuration.isEnabled($0) }
+            .sorted { lhs, rhs in
+                let lhsOrder = configuration.order(for: lhs)
+                let rhsOrder = configuration.order(for: rhs)
+                if lhsOrder != rhsOrder {
+                    return lhsOrder < rhsOrder
+                }
+                return lhs.id.rawValue < rhs.id.rawValue
+            }
+            .map(\.id)
     }
 
     private func isRefreshDue(id: WidgetID, at now: Date) -> Bool {
         guard let provider = providers[id] else { return false }
+        guard configuration.isEnabled(provider.descriptor) else { return false }
         guard let lastAttempted = lastAttemptedAt[id] else { return true }
 
         let severity = snapshots[id]?.severity ?? .unavailable
