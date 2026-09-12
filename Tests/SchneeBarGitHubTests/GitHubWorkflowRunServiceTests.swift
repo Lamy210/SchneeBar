@@ -21,10 +21,16 @@ private actor ServiceCredentialStore: GitHubCredentialStore {
 private struct ServiceStubResponse: Sendable {
     let json: String
     let statusCode: Int
+    let delayNanoseconds: UInt64
 
-    init(_ json: String, statusCode: Int = 200) {
+    init(
+        _ json: String,
+        statusCode: Int = 200,
+        delayNanoseconds: UInt64 = 0
+    ) {
         self.json = json
         self.statusCode = statusCode
+        self.delayNanoseconds = delayNanoseconds
     }
 }
 
@@ -41,6 +47,11 @@ private actor ServiceQueueTransport: GitHubHTTPTransport {
         let response = responses.isEmpty
             ? ServiceStubResponse(#"{"message":"Unexpected request"}"#, statusCode: 500)
             : responses.removeFirst()
+
+        if response.delayNanoseconds > 0 {
+            try await Task.sleep(nanoseconds: response.delayNanoseconds)
+        }
+
         let httpResponse = try #require(
             HTTPURLResponse(
                 url: request.url!,
@@ -58,7 +69,7 @@ private actor ServiceQueueTransport: GitHubHTTPTransport {
 }
 
 @Test
-func restoresSessionThenLoadsActionsWithoutExposingCredentialInResult() async throws {
+func actionsPollingUsesStoredCredentialWithoutRediscoveringAccountOrInventory() async throws {
     let connection = try serviceConnection()
     let identity = GitHubAccountIdentity(id: "100", login: "octocat")
     let key = GitHubCredentialKey(connectionID: connection.id, accountID: identity.id)
@@ -68,12 +79,7 @@ func restoresSessionThenLoadsActionsWithoutExposingCredentialInResult() async th
         for: key
     )
 
-    let accessTransport = ServiceQueueTransport([
-        ServiceStubResponse(
-            #"{"id":100,"login":"octocat","name":"Octo Cat","avatar_url":null}"#
-        ),
-        ServiceStubResponse(#"{"total_count":0,"installations":[]}"#),
-    ])
+    let accessTransport = ServiceQueueTransport([])
     let actionsTransport = ServiceQueueTransport([
         ServiceStubResponse(
             #"{"total_count":1,"workflow_runs":[{"id":700,"workflow_id":90,"name":"CI","display_title":"Build","event":"push","status":"in_progress","conclusion":null,"run_number":2,"head_branch":"main","head_sha":"abcdef","pull_requests":[],"created_at":"2026-09-12T10:00:00Z","updated_at":"2026-09-12T10:01:00Z"}]}"#
@@ -85,7 +91,6 @@ func restoresSessionThenLoadsActionsWithoutExposingCredentialInResult() async th
         accessClient: GitHubAccessClient(transport: accessTransport)
     )
     let service = GitHubWorkflowRunService(
-        credentialStore: credentialStore,
         sessionCoordinator: sessionCoordinator,
         actionsClient: GitHubActionsClient(transport: actionsTransport)
     )
@@ -99,11 +104,7 @@ func restoresSessionThenLoadsActionsWithoutExposingCredentialInResult() async th
 
     #expect(runs.map(\.id) == [700])
     #expect(runs[0].status == .inProgress)
-
-    let accessRequests = await accessTransport.recordedRequests()
-    #expect(accessRequests.count == 2)
-    #expect(accessRequests[0].url?.path == "/user")
-    #expect(accessRequests[1].url?.path == "/user/installations")
+    #expect(await accessTransport.recordedRequests().isEmpty)
 
     let actionsRequest = try #require(await actionsTransport.recordedRequests().first)
     #expect(actionsRequest.url?.path == "/repos/octocat/project/actions/runs")
@@ -118,14 +119,11 @@ func missingCredentialFailsBeforeActionsRequest() async throws {
     let connection = try serviceConnection()
     let identity = GitHubAccountIdentity(id: "100", login: "octocat")
     let credentialStore = ServiceCredentialStore()
-    let accessTransport = ServiceQueueTransport([])
     let actionsTransport = ServiceQueueTransport([])
 
     let service = GitHubWorkflowRunService(
-        credentialStore: credentialStore,
         sessionCoordinator: GitHubConnectionSessionCoordinator(
-            credentialStore: credentialStore,
-            accessClient: GitHubAccessClient(transport: accessTransport)
+            credentialStore: credentialStore
         ),
         actionsClient: GitHubActionsClient(transport: actionsTransport)
     )
@@ -139,8 +137,136 @@ func missingCredentialFailsBeforeActionsRequest() async throws {
         )
     }
 
-    #expect(await accessTransport.recordedRequests().isEmpty)
     #expect(await actionsTransport.recordedRequests().isEmpty)
+}
+
+@Test
+func actionsPollingRefreshesExpiringCredentialWithoutInventoryDiscovery() async throws {
+    let now = Date(timeIntervalSince1970: 1_789_200_000)
+    let connection = try serviceConnection()
+    let identity = GitHubAccountIdentity(id: "100", login: "octocat")
+    let key = GitHubCredentialKey(connectionID: connection.id, accountID: identity.id)
+    let credentialStore = ServiceCredentialStore()
+    try await credentialStore.save(
+        GitHubCredential(
+            accessToken: "old_access",
+            refreshToken: "old_refresh",
+            accessTokenExpiresAt: now.addingTimeInterval(30),
+            refreshTokenExpiresAt: now.addingTimeInterval(3_600)
+        ),
+        for: key
+    )
+
+    let accessTransport = ServiceQueueTransport([])
+    let refreshTransport = ServiceQueueTransport([
+        ServiceStubResponse(
+            #"{"access_token":"new_access","refresh_token":"new_refresh","expires_in":28800,"refresh_token_expires_in":15811200,"token_type":"bearer","scope":""}"#
+        )
+    ])
+    let actionsTransport = ServiceQueueTransport([
+        ServiceStubResponse(#"{"total_count":0,"workflow_runs":[]}"#)
+    ])
+
+    let coordinator = GitHubConnectionSessionCoordinator(
+        credentialStore: credentialStore,
+        accessClient: GitHubAccessClient(transport: accessTransport),
+        deviceFlowClient: GitHubDeviceFlowClient(
+            transport: refreshTransport,
+            now: { now }
+        ),
+        now: { now }
+    )
+    let service = GitHubWorkflowRunService(
+        sessionCoordinator: coordinator,
+        actionsClient: GitHubActionsClient(transport: actionsTransport)
+    )
+
+    _ = try await service.workflowRuns(
+        connection: connection,
+        identity: identity,
+        clientID: "Iv1.public-client-id",
+        repository: try serviceRepository()
+    )
+
+    #expect(await accessTransport.recordedRequests().isEmpty)
+    #expect(await refreshTransport.recordedRequests().count == 1)
+
+    let actionsRequest = try #require(await actionsTransport.recordedRequests().first)
+    #expect(
+        actionsRequest.value(forHTTPHeaderField: "Authorization")
+            == "Bearer new_access"
+    )
+
+    let persisted = try #require(try await credentialStore.load(for: key))
+    #expect(persisted.accessToken == "new_access")
+    #expect(persisted.refreshToken == "new_refresh")
+}
+
+@Test
+func concurrentActionsPollingSharesOneRefreshRotation() async throws {
+    let now = Date(timeIntervalSince1970: 1_789_200_000)
+    let connection = try serviceConnection()
+    let identity = GitHubAccountIdentity(id: "100", login: "octocat")
+    let key = GitHubCredentialKey(connectionID: connection.id, accountID: identity.id)
+    let credentialStore = ServiceCredentialStore()
+    try await credentialStore.save(
+        GitHubCredential(
+            accessToken: "old_access",
+            refreshToken: "old_refresh",
+            accessTokenExpiresAt: now.addingTimeInterval(30),
+            refreshTokenExpiresAt: now.addingTimeInterval(3_600)
+        ),
+        for: key
+    )
+
+    let refreshTransport = ServiceQueueTransport([
+        ServiceStubResponse(
+            #"{"access_token":"new_access","refresh_token":"new_refresh","expires_in":28800,"refresh_token_expires_in":15811200,"token_type":"bearer","scope":""}"#,
+            delayNanoseconds: 100_000_000
+        )
+    ])
+    let actionsTransport = ServiceQueueTransport([
+        ServiceStubResponse(#"{"total_count":0,"workflow_runs":[]}"#),
+        ServiceStubResponse(#"{"total_count":0,"workflow_runs":[]}"#),
+    ])
+
+    let coordinator = GitHubConnectionSessionCoordinator(
+        credentialStore: credentialStore,
+        deviceFlowClient: GitHubDeviceFlowClient(
+            transport: refreshTransport,
+            now: { now }
+        ),
+        now: { now }
+    )
+    let service = GitHubWorkflowRunService(
+        sessionCoordinator: coordinator,
+        actionsClient: GitHubActionsClient(transport: actionsTransport)
+    )
+    let repository = try serviceRepository()
+
+    async let first = service.workflowRuns(
+        connection: connection,
+        identity: identity,
+        clientID: "Iv1.public-client-id",
+        repository: repository
+    )
+    async let second = service.workflowRuns(
+        connection: connection,
+        identity: identity,
+        clientID: "Iv1.public-client-id",
+        repository: repository
+    )
+
+    _ = try await (first, second)
+
+    #expect(await refreshTransport.recordedRequests().count == 1)
+    let actionRequests = await actionsTransport.recordedRequests()
+    #expect(actionRequests.count == 2)
+    #expect(
+        actionRequests.allSatisfy {
+            $0.value(forHTTPHeaderField: "Authorization") == "Bearer new_access"
+        }
+    )
 }
 
 private func serviceConnection() throws -> GitHubConnection {
