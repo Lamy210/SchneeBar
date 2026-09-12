@@ -111,9 +111,9 @@ public enum WidgetRefreshPolicy: Equatable, Sendable {
         case .manual:
             nil
         case let .interval(interval):
-            interval
+            max(1, interval)
         case let .adaptive(active, idle):
-            severity >= .active ? active : idle
+            max(1, severity >= .active ? active : idle)
         }
     }
 }
