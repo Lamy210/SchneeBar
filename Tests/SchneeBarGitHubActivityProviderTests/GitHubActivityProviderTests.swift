@@ -102,6 +102,8 @@ func loadsOnlySelectedAccessibleRepositoriesAndOrdersAttentionFirst() async thro
     #expect(result.items.map(\.repository) == ["acme/api", "acme/web"])
     #expect(result.items.map(\.state) == [.failed, .running])
     #expect(result.failures.isEmpty)
+    #expect(result.successfulRepositoryCount == 2)
+    #expect(result.attemptedRepositoryCount == 2)
     #expect(Set(await loader.requestedIDs()) == Set([1, 2]))
 }
 
@@ -154,6 +156,8 @@ func repositoryFailureDoesNotSuppressHealthyRepositoryActivity() async throws {
     #expect(result.items.count == 1)
     #expect(result.items[0].repository == "acme/healthy")
     #expect(result.items[0].state == .waiting)
+    #expect(result.successfulRepositoryCount == 1)
+    #expect(result.attemptedRepositoryCount == 2)
     #expect(
         result.failures == [
             GitHubRepositoryActivityFailure(
@@ -168,7 +172,7 @@ func repositoryFailureDoesNotSuppressHealthyRepositoryActivity() async throws {
 @Test
 func limitsConcurrentRepositoryRequests() async throws {
     let repositories = try (1 ... 8).map {
-        try repository(id: Int64($0), fullName: "acme/repo-\($0)")
+        try repository(id: Int64($0), fullName: String(format: "acme/repo-%02d", $0))
     }
     let responses = Dictionary(
         uniqueKeysWithValues: repositories.map { ($0.id, .success([])) }
@@ -189,6 +193,131 @@ func limitsConcurrentRepositoryRequests() async throws {
     #expect(await loader.requestedIDs().count == 8)
     #expect(await loader.maximumConcurrency() <= 3)
     #expect(await loader.maximumConcurrency() > 1)
+}
+
+@Test
+func pollingBudgetRotatesAcrossColdRepositories() async throws {
+    let repositories = try (1 ... 10).map {
+        try repository(id: Int64($0), fullName: String(format: "acme/repo-%02d", $0))
+    }
+    let responses = Dictionary(
+        uniqueKeysWithValues: repositories.map { ($0.id, .success([])) }
+    ) as [Int64: Result<[GitHubWorkflowRun], ActivityLoaderStubError>]
+    let loader = ActivityLoaderStub(responses: responses)
+    let provider = GitHubActivityProvider(
+        workflowRunLoader: loader,
+        maximumConcurrentRepositories: 1,
+        maximumRepositoriesPerRefresh: 4,
+        minimumColdRepositoriesPerRefresh: 1,
+        now: { Date(timeIntervalSince1970: 100) }
+    )
+    let profile = try githubProfile(selection: .allAccessible)
+    let inventory = try githubInventory(repositories: repositories)
+
+    let first = await provider.load(profile: profile, inventory: inventory)
+    let second = await provider.load(profile: profile, inventory: inventory)
+    let third = await provider.load(profile: profile, inventory: inventory)
+
+    #expect(first.attemptedRepositoryCount == 4)
+    #expect(second.attemptedRepositoryCount == 4)
+    #expect(third.attemptedRepositoryCount == 4)
+
+    let requested = await loader.requestedIDs()
+    #expect(requested.count == 12)
+    #expect(Set(requested) == Set(repositories.map(\.id)))
+}
+
+@Test
+func keepsCachedHotActivityWhenBudgetPollsOtherRepositories() async throws {
+    let repositories = try (1 ... 6).map {
+        try repository(id: Int64($0), fullName: String(format: "acme/repo-%02d", $0))
+    }
+    let responses = try Dictionary(
+        uniqueKeysWithValues: repositories.map { repository -> (Int64, Result<[GitHubWorkflowRun], ActivityLoaderStubError>) in
+            if repository.id <= 4 {
+                return (
+                    repository.id,
+                    .success([
+                        try workflowRun(
+                            id: repository.id * 100,
+                            repository: repository,
+                            status: .inProgress,
+                            conclusion: nil,
+                            updatedAt: TimeInterval(repository.id)
+                        ),
+                    ])
+                )
+            }
+            return (repository.id, .success([]))
+        }
+    )
+    let loader = ActivityLoaderStub(responses: responses)
+    let provider = GitHubActivityProvider(
+        workflowRunLoader: loader,
+        maximumConcurrentRepositories: 1,
+        maximumRepositoriesPerRefresh: 4,
+        minimumColdRepositoriesPerRefresh: 1,
+        now: { Date(timeIntervalSince1970: 100) }
+    )
+    let profile = try githubProfile(selection: .allAccessible)
+    let inventory = try githubInventory(repositories: repositories)
+
+    let first = await provider.load(profile: profile, inventory: inventory)
+    let second = await provider.load(profile: profile, inventory: inventory)
+
+    #expect(first.items.count == 4)
+    #expect(second.items.count == 4)
+
+    let requested = await loader.requestedIDs()
+    #expect(requested.count == 8)
+    #expect(Array(requested.prefix(4)) == [1, 2, 3, 4])
+    #expect(Array(requested.suffix(4)).contains(5))
+}
+
+@Test
+func resetDiscardsStaleInFlightActivityResult() async throws {
+    let monitoredRepository = try repository(id: 1, fullName: "acme/api")
+    let loader = ActivityLoaderStub(
+        responses: [
+            1: .success([
+                try workflowRun(
+                    id: 10,
+                    repository: monitoredRepository,
+                    status: .inProgress,
+                    conclusion: nil,
+                    updatedAt: 100
+                ),
+            ]),
+        ],
+        delayNanoseconds: 100_000_000
+    )
+    let provider = GitHubActivityProvider(
+        workflowRunLoader: loader,
+        maximumConcurrentRepositories: 1
+    )
+    let profile = try githubProfile(selection: .allAccessible)
+    let inventory = try githubInventory(repositories: [monitoredRepository])
+
+    async let loading = provider.load(profile: profile, inventory: inventory)
+    try await Task.sleep(nanoseconds: 10_000_000)
+    await provider.reset(connectionID: profile.id)
+    let staleResult = await loading
+
+    #expect(staleResult.items.isEmpty)
+    #expect(staleResult.failures.isEmpty)
+
+    let afterReset = await provider.load(
+        profile: GitHubConnectionProfile(
+            connection: profile.connection,
+            account: profile.account,
+            authenticationMethod: profile.authenticationMethod,
+            clientID: profile.clientID,
+            repositorySelection: profile.repositorySelection,
+            isEnabled: false
+        ),
+        inventory: inventory
+    )
+    #expect(afterReset.items.isEmpty)
 }
 
 private func githubProfile(
