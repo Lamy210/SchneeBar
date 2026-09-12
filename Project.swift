@@ -13,7 +13,7 @@ let project = Project(
         .target(
             name: "SchneeBarCore",
             destinations: .macOS,
-            product: .framework,
+            product: .staticFramework,
             bundleId: "dev.lamy.schneebar.core",
             deploymentTargets: deploymentTarget,
             sources: ["Sources/SchneeBarCore/**"]
@@ -21,7 +21,7 @@ let project = Project(
         .target(
             name: "SchneeBarDesignSystem",
             destinations: .macOS,
-            product: .framework,
+            product: .staticFramework,
             bundleId: "dev.lamy.schneebar.design-system",
             deploymentTargets: deploymentTarget,
             sources: ["Sources/SchneeBarDesignSystem/**"],
