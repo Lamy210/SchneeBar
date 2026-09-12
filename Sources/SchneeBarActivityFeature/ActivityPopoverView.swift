@@ -83,6 +83,22 @@ private struct ActivityRow: View {
     let item: ActivityItem
 
     var body: some View {
+        Group {
+            if let destinationURL = item.destinationURL {
+                Link(destination: destinationURL) {
+                    rowContent
+                }
+                .buttonStyle(.plain)
+                .help("Open workflow run")
+                .accessibilityHint("Opens the workflow run in your browser")
+            } else {
+                rowContent
+            }
+        }
+        .accessibilityElement(children: .combine)
+    }
+
+    private var rowContent: some View {
         HStack(alignment: .top, spacing: 10) {
             Image(systemName: iconName)
                 .foregroundStyle(iconColor)
@@ -112,11 +128,17 @@ private struct ActivityRow: View {
             }
 
             Spacer(minLength: 4)
+
+            if item.destinationURL != nil {
+                Image(systemName: "arrow.up.right")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                    .padding(.top, 3)
+            }
         }
         .padding(.vertical, 7)
         .padding(.horizontal, 8)
         .contentShape(Rectangle())
-        .accessibilityElement(children: .combine)
     }
 
     private var iconName: String {
