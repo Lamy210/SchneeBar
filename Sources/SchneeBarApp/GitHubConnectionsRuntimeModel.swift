@@ -44,6 +44,15 @@ final class GitHubConnectionsRuntimeModel {
         self.enterpriseDiscovery = enterpriseDiscovery
     }
 
+    var onboardingIsActive: Bool {
+        switch onboardingPhase {
+        case .requestingCode, .waitingForAuthorization, .finalizing:
+            return true
+        case .configuration, .failed:
+            return false
+        }
+    }
+
     var connectionCards: [GitHubConnectionCardModel] {
         profiles.map { profile in
             GitHubConnectionCardModel(
