@@ -114,6 +114,18 @@ let project = Project(
             ]
         ),
         .target(
+            name: "SchneeBarGitHubActivityProvider",
+            destinations: .macOS,
+            product: .staticFramework,
+            bundleId: "dev.lamy.schneebar.github-activity-provider",
+            deploymentTargets: deploymentTarget,
+            sources: ["Sources/SchneeBarGitHubActivityProvider/**"],
+            dependencies: [
+                .target(name: "SchneeBarCore"),
+                .target(name: "SchneeBarGitHub"),
+            ]
+        ),
+        .target(
             name: "SchneeBarPreviewSupport",
             destinations: .macOS,
             product: .staticFramework,
@@ -237,6 +249,19 @@ let project = Project(
             sources: ["Tests/SchneeBarGitHubTests/**"],
             dependencies: [
                 .target(name: "SchneeBarGitHub"),
+            ]
+        ),
+        .target(
+            name: "SchneeBarGitHubActivityProviderTests",
+            destinations: .macOS,
+            product: .unitTests,
+            bundleId: "dev.lamy.schneebar.github-activity-provider-tests",
+            deploymentTargets: deploymentTarget,
+            sources: ["Tests/SchneeBarGitHubActivityProviderTests/**"],
+            dependencies: [
+                .target(name: "SchneeBarCore"),
+                .target(name: "SchneeBarGitHub"),
+                .target(name: "SchneeBarGitHubActivityProvider"),
             ]
         ),
         .target(
