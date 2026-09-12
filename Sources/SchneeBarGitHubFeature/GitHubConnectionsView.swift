@@ -3,6 +3,7 @@ import SwiftUI
 public enum GitHubConnectionPresentationStatus: Equatable, Sendable {
     case connected(repositoryCount: Int)
     case syncing
+    case disabled
     case authenticationRequired
     case ssoRequired
     case networkUnavailable
@@ -16,6 +17,8 @@ public enum GitHubConnectionPresentationStatus: Equatable, Sendable {
             return "Connected · \(repositoryCount) repos"
         case .syncing:
             return "Syncing"
+        case .disabled:
+            return "Monitoring disabled"
         case .authenticationRequired:
             return "Authentication required"
         case .ssoRequired:
@@ -37,6 +40,8 @@ public enum GitHubConnectionPresentationStatus: Equatable, Sendable {
             return "checkmark.circle.fill"
         case .syncing:
             return "arrow.triangle.2.circlepath"
+        case .disabled:
+            return "pause.circle"
         case .authenticationRequired, .ssoRequired:
             return "person.crop.circle.badge.exclamationmark"
         case .networkUnavailable:
@@ -56,6 +61,8 @@ public enum GitHubConnectionPresentationStatus: Equatable, Sendable {
             return .green
         case .syncing:
             return .blue
+        case .disabled:
+            return .secondary
         case .authenticationRequired, .ssoRequired, .untestedServer:
             return .orange
         case .networkUnavailable, .suspended, .unavailable:
@@ -207,6 +214,7 @@ public struct GitHubConnectionsView: View {
                     onRefresh(connection.id)
                 }
                 .buttonStyle(.borderless)
+                .disabled(!connection.isEnabled)
 
                 Button("Manage") {
                     onManage(connection.id)
