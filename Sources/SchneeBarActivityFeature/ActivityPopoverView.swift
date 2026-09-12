@@ -5,15 +5,18 @@ import SwiftUI
 public struct ActivityPopoverView: View {
     private let title: String
     private let items: [ActivityItem]
+    private let onInspect: ((ActivityItem) -> Void)?
     private let surfaceStyle: SchneeSurfaceStyle
 
     public init(
         title: String = "Developer Activity",
         items: [ActivityItem],
+        onInspect: ((ActivityItem) -> Void)? = nil,
         surfaceStyle: SchneeSurfaceStyle = .adaptive
     ) {
         self.title = title
         self.items = items
+        self.onInspect = onInspect
         self.surfaceStyle = surfaceStyle
     }
 
@@ -35,7 +38,12 @@ public struct ActivityPopoverView: View {
                 ScrollView {
                     LazyVStack(spacing: 4) {
                         ForEach(items) { item in
-                            ActivityRow(item: item)
+                            ActivityRow(
+                                item: item,
+                                onInspect: onInspect.map { callback in
+                                    { callback(item) }
+                                }
+                            )
                         }
                     }
                 }
@@ -81,21 +89,39 @@ public struct ActivityPopoverView: View {
 
 private struct ActivityRow: View {
     let item: ActivityItem
+    let onInspect: (() -> Void)?
 
     var body: some View {
-        Group {
-            if let destinationURL = item.destinationURL {
-                Link(destination: destinationURL) {
-                    rowContent
+        HStack(alignment: .center, spacing: 4) {
+            primaryContent
+
+            if let onInspect {
+                Button(action: onInspect) {
+                    Image(systemName: "chevron.right")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 22, height: 28)
                 }
                 .buttonStyle(.plain)
-                .help("Open workflow run")
-                .accessibilityHint("Opens the workflow run in your browser")
-            } else {
-                rowContent
+                .help("Inspect workflow jobs")
+                .accessibilityLabel("Inspect workflow jobs")
             }
         }
-        .accessibilityElement(children: .combine)
+        .accessibilityElement(children: .contain)
+    }
+
+    @ViewBuilder
+    private var primaryContent: some View {
+        if let destinationURL = item.destinationURL {
+            Link(destination: destinationURL) {
+                rowContent
+            }
+            .buttonStyle(.plain)
+            .help("Open workflow run")
+            .accessibilityHint("Opens the workflow run in your browser")
+        } else {
+            rowContent
+        }
     }
 
     private var rowContent: some View {
