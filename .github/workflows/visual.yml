@@ -1,0 +1,63 @@
+name: Visual Regression
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: visual-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  compare:
+    runs-on: macos-26
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout candidate
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+
+      - name: Checkout main baseline
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          ref: main
+          path: _baseline
+
+      - name: Install pinned tools
+        uses: jdx/mise-action@9e7f7633ff6f6d6048a9418a68d48f288f50eb14 # v4.2.3
+
+      - name: Select Xcode 26.6
+        run: sudo xcode-select -s /Applications/Xcode_26.6.app/Contents/Developer
+
+      - name: Render candidate
+        run: |
+          mkdir -p _visual/candidate
+          tuist run SchneeBarVisualSnapshotCLI -- --output "$GITHUB_WORKSPACE/_visual/candidate"
+
+      - name: Render main baseline
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/_visual/baseline"
+          if [[ -f "$GITHUB_WORKSPACE/_baseline/Project.swift" ]]; then
+            cd "$GITHUB_WORKSPACE/_baseline"
+            mise exec -- tuist run SchneeBarVisualSnapshotCLI -- --output "$GITHUB_WORKSPACE/_visual/baseline"
+          else
+            echo "main does not contain the visual renderer yet; candidate images will be reported as NEW."
+          fi
+
+      - name: Build visual report
+        run: |
+          python3 Scripts/visual_report.py \
+            --baseline _visual/baseline \
+            --candidate _visual/candidate \
+            --output _visual/report
+          cat _visual/report/summary.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload visual report
+        if: always()
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
+        with:
+          name: visual-regression-report
+          path: _visual/report
+          retention-days: 14
