@@ -1,7 +1,7 @@
 import AppKit
 import Foundation
-import SchneeBarCore
-import SchneeBarDesignSystem
+import SchneeBarActivityFeature
+import SchneeBarPreviewSupport
 import SwiftUI
 
 private enum SnapshotAppearance: String, CaseIterable {
@@ -57,27 +57,55 @@ private func render(
     appearance: SnapshotAppearance,
     outputDirectory: URL
 ) throws {
-    NSApplication.shared.appearance = NSAppearance(named: appearance.appKitAppearance)
+    let nsAppearance = NSAppearance(named: appearance.appKitAppearance)
+    NSApplication.shared.appearance = nsAppearance
 
-    // Render against a deterministic opaque backdrop. This both exercises
-    // macOS 26 glass/material compositing and keeps light/dark text readable
-    // when the PNG is viewed in CI reports with arbitrary page backgrounds.
+    // Blocking visual regression intentionally uses a deterministic surface.
+    // Real Liquid Glass/vibrancy remains covered by the interactive harness
+    // and a later full-app UI smoke layer because off-screen AppKit capture is
+    // not a trustworthy pixel oracle for compositor-driven materials.
     let root = ZStack {
         appearance.background
 
-        ActivityPopoverView(items: scenario.items)
-            .padding(24)
+        ActivityPopoverView(
+            items: scenario.items,
+            surfaceStyle: .deterministic
+        )
+        .padding(24)
     }
     .frame(width: 400)
     .environment(\.colorScheme, appearance.colorScheme)
 
     let hostingView = NSHostingView(rootView: root)
+    hostingView.appearance = nsAppearance
     hostingView.frame = NSRect(x: 0, y: 0, width: 400, height: 520)
-    hostingView.layoutSubtreeIfNeeded()
 
+    let window = NSWindow(
+        contentRect: hostingView.frame,
+        styleMask: [.borderless],
+        backing: .buffered,
+        defer: false
+    )
+    window.appearance = nsAppearance
+    window.isOpaque = true
+    window.backgroundColor = appearance == .dark ? .black : .white
+    window.isReleasedWhenClosed = false
+    window.contentView = hostingView
+    window.setFrameOrigin(NSPoint(x: -10_000, y: -10_000))
+    window.orderFrontRegardless()
+
+    defer {
+        window.orderOut(nil)
+        window.close()
+    }
+
+    hostingView.layoutSubtreeIfNeeded()
     let fittingHeight = max(hostingView.fittingSize.height, 1)
     hostingView.frame.size.height = fittingHeight
+    window.setContentSize(hostingView.frame.size)
     hostingView.layoutSubtreeIfNeeded()
+    window.displayIfNeeded()
+    hostingView.displayIfNeeded()
 
     guard let bitmap = hostingView.bitmapImageRepForCachingDisplay(in: hostingView.bounds) else {
         throw SnapshotError.cannotCreateBitmap
