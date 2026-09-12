@@ -45,22 +45,43 @@ public struct GitHubActivityLoadResult: Equatable, Sendable {
     }
 }
 
-public struct GitHubActivityProvider: Sendable {
+/// Aggregates GitHub Actions activity under an explicit request budget.
+///
+/// Large GitHub accounts can expose hundreds of repositories. Polling every
+/// repository on the widget's active cadence would exhaust REST API quotas and
+/// waste battery. The provider therefore keeps per-repository poll state:
+/// repositories with visible CI activity stay hot, while a reserved part of
+/// every refresh scans the least-recently-polled cold repositories.
+public actor GitHubActivityProvider {
     private let workflowRunLoader: any GitHubWorkflowRunLoading
     private let activityMapper: GitHubWorkflowActivityMapper
     private let maximumConcurrentRepositories: Int
     private let perRepositoryRunLimit: Int
+    private let maximumRepositoriesPerRefresh: Int
+    private let minimumColdRepositoriesPerRefresh: Int
+    private let now: @Sendable () -> Date
+
+    private var pollState: [RepositoryPollKey: RepositoryPollState] = [:]
+    private var cachedActivities: [RepositoryPollKey: [GitHubWorkflowActivity]] = [:]
+    private var loadsInProgress: Set<UUID> = []
+    private var lastResultByConnectionID: [UUID: GitHubActivityLoadResult] = [:]
 
     public init(
         workflowRunLoader: any GitHubWorkflowRunLoading,
         activityMapper: GitHubWorkflowActivityMapper = GitHubWorkflowActivityMapper(),
         maximumConcurrentRepositories: Int = 4,
-        perRepositoryRunLimit: Int = 20
+        perRepositoryRunLimit: Int = 20,
+        maximumRepositoriesPerRefresh: Int = 8,
+        minimumColdRepositoriesPerRefresh: Int = 2,
+        now: @escaping @Sendable () -> Date = { .now }
     ) {
         self.workflowRunLoader = workflowRunLoader
         self.activityMapper = activityMapper
         self.maximumConcurrentRepositories = max(1, maximumConcurrentRepositories)
         self.perRepositoryRunLimit = min(max(1, perRepositoryRunLimit), 100)
+        self.maximumRepositoriesPerRefresh = max(1, maximumRepositoriesPerRefresh)
+        self.minimumColdRepositoriesPerRefresh = max(0, minimumColdRepositoriesPerRefresh)
+        self.now = now
     }
 
     public func load(
@@ -68,49 +89,100 @@ public struct GitHubActivityProvider: Sendable {
         inventory: GitHubAccessInventory
     ) async -> GitHubActivityLoadResult {
         guard profile.isEnabled else {
+            reset(connectionID: profile.id)
             return emptyResult()
+        }
+
+        if loadsInProgress.contains(profile.id) {
+            return lastResultByConnectionID[profile.id] ?? emptyResult()
         }
 
         let repositories = monitoredRepositories(
             selection: profile.repositorySelection,
             inventory: inventory
         )
+        pruneState(connectionID: profile.id, repositories: repositories)
+
         guard !repositories.isEmpty else {
-            return emptyResult()
+            let result = emptyResult()
+            lastResultByConnectionID[profile.id] = result
+            return result
         }
 
+        let repositoriesToPoll = repositoriesForRefresh(
+            connectionID: profile.id,
+            repositories: repositories
+        )
+        guard !repositoriesToPoll.isEmpty else {
+            return cachedResult(
+                connectionID: profile.id,
+                failures: [],
+                successfulRepositoryCount: 0,
+                attemptedRepositoryCount: 0
+            )
+        }
+
+        loadsInProgress.insert(profile.id)
+        defer { loadsInProgress.remove(profile.id) }
+
         let outcomes = await loadRepositories(
-            repositories,
+            repositoriesToPoll,
             profile: profile
         )
 
-        var activities: [GitHubWorkflowActivity] = []
         var failures: [GitHubRepositoryActivityFailure] = []
         var successfulRepositoryCount = 0
 
         for outcome in outcomes {
             switch outcome {
-            case let .success(repositoryActivities):
+            case let .success(repositoryID, repositoryActivities):
                 successfulRepositoryCount += 1
-                activities.append(contentsOf: repositoryActivities)
+                let key = RepositoryPollKey(
+                    connectionID: profile.id,
+                    repositoryID: repositoryID
+                )
+                cachedActivities[key] = repositoryActivities
+                pollState[key, default: RepositoryPollState()].isHot = !repositoryActivities.isEmpty
             case let .failure(failure):
                 failures.append(failure)
             }
         }
 
-        activities.sort(by: activitySort)
-        failures.sort { lhs, rhs in
-            if lhs.repositoryFullName != rhs.repositoryFullName {
-                return lhs.repositoryFullName < rhs.repositoryFullName
-            }
-            return lhs.repositoryID < rhs.repositoryID
-        }
+        failures.sort(by: failureSort)
+        let result = cachedResult(
+            connectionID: profile.id,
+            failures: failures,
+            successfulRepositoryCount: successfulRepositoryCount,
+            attemptedRepositoryCount: repositoriesToPoll.count
+        )
+        lastResultByConnectionID[profile.id] = result
+        return result
+    }
+
+    public func reset(connectionID: UUID) {
+        pollState = pollState.filter { $0.key.connectionID != connectionID }
+        cachedActivities = cachedActivities.filter { $0.key.connectionID != connectionID }
+        lastResultByConnectionID.removeValue(forKey: connectionID)
+        loadsInProgress.remove(connectionID)
+    }
+
+    private func cachedResult(
+        connectionID: UUID,
+        failures: [GitHubRepositoryActivityFailure],
+        successfulRepositoryCount: Int,
+        attemptedRepositoryCount: Int
+    ) -> GitHubActivityLoadResult {
+        let activities = cachedActivities
+            .filter { $0.key.connectionID == connectionID }
+            .values
+            .flatMap { $0 }
+            .sorted(by: activitySort)
 
         return GitHubActivityLoadResult(
             items: activities.map(makeActivityItem),
             failures: failures,
             successfulRepositoryCount: successfulRepositoryCount,
-            attemptedRepositoryCount: repositories.count
+            attemptedRepositoryCount: attemptedRepositoryCount
         )
     }
 
@@ -133,30 +205,155 @@ public struct GitHubActivityProvider: Sendable {
             .flatMap(\.repositories)
             .filter { selection.includes(repositoryID: $0.id) }
             .filter { seen.insert($0.id).inserted }
-            .sorted { lhs, rhs in
-                if lhs.fullName != rhs.fullName {
-                    return lhs.fullName < rhs.fullName
-                }
-                return lhs.id < rhs.id
+            .sorted(by: repositorySort)
+    }
+
+    private func repositoriesForRefresh(
+        connectionID: UUID,
+        repositories: [GitHubRepositoryAccess]
+    ) -> [GitHubRepositoryAccess] {
+        let budget = min(maximumRepositoriesPerRefresh, repositories.count)
+        let timestamp = now()
+
+        let hot = repositories
+            .filter {
+                pollState[
+                    RepositoryPollKey(connectionID: connectionID, repositoryID: $0.id)
+                ]?.isHot == true
             }
+            .sorted {
+                pollCandidateSort(
+                    lhs: $0,
+                    rhs: $1,
+                    connectionID: connectionID
+                )
+            }
+        let cold = repositories
+            .filter {
+                pollState[
+                    RepositoryPollKey(connectionID: connectionID, repositoryID: $0.id)
+                ]?.isHot != true
+            }
+            .sorted {
+                pollCandidateSort(
+                    lhs: $0,
+                    rhs: $1,
+                    connectionID: connectionID
+                )
+            }
+
+        let reservedCold = min(minimumColdRepositoriesPerRefresh, cold.count, budget)
+        let hotBudget = budget - reservedCold
+
+        var selected = Array(hot.prefix(hotBudget))
+        let remaining = budget - selected.count
+        selected.append(contentsOf: cold.prefix(remaining))
+
+        if selected.count < budget {
+            let selectedIDs = Set(selected.map(\.id))
+            selected.append(
+                contentsOf: hot
+                    .filter { !selectedIDs.contains($0.id) }
+                    .prefix(budget - selected.count)
+            )
+        }
+
+        for repository in selected {
+            let key = RepositoryPollKey(
+                connectionID: connectionID,
+                repositoryID: repository.id
+            )
+            pollState[key, default: RepositoryPollState()].lastPolledAt = timestamp
+        }
+
+        return selected
+    }
+
+    private func pollCandidateSort(
+        lhs: GitHubRepositoryAccess,
+        rhs: GitHubRepositoryAccess,
+        connectionID: UUID
+    ) -> Bool {
+        let lhsKey = RepositoryPollKey(connectionID: connectionID, repositoryID: lhs.id)
+        let rhsKey = RepositoryPollKey(connectionID: connectionID, repositoryID: rhs.id)
+        let lhsDate = pollState[lhsKey]?.lastPolledAt
+        let rhsDate = pollState[rhsKey]?.lastPolledAt
+
+        switch (lhsDate, rhsDate) {
+        case (nil, nil):
+            return repositorySort(lhs: lhs, rhs: rhs)
+        case (nil, _):
+            return true
+        case (_, nil):
+            return false
+        case let (lhsDate?, rhsDate?):
+            if lhsDate != rhsDate {
+                return lhsDate < rhsDate
+            }
+            return repositorySort(lhs: lhs, rhs: rhs)
+        }
+    }
+
+    private func pruneState(
+        connectionID: UUID,
+        repositories: [GitHubRepositoryAccess]
+    ) {
+        let validRepositoryIDs = Set(repositories.map(\.id))
+        pollState = pollState.filter { key, _ in
+            key.connectionID != connectionID || validRepositoryIDs.contains(key.repositoryID)
+        }
+        cachedActivities = cachedActivities.filter { key, _ in
+            key.connectionID != connectionID || validRepositoryIDs.contains(key.repositoryID)
+        }
     }
 
     private func loadRepositories(
         _ repositories: [GitHubRepositoryAccess],
         profile: GitHubConnectionProfile
     ) async -> [RepositoryLoadOutcome] {
-        await withTaskGroup(of: RepositoryLoadOutcome.self) { group in
+        let maximumConcurrentRepositories = self.maximumConcurrentRepositories
+        let perRepositoryRunLimit = self.perRepositoryRunLimit
+        let workflowRunLoader = self.workflowRunLoader
+        let activityMapper = self.activityMapper
+
+        return await withTaskGroup(of: RepositoryLoadOutcome.self) { group in
             var iterator = repositories.makeIterator()
             var activeTasks = 0
+
+            func addTask(for repository: GitHubRepositoryAccess) {
+                group.addTask {
+                    do {
+                        let runs = try await workflowRunLoader.workflowRuns(
+                            connection: profile.connection,
+                            identity: profile.account,
+                            clientID: profile.clientID,
+                            repository: repository,
+                            query: GitHubWorkflowRunQuery(limit: perRepositoryRunLimit)
+                        )
+                        let activities = activityMapper.visibleActivities(
+                            runs: runs,
+                            repository: repository
+                        )
+                        return .success(
+                            repositoryID: repository.id,
+                            activities: activities
+                        )
+                    } catch {
+                        return .failure(
+                            GitHubRepositoryActivityFailure(
+                                repositoryID: repository.id,
+                                repositoryFullName: repository.fullName,
+                                reason: Self.failureReason(for: error)
+                            )
+                        )
+                    }
+                }
+            }
 
             while activeTasks < maximumConcurrentRepositories,
                   let repository = iterator.next()
             {
-                addLoadTask(
-                    repository: repository,
-                    profile: profile,
-                    to: &group
-                )
+                addTask(for: repository)
                 activeTasks += 1
             }
 
@@ -168,11 +365,7 @@ public struct GitHubActivityProvider: Sendable {
                 activeTasks -= 1
 
                 if let repository = iterator.next() {
-                    addLoadTask(
-                        repository: repository,
-                        profile: profile,
-                        to: &group
-                    )
+                    addTask(for: repository)
                     activeTasks += 1
                 }
             }
@@ -181,42 +374,7 @@ public struct GitHubActivityProvider: Sendable {
         }
     }
 
-    private func addLoadTask(
-        repository: GitHubRepositoryAccess,
-        profile: GitHubConnectionProfile,
-        to group: inout TaskGroup<RepositoryLoadOutcome>
-    ) {
-        let workflowRunLoader = self.workflowRunLoader
-        let activityMapper = self.activityMapper
-        let runLimit = perRepositoryRunLimit
-
-        group.addTask {
-            do {
-                let runs = try await workflowRunLoader.workflowRuns(
-                    connection: profile.connection,
-                    identity: profile.account,
-                    clientID: profile.clientID,
-                    repository: repository,
-                    query: GitHubWorkflowRunQuery(limit: runLimit)
-                )
-                let activities = activityMapper.visibleActivities(
-                    runs: runs,
-                    repository: repository
-                )
-                return .success(activities)
-            } catch {
-                return .failure(
-                    GitHubRepositoryActivityFailure(
-                        repositoryID: repository.id,
-                        repositoryFullName: repository.fullName,
-                        reason: failureReason(for: error)
-                    )
-                )
-            }
-        }
-    }
-
-    private func failureReason(
+    private static func failureReason(
         for error: Error
     ) -> GitHubRepositoryActivityFailureReason {
         switch error {
@@ -295,9 +453,39 @@ public struct GitHubActivityProvider: Sendable {
         case .ignored: 4
         }
     }
+
+    private func repositorySort(
+        lhs: GitHubRepositoryAccess,
+        rhs: GitHubRepositoryAccess
+    ) -> Bool {
+        if lhs.fullName != rhs.fullName {
+            return lhs.fullName < rhs.fullName
+        }
+        return lhs.id < rhs.id
+    }
+
+    private func failureSort(
+        lhs: GitHubRepositoryActivityFailure,
+        rhs: GitHubRepositoryActivityFailure
+    ) -> Bool {
+        if lhs.repositoryFullName != rhs.repositoryFullName {
+            return lhs.repositoryFullName < rhs.repositoryFullName
+        }
+        return lhs.repositoryID < rhs.repositoryID
+    }
+}
+
+private struct RepositoryPollKey: Hashable, Sendable {
+    let connectionID: UUID
+    let repositoryID: Int64
+}
+
+private struct RepositoryPollState: Sendable {
+    var lastPolledAt: Date?
+    var isHot = false
 }
 
 private enum RepositoryLoadOutcome: Sendable {
-    case success([GitHubWorkflowActivity])
+    case success(repositoryID: Int64, activities: [GitHubWorkflowActivity])
     case failure(GitHubRepositoryActivityFailure)
 }
