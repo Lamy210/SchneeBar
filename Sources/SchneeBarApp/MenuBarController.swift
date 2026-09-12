@@ -12,14 +12,17 @@ final class MenuBarController: NSObject {
     private let widgetEngine: WidgetEngine
     private var refreshTask: Task<Void, Never>?
 
-    init(runtimeModel: WidgetRuntimeModel) {
+    init(
+        runtimeModel: WidgetRuntimeModel,
+        loadActivityItems: @escaping @Sendable () async throws -> [ActivityItem]
+    ) {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         popover = NSPopover()
         self.runtimeModel = runtimeModel
         widgetEngine = WidgetEngine(providers: [
             ClockWidgetProvider(),
             CPUWidgetProvider(),
-            ActivityWidgetProvider(loadItems: { [] }),
+            ActivityWidgetProvider(loadItems: loadActivityItems),
         ])
         super.init()
 
