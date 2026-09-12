@@ -1,23 +1,42 @@
 # Development Plan
 
-## Phase 0 — Foundation (current)
+## Phase 0 — Foundation (completed in bootstrap PR)
 
 - Native AppKit `NSStatusItem` shell
 - SwiftUI popover
-- Core / DesignSystem boundaries
+- Core / DesignSystem / feature boundaries
 - deterministic fixture scenarios
 - local Visual Harness
 - CI-rendered visual report
 - Swift Testing
 - CodeQL / Dependabot / public-repo security policy
 
-## Phase 1 — Widget Engine
+## Phase 1 — Widget Engine (current)
 
-- Widget state model
-- representation variants (compact / normal / critical)
-- priority and smart visibility policies
-- system clock + CPU proof-of-concept
-- settings for ordering and visibility
+Implemented in the current branch:
+
+- provider-neutral `WidgetProvider` contract
+- widget descriptors and snapshots
+- representation variants (`compact` / `normal` / `critical`)
+- severity and priority ordering
+- smart visibility policies
+- interval/adaptive refresh policies
+- refresh-due scheduling with last-known-good fallback
+- native Clock widget provider
+- native CPU widget provider using macOS host CPU counters
+- Developer Activity mapped into the same widget contract
+- Observation-backed runtime model
+- Menu Bar rendering from visible widget snapshots
+- shared Widget Feature UI
+- deterministic Widget Visual Regression scenarios
+
+Remaining before Phase 1 is considered complete:
+
+- settings for widget ordering, enable/disable, and representation preference
+- persistence for widget configuration
+- wake/sleep refresh handling
+- runtime diagnostics for provider failures/stale snapshots
+- additional system widgets only after the engine contract proves stable
 
 ## Phase 2 — GitHub connection foundation
 
