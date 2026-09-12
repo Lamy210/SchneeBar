@@ -27,7 +27,17 @@ public actor WidgetEngine {
     }
 
     public func setConfiguration(_ configuration: WidgetConfiguration) {
+        let previousConfiguration = self.configuration
         self.configuration = configuration
+
+        for (id, provider) in providers {
+            let descriptor = provider.descriptor
+            let wasEnabled = previousConfiguration.isEnabled(descriptor)
+            let isEnabled = configuration.isEnabled(descriptor)
+            if !wasEnabled && isEnabled {
+                lastAttemptedAt.removeValue(forKey: id)
+            }
+        }
     }
 
     public func currentConfiguration() -> WidgetConfiguration {
