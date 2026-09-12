@@ -9,11 +9,11 @@ Whole-desktop/menu-bar pixel tests are inherently noisy because of time, third-p
 
 ## Current implementation
 
-`SchneeBarVisualSnapshotCLI` renders fixed Developer Activity fixture scenarios using the same feature view as the real app, but with a deterministic surface instead of Liquid Glass/vibrancy.
+`SchneeBarVisualSnapshotCLI` renders fixed Developer Activity and Widget Feature fixture scenarios using the same feature views as the real app, but with a deterministic surface instead of Liquid Glass/vibrancy.
 
-This is intentional: off-screen `NSHostingView` capture is not a reliable pixel oracle for compositor-driven glass/material effects. The deterministic layer validates layout, typography, semantic state colors, scrolling/truncation, and feature composition. Real adaptive glass remains visible in the local Visual Harness and will later be covered by XCUITest smoke screenshots.
+This is intentional: off-screen `NSHostingView` capture is not a reliable pixel oracle for compositor-driven glass/material effects. The deterministic layer validates layout, typography, semantic state colors, scrolling/truncation, feature composition, and widget priority/severity presentation. Real adaptive glass remains visible in the local Visual Harness and will later be covered by XCUITest smoke screenshots.
 
-Scenarios currently cover:
+Developer Activity scenarios currently cover:
 
 - normal
 - running
@@ -21,6 +21,14 @@ Scenarios currently cover:
 - waiting-only
 - mixed Enterprise/GitHub contexts
 - overflow / long repository names
+- light/dark appearances
+
+Widget scenarios currently cover:
+
+- nominal CPU + Clock
+- attention/running state
+- critical state
+- many-widget composition
 - light/dark appearances
 
 Snapshots use an explicit light/dark backdrop and deterministic card surface so text/status colors remain reviewable in arbitrary artifact viewers.
