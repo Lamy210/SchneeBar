@@ -12,10 +12,10 @@ final class MenuBarController: NSObject {
     private let widgetEngine: WidgetEngine
     private var refreshTask: Task<Void, Never>?
 
-    override init() {
+    init(runtimeModel: WidgetRuntimeModel) {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         popover = NSPopover()
-        runtimeModel = WidgetRuntimeModel()
+        self.runtimeModel = runtimeModel
         widgetEngine = WidgetEngine(providers: [
             ClockWidgetProvider(),
             CPUWidgetProvider(),
@@ -40,7 +40,7 @@ final class MenuBarController: NSObject {
             rootView: PopoverRootView(model: runtimeModel)
         )
 
-        startWidgetRefreshLoop()
+        configureAndStartWidgetRuntime()
     }
 
     @objc
@@ -59,16 +59,29 @@ final class MenuBarController: NSObject {
         )
     }
 
-    private func startWidgetRefreshLoop() {
+    private func configureAndStartWidgetRuntime() {
         refreshTask?.cancel()
         let engine = widgetEngine
+        let model = runtimeModel
 
-        refreshTask = Task { [weak self] in
+        refreshTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+
+            await model.loadPreferences()
+            await engine.setConfiguration(model.configuration)
+            model.descriptors = await engine.descriptors()
+
+            model.onConfigurationChanged = { [weak self, engine] configuration in
+                Task { @MainActor [weak self] in
+                    await engine.setConfiguration(configuration)
+                    let snapshots = await engine.refreshDue()
+                    self?.apply(snapshots: snapshots)
+                }
+            }
+
             while !Task.isCancelled {
-                guard self != nil else { return }
-
                 let snapshots = await engine.refreshDue()
-                self?.apply(snapshots: snapshots)
+                apply(snapshots: snapshots)
 
                 let delay = await engine.secondsUntilNextRefresh(maximum: 30)
                 let sleepSeconds = max(1, Int64(delay.rounded(.up)))
@@ -87,9 +100,7 @@ final class MenuBarController: NSObject {
 
         guard let button = statusItem.button else { return }
         let labels = snapshots.prefix(3).map { snapshot in
-            let representation: WidgetRepresentationKind = snapshot.severity >= .critical
-                ? .critical
-                : .compact
+            let representation = runtimeModel.configuration.representation(for: snapshot)
             return snapshot.content(for: representation).text
         }
 
