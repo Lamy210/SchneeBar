@@ -13,8 +13,12 @@ SchneeBar App
   |
   +-- Presentation
   |     +-- Menu Bar (AppKit / NSStatusItem)
-  |     +-- SwiftUI Popovers
+  |     +-- Activity Feature (SwiftUI)
   |     +-- Settings
+  |
+  +-- Design System
+  |     +-- Surfaces / materials
+  |     +-- typography / spacing / primitives
   |
   +-- Application
   |     +-- WidgetEngine
@@ -41,6 +45,15 @@ SchneeBar App
         +-- SQLite (planned)
 ```
 
+## Current module boundaries
+
+- `SchneeBarCore`: provider-neutral domain/application primitives only.
+- `SchneeBarDesignSystem`: reusable visual primitives and surfaces; it must not know Developer Activity domain types.
+- `SchneeBarActivityFeature`: Developer Activity presentation. Depends on Core + DesignSystem.
+- `SchneeBarPreviewSupport`: deterministic fictional fixtures used only by visual/test tooling.
+- `SchneeBar`: composition root and macOS integration. Production UI does not depend on PreviewSupport.
+- `SchneeBarVisualHarness` / `SchneeBarVisualSnapshotCLI`: development and CI tooling.
+
 ## Dependency rule
 
 Dependencies point inward. Domain models are provider-neutral and UI-neutral.
@@ -48,15 +61,17 @@ Dependencies point inward. Domain models are provider-neutral and UI-neutral.
 Forbidden examples:
 
 - `SwiftUI.View` inside Domain
+- feature/domain-specific views inside `SchneeBarDesignSystem`
+- preview/test fixtures inside production Core
 - GitHub API response types inside Presentation
 - direct URLSession calls from views
 - direct Keychain calls from views
 
 ## UI boundary
 
-AppKit owns macOS integration where required (`NSStatusItem`, panel/popover lifecycle). SwiftUI owns composable content and settings.
+AppKit owns macOS integration where required (`NSStatusItem`, panel/popover lifecycle). SwiftUI owns composable feature content and settings.
 
-The first implementation deliberately keeps the visible component in `SchneeBarDesignSystem` so the same view is used by the app, the local Visual Harness, and CI rendering.
+Feature views are shared by the app, local Visual Harness, and deterministic CI renderer. Visual fixtures are injected from PreviewSupport rather than compiled into production Core.
 
 ## Concurrency
 
