@@ -6,6 +6,8 @@ public struct ClockWidgetProvider: WidgetProvider {
     public let descriptor = WidgetDescriptor(
         id: "system.clock",
         displayName: "Clock",
+        defaultIsEnabled: false,
+        defaultOrder: 200,
         defaultRepresentation: .compact,
         visibilityPolicy: .always,
         refreshPolicy: .interval(30)
@@ -51,6 +53,8 @@ public actor CPUWidgetProvider: WidgetProvider {
     public nonisolated let descriptor = WidgetDescriptor(
         id: "system.cpu",
         displayName: "CPU",
+        defaultIsEnabled: true,
+        defaultOrder: 100,
         defaultRepresentation: .normal,
         visibilityPolicy: .always,
         refreshPolicy: .interval(5)
