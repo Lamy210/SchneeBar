@@ -2,6 +2,7 @@ import AppKit
 import Foundation
 import SchneeBarActivityFeature
 import SchneeBarPreviewSupport
+import SchneeBarWidgetFeature
 import SwiftUI
 
 private enum SnapshotAppearance: String, CaseIterable {
@@ -52,33 +53,18 @@ private enum SnapshotError: Error {
 }
 
 @MainActor
-private func render(
-    scenario: ActivityFixtureScenario,
+private func render<Content: View>(
+    rootView: Content,
     appearance: SnapshotAppearance,
+    filename: String,
     outputDirectory: URL
 ) throws {
     let nsAppearance = NSAppearance(named: appearance.appKitAppearance)
     NSApplication.shared.appearance = nsAppearance
 
-    // Blocking visual regression intentionally uses a deterministic surface.
-    // Real Liquid Glass/vibrancy remains covered by the interactive harness
-    // and a later full-app UI smoke layer because off-screen AppKit capture is
-    // not a trustworthy pixel oracle for compositor-driven materials.
-    let root = ZStack {
-        appearance.background
-
-        ActivityPopoverView(
-            items: scenario.items,
-            surfaceStyle: .deterministic
-        )
-        .padding(24)
-    }
-    .frame(width: 400)
-    .environment(\.colorScheme, appearance.colorScheme)
-
-    let hostingView = NSHostingView(rootView: root)
+    let hostingView = NSHostingView(rootView: rootView)
     hostingView.appearance = nsAppearance
-    hostingView.frame = NSRect(x: 0, y: 0, width: 400, height: 520)
+    hostingView.frame = NSRect(x: 0, y: 0, width: 400, height: 620)
 
     let window = NSWindow(
         contentRect: hostingView.frame,
@@ -117,8 +103,46 @@ private func render(
         throw SnapshotError.cannotEncodePNG
     }
 
-    let filename = "\(scenario.rawValue)-\(appearance.rawValue).png"
-    try png.write(to: outputDirectory.appendingPathComponent(filename), options: .atomic)
+    try png.write(
+        to: outputDirectory.appendingPathComponent(filename),
+        options: .atomic
+    )
+}
+
+@MainActor
+private func activityRoot(
+    scenario: ActivityFixtureScenario,
+    appearance: SnapshotAppearance
+) -> some View {
+    ZStack {
+        appearance.background
+
+        ActivityPopoverView(
+            items: scenario.items,
+            surfaceStyle: .deterministic
+        )
+        .padding(24)
+    }
+    .frame(width: 400)
+    .environment(\.colorScheme, appearance.colorScheme)
+}
+
+@MainActor
+private func widgetRoot(
+    scenario: WidgetFixtureScenario,
+    appearance: SnapshotAppearance
+) -> some View {
+    ZStack {
+        appearance.background
+
+        WidgetOverviewView(
+            snapshots: scenario.snapshots,
+            surfaceStyle: .deterministic
+        )
+        .padding(24)
+    }
+    .frame(width: 400)
+    .environment(\.colorScheme, appearance.colorScheme)
 }
 
 @MainActor
@@ -141,8 +165,20 @@ private func run() throws {
     for scenario in ActivityFixtureScenario.allCases {
         for appearance in SnapshotAppearance.allCases {
             try render(
-                scenario: scenario,
+                rootView: activityRoot(scenario: scenario, appearance: appearance),
                 appearance: appearance,
+                filename: "activity-\(scenario.rawValue)-\(appearance.rawValue).png",
+                outputDirectory: outputDirectory
+            )
+        }
+    }
+
+    for scenario in WidgetFixtureScenario.allCases {
+        for appearance in SnapshotAppearance.allCases {
+            try render(
+                rootView: widgetRoot(scenario: scenario, appearance: appearance),
+                appearance: appearance,
+                filename: "widgets-\(scenario.rawValue)-\(appearance.rawValue).png",
                 outputDirectory: outputDirectory
             )
         }
