@@ -134,12 +134,16 @@ public struct GitHubAccessInventory: Equatable, Sendable {
 }
 
 public enum GitHubAccessClientError: Error, Equatable, Sendable {
+    case invalidCredential
     case httpStatus(Int)
     case invalidResponse
     case invalidInstallationID
+    case paginationLimitExceeded
 }
 
 public struct GitHubAccessClient: Sendable {
+    private static let maximumPages = 1_000
+
     private let transport: any GitHubHTTPTransport
 
     public init(transport: any GitHubHTTPTransport = URLSessionGitHubHTTPTransport()) {
@@ -161,7 +165,7 @@ public struct GitHubAccessClient: Sendable {
             credential: credential
         )
 
-        guard !payload.login.isEmpty else {
+        guard payload.id > 0, !payload.login.isEmpty else {
             throw GitHubAccessClientError.invalidResponse
         }
 
@@ -188,10 +192,15 @@ public struct GitHubAccessClient: Sendable {
             .appendingPathComponent("installations", isDirectory: false)
 
         var page = 1
-        var installations: [GitHubInstallation] = []
         var expectedTotal: Int?
+        var seenIDs = Set<Int64>()
+        var installations: [GitHubInstallation] = []
 
-        while expectedTotal == nil || installations.count < expectedTotal ?? 0 {
+        while shouldLoadMore(currentCount: installations.count, expectedTotal: expectedTotal) {
+            guard page <= Self.maximumPages else {
+                throw GitHubAccessClientError.paginationLimitExceeded
+            }
+
             let url = try paginatedURL(baseURL, page: page)
             let payload: InstallationListPayload = try await get(
                 url: url,
@@ -200,11 +209,17 @@ public struct GitHubAccessClient: Sendable {
             )
             expectedTotal = max(0, payload.totalCount)
 
-            if payload.installations.isEmpty {
+            guard !payload.installations.isEmpty else {
                 break
             }
 
-            installations.append(contentsOf: try payload.installations.map(mapInstallation))
+            let mapped = try payload.installations.map(mapInstallation)
+            let newItems = mapped.filter { seenIDs.insert($0.id).inserted }
+            guard !newItems.isEmpty else {
+                break
+            }
+
+            installations.append(contentsOf: newItems)
             page += 1
         }
 
@@ -231,10 +246,15 @@ public struct GitHubAccessClient: Sendable {
             .appendingPathComponent("repositories", isDirectory: false)
 
         var page = 1
-        var repositories: [GitHubRepositoryAccess] = []
         var expectedTotal: Int?
+        var seenIDs = Set<Int64>()
+        var repositories: [GitHubRepositoryAccess] = []
 
-        while expectedTotal == nil || repositories.count < expectedTotal ?? 0 {
+        while shouldLoadMore(currentCount: repositories.count, expectedTotal: expectedTotal) {
+            guard page <= Self.maximumPages else {
+                throw GitHubAccessClientError.paginationLimitExceeded
+            }
+
             let url = try paginatedURL(baseURL, page: page)
             let payload: RepositoryListPayload = try await get(
                 url: url,
@@ -243,11 +263,19 @@ public struct GitHubAccessClient: Sendable {
             )
             expectedTotal = max(0, payload.totalCount)
 
-            if payload.repositories.isEmpty {
+            guard !payload.repositories.isEmpty else {
                 break
             }
 
-            repositories.append(contentsOf: try payload.repositories.map(mapRepository))
+            let mapped = try payload.repositories.map {
+                try mapRepository($0, webBaseURL: endpoints.webBaseURL)
+            }
+            let newItems = mapped.filter { seenIDs.insert($0.id).inserted }
+            guard !newItems.isEmpty else {
+                break
+            }
+
+            repositories.append(contentsOf: newItems)
             page += 1
         }
 
@@ -295,10 +323,15 @@ public struct GitHubAccessClient: Sendable {
         connection: GitHubConnection,
         credential: GitHubCredential
     ) async throws -> Response {
+        let token = credential.accessToken.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !token.isEmpty else {
+            throw GitHubAccessClientError.invalidCredential
+        }
+
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
         request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
-        request.setValue("Bearer \(credential.accessToken)", forHTTPHeaderField: "Authorization")
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
 
         if let apiVersion = apiVersion(for: connection) {
             request.setValue(apiVersion, forHTTPHeaderField: "X-GitHub-Api-Version")
@@ -345,8 +378,13 @@ public struct GitHubAccessClient: Sendable {
         return result
     }
 
+    private func shouldLoadMore(currentCount: Int, expectedTotal: Int?) -> Bool {
+        expectedTotal.map { currentCount < $0 } ?? true
+    }
+
     private func mapInstallation(_ payload: InstallationPayload) throws -> GitHubInstallation {
         guard payload.id > 0,
+              payload.account.id > 0,
               !payload.account.login.isEmpty,
               !payload.account.type.isEmpty
         else {
@@ -367,16 +405,22 @@ public struct GitHubAccessClient: Sendable {
         )
     }
 
-    private func mapRepository(_ payload: RepositoryPayload) throws -> GitHubRepositoryAccess {
+    private func mapRepository(
+        _ payload: RepositoryPayload,
+        webBaseURL: URL
+    ) throws -> GitHubRepositoryAccess {
         guard payload.id > 0,
               !payload.name.isEmpty,
               !payload.fullName.isEmpty,
-              !payload.owner.login.isEmpty,
-              let webURL = URL(string: payload.htmlURL),
-              webURL.scheme?.lowercased() == "https"
+              payload.owner.id > 0,
+              !payload.owner.login.isEmpty
         else {
             throw GitHubAccessClientError.invalidResponse
         }
+
+        let webURL = webBaseURL
+            .appendingPathComponent(payload.owner.login, isDirectory: true)
+            .appendingPathComponent(payload.name, isDirectory: false)
 
         return GitHubRepositoryAccess(
             id: payload.id,
@@ -465,7 +509,6 @@ private struct RepositoryPayload: Decodable {
     let name: String
     let fullName: String
     let isPrivate: Bool
-    let htmlURL: String
     let owner: AccountPayload
     let permissions: RepositoryPermissionPayload?
 
@@ -474,7 +517,6 @@ private struct RepositoryPayload: Decodable {
         case name
         case fullName = "full_name"
         case isPrivate = "private"
-        case htmlURL = "html_url"
         case owner
         case permissions
     }
