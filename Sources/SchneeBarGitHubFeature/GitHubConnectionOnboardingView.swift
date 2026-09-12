@@ -119,7 +119,7 @@ public struct GitHubConnectionOnboardingView: View {
                     .textContentType(.URL)
             }
 
-            SecureField("GitHub App Client ID", text: $draft.clientID)
+            TextField("GitHub App Client ID", text: $draft.clientID)
                 .textContentType(.username)
 
             Text("The client ID identifies the GitHub App and may be stored in the connection profile. Do not enter a client secret or private key.")
@@ -138,7 +138,7 @@ public struct GitHubConnectionOnboardingView: View {
         _ presentation: GitHubDeviceAuthorizationPresentation
     ) -> some View {
         VStack(alignment: .leading, spacing: 14) {
-            Label("Authorize SchneeBar in GitHub", systemImage: "person.badge.key.fill")
+            Label("Authorize SchneeBar in GitHub", systemImage: "key.fill")
                 .font(.headline)
 
             Text("Enter this one-time code on the GitHub authorization page:")
