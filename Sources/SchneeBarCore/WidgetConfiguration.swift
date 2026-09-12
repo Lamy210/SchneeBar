@@ -6,7 +6,7 @@ public struct WidgetPreference: Codable, Equatable, Identifiable, Sendable {
 
     public init(
         id: WidgetID,
-        isEnabled: Bool = true,
+        isEnabled: Bool,
         order: Int,
         representation: WidgetRepresentationKind? = nil
     ) {
@@ -28,8 +28,8 @@ public struct WidgetConfiguration: Codable, Equatable, Sendable {
         preferences.first(where: { $0.id == id })
     }
 
-    public func isEnabled(_ id: WidgetID) -> Bool {
-        preference(for: id)?.isEnabled ?? true
+    public func isEnabled(_ descriptor: WidgetDescriptor) -> Bool {
+        preference(for: descriptor.id)?.isEnabled ?? descriptor.defaultIsEnabled
     }
 
     public func order(for descriptor: WidgetDescriptor) -> Int {
@@ -77,6 +77,7 @@ public struct WidgetConfiguration: Codable, Equatable, Sendable {
 
         var preference = WidgetPreference(
             id: descriptor.id,
+            isEnabled: descriptor.defaultIsEnabled,
             order: descriptor.defaultOrder,
             representation: nil
         )
