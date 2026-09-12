@@ -121,6 +121,7 @@ public enum WidgetRefreshPolicy: Equatable, Sendable {
 public struct WidgetDescriptor: Equatable, Sendable {
     public let id: WidgetID
     public let displayName: String
+    public let defaultOrder: Int
     public let defaultRepresentation: WidgetRepresentationKind
     public let visibilityPolicy: WidgetVisibilityPolicy
     public let refreshPolicy: WidgetRefreshPolicy
@@ -128,12 +129,14 @@ public struct WidgetDescriptor: Equatable, Sendable {
     public init(
         id: WidgetID,
         displayName: String,
+        defaultOrder: Int = 0,
         defaultRepresentation: WidgetRepresentationKind = .normal,
         visibilityPolicy: WidgetVisibilityPolicy = .always,
         refreshPolicy: WidgetRefreshPolicy = .manual
     ) {
         self.id = id
         self.displayName = displayName
+        self.defaultOrder = defaultOrder
         self.defaultRepresentation = defaultRepresentation
         self.visibilityPolicy = visibilityPolicy
         self.refreshPolicy = refreshPolicy
