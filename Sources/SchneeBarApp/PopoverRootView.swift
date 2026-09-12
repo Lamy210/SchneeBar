@@ -3,8 +3,15 @@ import SchneeBarActivityFeature
 import SwiftUI
 
 struct PopoverRootView: View {
+    let model: WidgetRuntimeModel
+
     var body: some View {
         VStack(spacing: 8) {
+            WidgetOverviewView(snapshots: model.snapshots)
+
+            Divider()
+                .padding(.horizontal, 12)
+
             ActivityPopoverView(items: [])
 
             Divider()
