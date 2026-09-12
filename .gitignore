@@ -1,0 +1,14 @@
+.DS_Store
+DerivedData/
+.build/
+.swiftpm/
+Tuist/.build/
+SchneeBar.xcodeproj/
+SchneeBar.xcworkspace/
+xcuserdata/
+*.xcuserstate
+.visual/
+_visual/
+.env
+.env.*
+!.env.example
