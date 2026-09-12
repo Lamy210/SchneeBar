@@ -61,6 +61,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         )
 
+        githubRuntimeModel.onActivitySourceChanged = { [weak self] in
+            self?.menuBarController?.refreshActivityNow()
+        }
+
         Task { @MainActor [weak self] in
             await self?.githubRuntimeModel.load()
         }
