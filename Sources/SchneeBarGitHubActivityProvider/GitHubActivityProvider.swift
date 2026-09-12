@@ -64,6 +64,7 @@ public actor GitHubActivityProvider {
     private var pollState: [RepositoryPollKey: RepositoryPollState] = [:]
     private var cachedActivities: [RepositoryPollKey: [GitHubWorkflowActivity]] = [:]
     private var loadsInProgress: Set<UUID> = []
+    private var generationByConnectionID: [UUID: UInt64] = [:]
     private var lastResultByConnectionID: [UUID: GitHubActivityLoadResult] = [:]
 
     public init(
@@ -122,6 +123,7 @@ public actor GitHubActivityProvider {
             )
         }
 
+        let generation = generationByConnectionID[profile.id, default: 0]
         loadsInProgress.insert(profile.id)
         defer { loadsInProgress.remove(profile.id) }
 
@@ -129,6 +131,10 @@ public actor GitHubActivityProvider {
             repositoriesToPoll,
             profile: profile
         )
+
+        guard generationByConnectionID[profile.id, default: 0] == generation else {
+            return lastResultByConnectionID[profile.id] ?? emptyResult()
+        }
 
         var failures: [GitHubRepositoryActivityFailure] = []
         var successfulRepositoryCount = 0
@@ -160,6 +166,7 @@ public actor GitHubActivityProvider {
     }
 
     public func reset(connectionID: UUID) {
+        generationByConnectionID[connectionID, default: 0] &+= 1
         pollState = pollState.filter { $0.key.connectionID != connectionID }
         cachedActivities = cachedActivities.filter { $0.key.connectionID != connectionID }
         lastResultByConnectionID.removeValue(forKey: connectionID)
@@ -315,45 +322,42 @@ public actor GitHubActivityProvider {
         let perRepositoryRunLimit = self.perRepositoryRunLimit
         let workflowRunLoader = self.workflowRunLoader
         let activityMapper = self.activityMapper
+        let loadOne: @Sendable (GitHubRepositoryAccess) async -> RepositoryLoadOutcome = { repository in
+            do {
+                let runs = try await workflowRunLoader.workflowRuns(
+                    connection: profile.connection,
+                    identity: profile.account,
+                    clientID: profile.clientID,
+                    repository: repository,
+                    query: GitHubWorkflowRunQuery(limit: perRepositoryRunLimit)
+                )
+                let activities = activityMapper.visibleActivities(
+                    runs: runs,
+                    repository: repository
+                )
+                return .success(
+                    repositoryID: repository.id,
+                    activities: activities
+                )
+            } catch {
+                return .failure(
+                    GitHubRepositoryActivityFailure(
+                        repositoryID: repository.id,
+                        repositoryFullName: repository.fullName,
+                        reason: Self.failureReason(for: error)
+                    )
+                )
+            }
+        }
 
         return await withTaskGroup(of: RepositoryLoadOutcome.self) { group in
             var iterator = repositories.makeIterator()
             var activeTasks = 0
 
-            func addTask(for repository: GitHubRepositoryAccess) {
-                group.addTask {
-                    do {
-                        let runs = try await workflowRunLoader.workflowRuns(
-                            connection: profile.connection,
-                            identity: profile.account,
-                            clientID: profile.clientID,
-                            repository: repository,
-                            query: GitHubWorkflowRunQuery(limit: perRepositoryRunLimit)
-                        )
-                        let activities = activityMapper.visibleActivities(
-                            runs: runs,
-                            repository: repository
-                        )
-                        return .success(
-                            repositoryID: repository.id,
-                            activities: activities
-                        )
-                    } catch {
-                        return .failure(
-                            GitHubRepositoryActivityFailure(
-                                repositoryID: repository.id,
-                                repositoryFullName: repository.fullName,
-                                reason: Self.failureReason(for: error)
-                            )
-                        )
-                    }
-                }
-            }
-
             while activeTasks < maximumConcurrentRepositories,
                   let repository = iterator.next()
             {
-                addTask(for: repository)
+                group.addTask { await loadOne(repository) }
                 activeTasks += 1
             }
 
@@ -365,7 +369,7 @@ public actor GitHubActivityProvider {
                 activeTasks -= 1
 
                 if let repository = iterator.next() {
-                    addTask(for: repository)
+                    group.addTask { await loadOne(repository) }
                     activeTasks += 1
                 }
             }
