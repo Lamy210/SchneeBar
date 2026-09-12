@@ -85,7 +85,7 @@ public actor WidgetEngine {
         maximum: TimeInterval = 60
     ) -> TimeInterval {
         let intervals = providers.compactMap { id, provider -> TimeInterval? in
-            guard configuration.isEnabled(id) else { return nil }
+            guard configuration.isEnabled(provider.descriptor) else { return nil }
             guard let lastAttempted = lastAttemptedAt[id] else { return 0 }
 
             let severity = snapshots[id]?.severity ?? .unavailable
@@ -107,7 +107,7 @@ public actor WidgetEngine {
     public func orderedVisibleSnapshots() -> [WidgetSnapshot] {
         snapshots.values
             .filter { snapshot in
-                configuration.isEnabled(snapshot.descriptor.id) && snapshot.isVisible
+                configuration.isEnabled(snapshot.descriptor) && snapshot.isVisible
             }
             .sorted { lhs, rhs in
                 if lhs.priority != rhs.priority {
@@ -127,7 +127,7 @@ public actor WidgetEngine {
     private func orderedEnabledProviderIDs() -> [WidgetID] {
         providers.values
             .map(\.descriptor)
-            .filter { configuration.isEnabled($0.id) }
+            .filter { configuration.isEnabled($0) }
             .sorted { lhs, rhs in
                 let lhsOrder = configuration.order(for: lhs)
                 let rhsOrder = configuration.order(for: rhs)
@@ -140,8 +140,8 @@ public actor WidgetEngine {
     }
 
     private func isRefreshDue(id: WidgetID, at now: Date) -> Bool {
-        guard configuration.isEnabled(id) else { return false }
         guard let provider = providers[id] else { return false }
+        guard configuration.isEnabled(provider.descriptor) else { return false }
         guard let lastAttempted = lastAttemptedAt[id] else { return true }
 
         let severity = snapshots[id]?.severity ?? .unavailable
