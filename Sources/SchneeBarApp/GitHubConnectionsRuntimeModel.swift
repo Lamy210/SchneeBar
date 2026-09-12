@@ -15,6 +15,9 @@ final class GitHubConnectionsRuntimeModel {
     var onboardingPhase: GitHubConnectionOnboardingPhase = .configuration
 
     @ObservationIgnored
+    var onActivitySourceChanged: (@MainActor @Sendable () -> Void)?
+
+    @ObservationIgnored
     private let profileStore: any GitHubConnectionProfileStore
 
     @ObservationIgnored
@@ -216,6 +219,7 @@ final class GitHubConnectionsRuntimeModel {
                 upsert(profile)
                 inventoryByConnectionID[profile.id] = session.inventory
                 statusByConnectionID[profile.id] = presentationStatus(for: session.inventory)
+                onActivitySourceChanged?()
                 onboardingTask = nil
                 onboardingPhase = .configuration
                 isPresentingOnboarding = false
@@ -231,8 +235,11 @@ final class GitHubConnectionsRuntimeModel {
     func refresh(profileID: UUID) async {
         guard let profile = profiles.first(where: { $0.id == profileID }) else { return }
         guard profile.isEnabled else {
-            inventoryByConnectionID.removeValue(forKey: profileID)
+            let hadInventory = inventoryByConnectionID.removeValue(forKey: profileID) != nil
             statusByConnectionID[profileID] = .disabled
+            if hadInventory {
+                onActivitySourceChanged?()
+            }
             return
         }
 
@@ -250,11 +257,15 @@ final class GitHubConnectionsRuntimeModel {
             updated.lastConnectedAt = .now
             try await profileStore.save(updated)
             upsert(updated)
+            onActivitySourceChanged?()
         } catch GitHubConnectionSessionError.credentialNotFound,
                 GitHubConnectionSessionError.reauthenticationRequired,
                 GitHubConnectionSessionError.accountMismatch(_, _) {
-            inventoryByConnectionID.removeValue(forKey: profileID)
+            let hadInventory = inventoryByConnectionID.removeValue(forKey: profileID) != nil
             statusByConnectionID[profileID] = .authenticationRequired
+            if hadInventory {
+                onActivitySourceChanged?()
+            }
         } catch let error as URLError where error.code == .notConnectedToInternet
             || error.code == .cannotFindHost
             || error.code == .cannotConnectToHost
@@ -282,8 +293,11 @@ final class GitHubConnectionsRuntimeModel {
                 await self?.refresh(profileID: profileID)
             }
         } else {
-            inventoryByConnectionID.removeValue(forKey: profileID)
+            let hadInventory = inventoryByConnectionID.removeValue(forKey: profileID) != nil
             statusByConnectionID[profileID] = .disabled
+            if hadInventory {
+                onActivitySourceChanged?()
+            }
         }
     }
 
@@ -298,6 +312,7 @@ final class GitHubConnectionsRuntimeModel {
             profiles.removeAll(where: { $0.id == profileID })
             inventoryByConnectionID.removeValue(forKey: profileID)
             statusByConnectionID.removeValue(forKey: profileID)
+            onActivitySourceChanged?()
         } catch {
             statusByConnectionID[profileID] = .unavailable
         }
