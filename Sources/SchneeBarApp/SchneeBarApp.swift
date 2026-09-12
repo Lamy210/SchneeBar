@@ -25,6 +25,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let runtimeModel = WidgetRuntimeModel(
         preferencesStore: UserDefaultsWidgetPreferencesStore()
     )
+    let activityRuntimeModel = ActivityRuntimeModel()
 
     let githubRuntimeModel: GitHubConnectionsRuntimeModel
 
@@ -54,10 +55,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApplication.shared.setActivationPolicy(.accessory)
 
         let githubRuntimeModel = githubRuntimeModel
+        let activityRuntimeModel = activityRuntimeModel
         menuBarController = MenuBarController(
             runtimeModel: runtimeModel,
+            activityRuntimeModel: activityRuntimeModel,
             loadActivityItems: {
-                try await githubRuntimeModel.loadActivityItems()
+                let items = try await githubRuntimeModel.loadActivityItems()
+                await activityRuntimeModel.replace(with: items)
+                return items
             }
         )
 
