@@ -1,6 +1,6 @@
 import SwiftUI
 
-public enum GitHubRepositorySelectionPresentationMode: String, CaseIterable, Sendable {
+public enum GitHubRepositorySelectionPresentationMode: String, CaseIterable, Hashable, Sendable {
     case allAccessible
     case selected
 
@@ -127,7 +127,7 @@ public struct GitHubConnectionManagementView: View {
 
     private var header: some View {
         HStack(alignment: .top, spacing: 14) {
-            Image(systemName: "shippingbox.and.arrow.backward")
+            Image(systemName: "shippingbox")
                 .font(.title2)
                 .foregroundStyle(.secondary)
                 .frame(width: 30)
