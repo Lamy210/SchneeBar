@@ -21,10 +21,10 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Checkout main baseline
+      - name: Checkout PR base
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
-          ref: main
+          ref: ${{ github.event.pull_request.base.sha }}
           path: _baseline
           persist-credentials: false
 
@@ -43,14 +43,14 @@ jobs:
           mkdir -p _visual/candidate
           tuist run SchneeBarVisualSnapshotCLI -- --output "$GITHUB_WORKSPACE/_visual/candidate"
 
-      - name: Render main baseline
+      - name: Render PR base
         run: |
           mkdir -p "$GITHUB_WORKSPACE/_visual/baseline"
           if [[ -f "$GITHUB_WORKSPACE/_baseline/Project.swift" ]]; then
             cd "$GITHUB_WORKSPACE/_baseline"
             mise exec -- tuist run SchneeBarVisualSnapshotCLI -- --output "$GITHUB_WORKSPACE/_visual/baseline"
           else
-            echo "main does not contain the visual renderer yet; candidate images will be reported as NEW."
+            echo "PR base does not contain the visual renderer yet; candidate images will be reported as NEW."
           fi
 
       - name: Build visual report
