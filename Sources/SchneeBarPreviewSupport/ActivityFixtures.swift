@@ -1,3 +1,4 @@
+import Foundation
 import SchneeBarCore
 
 public enum ActivityFixtureScenario: String, CaseIterable, Identifiable, Sendable {
@@ -30,14 +31,35 @@ public enum ActivityFixtureScenario: String, CaseIterable, Identifiable, Sendabl
             ]
         case .running:
             [
-                .init(id: "running-pr", repository: "SchneeBar", context: "PR #12", detail: "macOS Build · 4/6 jobs", state: .running),
+                .init(
+                    id: "running-pr",
+                    repository: "SchneeBar",
+                    context: "PR #12",
+                    detail: "macOS Build · 4/6 jobs",
+                    state: .running,
+                    destinationURL: URL(string: "https://github.com/Lamy210/SchneeBar/actions/runs/1200")
+                ),
                 .init(id: "running-release", repository: "SchneeMail", context: "main", detail: "Release · 01:42", state: .running),
                 .init(id: "running-wait", repository: "Project A", context: "PR #731", detail: "Waiting for review", state: .waiting),
             ]
         case .mainFailure:
             [
-                .init(id: "failure-main", repository: "SchneeBar", context: "main", detail: "macOS Tests failed · 2m ago", state: .failed),
-                .init(id: "failure-pr", repository: "SchneeBar", context: "PR #14", detail: "CI · 7/10 jobs", state: .running),
+                .init(
+                    id: "failure-main",
+                    repository: "SchneeBar",
+                    context: "main",
+                    detail: "macOS Tests failed · 2m ago",
+                    state: .failed,
+                    destinationURL: URL(string: "https://github.com/Lamy210/SchneeBar/actions/runs/1400")
+                ),
+                .init(
+                    id: "failure-pr",
+                    repository: "SchneeBar",
+                    context: "PR #14",
+                    detail: "CI · 7/10 jobs",
+                    state: .running,
+                    destinationURL: URL(string: "https://github.com/Lamy210/SchneeBar/actions/runs/1401")
+                ),
                 .init(id: "failure-other", repository: "SchneeAI", context: "main", detail: "CI passed · 5m ago", state: .success),
             ]
         case .waiting:
@@ -47,8 +69,22 @@ public enum ActivityFixtureScenario: String, CaseIterable, Identifiable, Sendabl
             ]
         case .enterprise:
             [
-                .init(id: "enterprise-cloud", repository: "Company API", context: "PR #843", detail: "Review requested · GHE.com", state: .waiting),
-                .init(id: "enterprise-ghes", repository: "Internal Service", context: "production", detail: "Deploying · GHES", state: .running),
+                .init(
+                    id: "enterprise-cloud",
+                    repository: "Company API",
+                    context: "PR #843",
+                    detail: "Review requested · GHE.com",
+                    state: .waiting,
+                    destinationURL: URL(string: "https://company.ghe.com/acme/api/actions/runs/843")
+                ),
+                .init(
+                    id: "enterprise-ghes",
+                    repository: "Internal Service",
+                    context: "production",
+                    detail: "Deploying · GHES",
+                    state: .running,
+                    destinationURL: URL(string: "https://github.internal.example:8443/acme/internal/actions/runs/844")
+                ),
                 .init(id: "enterprise-personal", repository: "SchneeBar", context: "main", detail: "CI passed · GitHub.com", state: .success),
             ]
         case .overflow:

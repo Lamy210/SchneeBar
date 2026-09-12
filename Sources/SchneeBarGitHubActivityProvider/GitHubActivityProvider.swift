@@ -410,7 +410,8 @@ public actor GitHubActivityProvider {
             repository: activity.repositoryFullName,
             context: activity.context,
             detail: activity.detail,
-            state: activityState(activity.classification)
+            state: activityState(activity.classification),
+            destinationURL: activity.webURL
         )
     }
 
