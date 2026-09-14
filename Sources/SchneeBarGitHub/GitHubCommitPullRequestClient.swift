@@ -6,6 +6,7 @@ public enum GitHubCommitPullRequestClientError: Error, Equatable, Sendable {
     case invalidCommitSHA
     case invalidResponse
     case httpStatus(Int)
+    case paginationLimitExceeded
 }
 
 /// Loads pull requests associated with a commit using GitHub's REST API.
@@ -14,6 +15,9 @@ public enum GitHubCommitPullRequestClientError: Error, Equatable, Sendable {
 /// response URLs and other provider payload details are not exposed beyond this
 /// adapter boundary.
 public struct GitHubCommitPullRequestClient: Sendable {
+    private static let pageSize = 100
+    private static let maximumPages = 10
+
     private let transport: any GitHubHTTPTransport
 
     public init(transport: any GitHubHTTPTransport = URLSessionGitHubHTTPTransport()) {
@@ -43,7 +47,7 @@ public struct GitHubCommitPullRequestClient: Sendable {
             deploymentKind: connection.deploymentKind,
             webBaseURL: connection.webBaseURL
         )
-        let url = endpoints.restBaseURL
+        let baseURL = endpoints.restBaseURL
             .appendingPathComponent("repos", isDirectory: true)
             .appendingPathComponent(repository.ownerLogin, isDirectory: true)
             .appendingPathComponent(repository.name, isDirectory: true)
@@ -51,6 +55,39 @@ public struct GitHubCommitPullRequestClient: Sendable {
             .appendingPathComponent(normalizedCommitSHA, isDirectory: true)
             .appendingPathComponent("pulls", isDirectory: false)
 
+        var page = 1
+        var seenNumbers = Set<Int>()
+
+        while page <= Self.maximumPages {
+            let url = try requestURL(baseURL: baseURL, page: page)
+            let payload: [AssociatedPullRequestPayload] = try await get(
+                url: url,
+                connection: connection,
+                token: token
+            )
+
+            guard payload.allSatisfy({ $0.number > 0 }) else {
+                throw GitHubCommitPullRequestClientError.invalidResponse
+            }
+
+            let previousCount = seenNumbers.count
+            seenNumbers.formUnion(payload.map(\.number))
+
+            if payload.count < Self.pageSize || seenNumbers.count == previousCount {
+                return seenNumbers.sorted()
+            }
+
+            page += 1
+        }
+
+        throw GitHubCommitPullRequestClientError.paginationLimitExceeded
+    }
+
+    private func get<Response: Decodable>(
+        url: URL,
+        connection: GitHubConnection,
+        token: String
+    ) async throws -> Response {
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
         request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
@@ -64,18 +101,25 @@ public struct GitHubCommitPullRequestClient: Sendable {
             throw GitHubCommitPullRequestClientError.httpStatus(response.statusCode)
         }
 
-        let payload: [AssociatedPullRequestPayload]
         do {
-            payload = try JSONDecoder().decode([AssociatedPullRequestPayload].self, from: data)
+            return try JSONDecoder().decode(Response.self, from: data)
         } catch {
             throw GitHubCommitPullRequestClientError.invalidResponse
         }
+    }
 
-        guard payload.allSatisfy({ $0.number > 0 }) else {
+    private func requestURL(baseURL: URL, page: Int) throws -> URL {
+        guard var components = URLComponents(url: baseURL, resolvingAgainstBaseURL: false) else {
             throw GitHubCommitPullRequestClientError.invalidResponse
         }
-
-        return Array(Set(payload.map(\.number))).sorted()
+        components.queryItems = [
+            URLQueryItem(name: "per_page", value: String(Self.pageSize)),
+            URLQueryItem(name: "page", value: String(page)),
+        ]
+        guard let url = components.url else {
+            throw GitHubCommitPullRequestClientError.invalidResponse
+        }
+        return url
     }
 
     private func apiVersion(for connection: GitHubConnection) -> String? {
