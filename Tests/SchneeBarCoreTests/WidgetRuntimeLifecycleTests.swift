@@ -5,7 +5,8 @@ import Testing
 func runtimeGenerationIsCurrentOnlyWhileAwake() throws {
     var lifecycle = WidgetRuntimeLifecycle()
 
-    let generation = try #require(lifecycle.beginRuntime())
+    let generationCandidate = lifecycle.beginRuntime()
+    let generation = try #require(generationCandidate)
 
     #expect(!lifecycle.isSleeping)
     #expect(lifecycle.isCurrent(generation))
@@ -19,10 +20,12 @@ func runtimeGenerationIsCurrentOnlyWhileAwake() throws {
 @Test
 func wakingCreatesANewCurrentGeneration() throws {
     var lifecycle = WidgetRuntimeLifecycle()
-    let beforeSleep = try #require(lifecycle.beginRuntime())
+    let beforeSleepCandidate = lifecycle.beginRuntime()
+    let beforeSleep = try #require(beforeSleepCandidate)
 
     lifecycle.willSleep()
-    let afterWake = try #require(lifecycle.didWake())
+    let afterWakeCandidate = lifecycle.didWake()
+    let afterWake = try #require(afterWakeCandidate)
 
     #expect(!lifecycle.isSleeping)
     #expect(afterWake != beforeSleep)
@@ -33,7 +36,8 @@ func wakingCreatesANewCurrentGeneration() throws {
 @Test
 func duplicatePowerEventsAreIdempotent() throws {
     var lifecycle = WidgetRuntimeLifecycle()
-    let initial = try #require(lifecycle.beginRuntime())
+    let initialCandidate = lifecycle.beginRuntime()
+    let initial = try #require(initialCandidate)
 
     lifecycle.willSleep()
     lifecycle.willSleep()
@@ -41,18 +45,23 @@ func duplicatePowerEventsAreIdempotent() throws {
     #expect(lifecycle.isSleeping)
     #expect(!lifecycle.isCurrent(initial))
 
-    let afterWake = try #require(lifecycle.didWake())
-    #expect(lifecycle.didWake() == nil)
+    let afterWakeCandidate = lifecycle.didWake()
+    let afterWake = try #require(afterWakeCandidate)
+    let duplicateWake = lifecycle.didWake()
+
+    #expect(duplicateWake == nil)
     #expect(lifecycle.isCurrent(afterWake))
 }
 
 @Test
 func runtimeCannotBeginWhileSleeping() throws {
     var lifecycle = WidgetRuntimeLifecycle()
-    let initial = try #require(lifecycle.beginRuntime())
+    let initialCandidate = lifecycle.beginRuntime()
+    let initial = try #require(initialCandidate)
 
     lifecycle.willSleep()
+    let sleepingRuntime = lifecycle.beginRuntime()
 
-    #expect(lifecycle.beginRuntime() == nil)
+    #expect(sleepingRuntime == nil)
     #expect(!lifecycle.isCurrent(initial))
 }
