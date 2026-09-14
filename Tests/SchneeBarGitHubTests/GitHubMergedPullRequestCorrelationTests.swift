@@ -36,7 +36,7 @@ func deprecatedMergeCommitSHAIsNotCorrelationEvidence() throws {
 }
 
 @Test
-func mergedMetadataPromotesSharedCommitEvidenceFromHighToExact() throws {
+func deprecatedMergeCommitSHADoesNotPromoteSharedCommitEvidence() throws {
     let metadata = try mergedCorrelationMetadata(
         number: 25,
         isMerged: true,
@@ -57,13 +57,6 @@ func mergedMetadataPromotesSharedCommitEvidenceFromHighToExact() throws {
         headSHA: "same-commit"
     )
 
-    let direct = GitHubWorkflowExecutionCorrelator().correlate(
-        repositoryID: 42,
-        left: pullRequestRun,
-        right: baseRun
-    )
-    #expect(direct.confidence == .high)
-
     let result = GitHubWorkflowExecutionCorrelator().correlateMergedPullRequest(
         repositoryID: 42,
         pullRequest: metadata,
@@ -71,8 +64,8 @@ func mergedMetadataPromotesSharedCommitEvidenceFromHighToExact() throws {
         baseRun: baseRun
     )
 
-    #expect(result.confidence == .exact)
-    #expect(result.reason == .mergedPullRequest(25, "same-commit"))
+    #expect(result.confidence == .high)
+    #expect(result.reason == .sharedHeadCommit("same-commit"))
 }
 
 @Test
@@ -216,7 +209,7 @@ func mergedPullRequestCorrelationRequiresMatchingPullRequestNumber() throws {
 }
 
 @Test
-func mergedPullRequestCorrelationRequiresLandedCommit() throws {
+func mergedPullRequestCorrelationDoesNotInferLandedCommitFromMetadata() throws {
     let metadata = try mergedCorrelationMetadata(
         number: 25,
         isMerged: true,
@@ -230,18 +223,18 @@ func mergedPullRequestCorrelationRequiresLandedCommit() throws {
         headSHA: "final-head",
         pullRequestNumbers: [25]
     )
-    let unrelatedBaseRun = try mergedCorrelationRun(
+    let baseRun = try mergedCorrelationRun(
         id: 109,
         event: "push",
         branch: "main",
-        headSHA: "different-main-commit"
+        headSHA: "landed-commit"
     )
 
     let result = GitHubWorkflowExecutionCorrelator().correlateMergedPullRequest(
         repositoryID: 42,
         pullRequest: metadata,
         pullRequestRun: pullRequestRun,
-        baseRun: unrelatedBaseRun
+        baseRun: baseRun
     )
 
     #expect(result.confidence == .unknown)
