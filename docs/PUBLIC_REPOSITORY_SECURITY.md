@@ -14,6 +14,19 @@ SchneeBar is public. Pull-request code from forks must be treated as untrusted.
 - Dependabot tracks Action updates.
 - Release signing/notarization must live in a separate protected workflow/environment.
 
+## CodeQL merge gate
+
+Swift CodeQL is intentionally deferred while a pull request is in Draft so normal development pushes do not repeatedly occupy a macOS runner with an expensive extraction build.
+
+- Draft pull requests create a CodeQL workflow run whose analysis job is skipped.
+- Marking a pull request Ready for review starts a real CodeQL analysis for the current head.
+- Synchronizing a non-Draft pull request runs CodeQL again for the new head.
+- Converting a pull request back to Draft creates a skipped run and allows the workflow concurrency policy to supersede analysis for the previous review state.
+- Pushes to `main` and the scheduled scan continue to run CodeQL normally.
+- A skipped Draft CodeQL result is **not** approval to merge. The final pull-request head must have a successful non-Draft CodeQL analysis before merge.
+
+Repository rules should require the stabilized CodeQL check together with normal CI once branch/ruleset protection is enabled.
+
 ## Application secrets
 
 Never commit or embed:
