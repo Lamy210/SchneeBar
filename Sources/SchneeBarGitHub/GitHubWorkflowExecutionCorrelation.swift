@@ -125,6 +125,8 @@ public struct GitHubWorkflowExecutionCorrelator: Sendable {
         let metadataHeadSHA = normalizedSHA(pullRequest.headSHA)
         let runHeadSHA = normalizedSHA(pullRequestRun.headSHA)
         let baseRunSHA = normalizedSHA(baseRun.headSHA)
+        let metadataBaseRef = pullRequest.baseRef.trimmingCharacters(in: .whitespacesAndNewlines)
+        let baseRunRef = baseRun.headBranch?.trimmingCharacters(in: .whitespacesAndNewlines)
 
         guard pullRequest.isMerged,
               pullRequest.mergedAt != nil,
@@ -133,6 +135,8 @@ public struct GitHubWorkflowExecutionCorrelator: Sendable {
               associatedPullRequestNumbers.contains(pullRequestNumber),
               !metadataHeadSHA.isEmpty,
               runHeadSHA == metadataHeadSHA,
+              !metadataBaseRef.isEmpty,
+              baseRunRef == metadataBaseRef,
               !baseRunSHA.isEmpty
         else {
             return direct
@@ -224,4 +228,5 @@ public struct GitHubWorkflowExecutionCorrelator: Sendable {
 private struct Candidate: Sendable {
     let run: GitHubWorkflowRun
     let confidence: GitHubWorkflowExecutionCorrelationConfidence
+    let reason: GitHubWorkflowExecutionCorrelationReason
 }
