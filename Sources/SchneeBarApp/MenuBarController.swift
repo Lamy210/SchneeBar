@@ -13,10 +13,13 @@ final class MenuBarController: NSObject {
     private let runtimeModel: WidgetRuntimeModel
     private let activityRuntimeModel: ActivityRuntimeModel
     private let widgetEngine: WidgetEngine
+    private let workspaceNotificationCenter: NotificationCenter
     private var refreshTask: Task<Void, Never>?
     private var immediateActivityRefreshTask: Task<Void, Never>?
     private var widgetRuntimeIsConfigured = false
     private var activityRefreshIsPending = false
+    private var isSleeping = false
+    private var runtimeGeneration = 0
 
     init(
         runtimeModel: WidgetRuntimeModel,
@@ -32,6 +35,7 @@ final class MenuBarController: NSObject {
             CPUWidgetProvider(),
             ActivityWidgetProvider(loadItems: loadActivityItems),
         ])
+        workspaceNotificationCenter = NSWorkspace.shared.notificationCenter
         super.init()
 
         if let button = statusItem.button {
@@ -54,16 +58,18 @@ final class MenuBarController: NSObject {
             )
         )
 
+        observeWorkspacePowerEvents()
         configureAndStartWidgetRuntime()
     }
 
     deinit {
         refreshTask?.cancel()
         immediateActivityRefreshTask?.cancel()
+        workspaceNotificationCenter.removeObserver(self)
     }
 
     func refreshActivityNow() {
-        guard widgetRuntimeIsConfigured else {
+        guard widgetRuntimeIsConfigured, !isSleeping else {
             activityRefreshIsPending = true
             return
         }
@@ -71,24 +77,32 @@ final class MenuBarController: NSObject {
         activityRefreshIsPending = false
         immediateActivityRefreshTask?.cancel()
         let engine = widgetEngine
+        let generation = runtimeGeneration
 
         immediateActivityRefreshTask = Task { @MainActor [weak self] in
-            guard let self else { return }
+            guard let self, isCurrentRuntime(generation) else { return }
 
             let descriptors = await engine.descriptors()
-            guard let activityDescriptor = descriptors.first(where: {
-                $0.id == Self.activityWidgetID
-            }) else {
+            guard isCurrentRuntime(generation),
+                  let activityDescriptor = descriptors.first(where: {
+                      $0.id == Self.activityWidgetID
+                  })
+            else {
                 return
             }
 
             let configuration = await engine.currentConfiguration()
-            guard configuration.isEnabled(activityDescriptor) else {
+            guard isCurrentRuntime(generation),
+                  configuration.isEnabled(activityDescriptor)
+            else {
                 return
             }
 
             _ = await engine.refresh(id: Self.activityWidgetID)
+            guard isCurrentRuntime(generation) else { return }
+
             let snapshots = await engine.orderedVisibleSnapshots()
+            guard isCurrentRuntime(generation) else { return }
             apply(snapshots: snapshots)
         }
     }
@@ -109,36 +123,101 @@ final class MenuBarController: NSObject {
         )
     }
 
-    private func configureAndStartWidgetRuntime() {
+    private func observeWorkspacePowerEvents() {
+        workspaceNotificationCenter.addObserver(
+            self,
+            selector: #selector(workspaceWillSleep(_:)),
+            name: NSWorkspace.willSleepNotification,
+            object: nil
+        )
+        workspaceNotificationCenter.addObserver(
+            self,
+            selector: #selector(workspaceDidWake(_:)),
+            name: NSWorkspace.didWakeNotification,
+            object: nil
+        )
+    }
+
+    @objc
+    private func workspaceWillSleep(_ notification: Notification) {
+        guard !isSleeping else { return }
+
+        isSleeping = true
+        widgetRuntimeIsConfigured = false
+        runtimeGeneration += 1
         refreshTask?.cancel()
+        refreshTask = nil
+        immediateActivityRefreshTask?.cancel()
+        immediateActivityRefreshTask = nil
+    }
+
+    @objc
+    private func workspaceDidWake(_ notification: Notification) {
+        guard isSleeping else { return }
+
+        isSleeping = false
+        configureAndStartWidgetRuntime(
+            loadPreferences: false,
+            forceRefreshOnStart: true
+        )
+    }
+
+    private func configureAndStartWidgetRuntime(
+        loadPreferences: Bool = true,
+        forceRefreshOnStart: Bool = false
+    ) {
+        guard !isSleeping else { return }
+
+        refreshTask?.cancel()
+        runtimeGeneration += 1
+        let generation = runtimeGeneration
         let engine = widgetEngine
         let model = runtimeModel
 
         refreshTask = Task { @MainActor [weak self] in
-            guard let self else { return }
+            guard let self, isCurrentRuntime(generation) else { return }
 
-            await model.loadPreferences()
+            if loadPreferences {
+                await model.loadPreferences()
+                guard isCurrentRuntime(generation) else { return }
+            }
+
             await engine.setConfiguration(model.configuration)
+            guard isCurrentRuntime(generation) else { return }
+
             model.descriptors = await engine.descriptors()
+            guard isCurrentRuntime(generation) else { return }
             widgetRuntimeIsConfigured = true
 
             model.onConfigurationChanged = { [weak self, engine] configuration in
                 Task { @MainActor [weak self] in
+                    guard let self, isCurrentRuntime(generation) else { return }
+
                     await engine.setConfiguration(configuration)
+                    guard isCurrentRuntime(generation) else { return }
+
                     let snapshots = await engine.refreshDue()
-                    self?.apply(snapshots: snapshots)
+                    guard isCurrentRuntime(generation) else { return }
+                    self.apply(snapshots: snapshots)
                 }
             }
 
-            if activityRefreshIsPending {
+            if forceRefreshOnStart {
+                activityRefreshIsPending = false
+                let snapshots = await engine.refreshAll()
+                guard isCurrentRuntime(generation) else { return }
+                apply(snapshots: snapshots)
+            } else if activityRefreshIsPending {
                 refreshActivityNow()
             }
 
-            while !Task.isCancelled {
+            while !Task.isCancelled, isCurrentRuntime(generation) {
                 let snapshots = await engine.refreshDue()
+                guard isCurrentRuntime(generation) else { return }
                 apply(snapshots: snapshots)
 
                 let delay = await engine.secondsUntilNextRefresh(maximum: 30)
+                guard isCurrentRuntime(generation) else { return }
                 let sleepSeconds = max(1, Int64(delay.rounded(.up)))
 
                 do {
@@ -148,6 +227,10 @@ final class MenuBarController: NSObject {
                 }
             }
         }
+    }
+
+    private func isCurrentRuntime(_ generation: Int) -> Bool {
+        !isSleeping && runtimeGeneration == generation
     }
 
     private func apply(snapshots: [WidgetSnapshot]) {
