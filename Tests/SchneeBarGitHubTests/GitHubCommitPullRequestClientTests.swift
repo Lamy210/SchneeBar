@@ -69,6 +69,53 @@ func loadsAssociatedPullRequestsForHostedCommit() async throws {
     )
 }
 
+@Test
+func paginatesAssociatedPullRequestsUntilShortPage() async throws {
+    let firstPage = (1 ... 100)
+        .map { #"{"number":\#($0)}"# }
+        .joined(separator: ",")
+    let transport = CommitPullRequestQueueTransport([
+        CommitPullRequestStubResponse("[\(firstPage)]"),
+        CommitPullRequestStubResponse(#"[{"number":101}]"#),
+    ])
+    let client = GitHubCommitPullRequestClient(transport: transport)
+
+    let numbers = try await client.pullRequestNumbers(
+        for: "landed-pagination",
+        repository: try commitPullRequestRepository(),
+        connection: try commitPullRequestGitHubDotComConnection(),
+        credential: GitHubCredential(accessToken: "ghu_commit")
+    )
+
+    #expect(numbers == Array(1 ... 101))
+
+    let requests = await transport.recordedRequests()
+    #expect(requests.count == 2)
+    guard requests.count == 2 else { return }
+
+    let firstQuery = queryValues(for: requests[0])
+    #expect(firstQuery["per_page"] == "100")
+    #expect(firstQuery["page"] == "1")
+
+    let secondQuery = queryValues(for: requests[1])
+    #expect(secondQuery["per_page"] == "100")
+    #expect(secondQuery["page"] == "2")
+}
+
+private func queryValues(for request: URLRequest) -> [String: String] {
+    guard let url = request.url,
+          let components = URLComponents(url: url, resolvingAgainstBaseURL: false)
+    else {
+        return [:]
+    }
+
+    return Dictionary(
+        uniqueKeysWithValues: (components.queryItems ?? []).compactMap { item in
+            item.value.map { (item.name, $0) }
+        }
+    )
+}
+
 private func commitPullRequestGitHubDotComConnection() throws -> GitHubConnection {
     GitHubConnection(
         displayName: "GitHub.com",
