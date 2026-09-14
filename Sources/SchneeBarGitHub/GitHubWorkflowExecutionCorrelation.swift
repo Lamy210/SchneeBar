@@ -20,6 +20,7 @@ public enum GitHubWorkflowExecutionCorrelationReason: Equatable, Sendable {
     case sameRun
     case sharedPullRequest(Int)
     case sharedHeadCommit(String)
+    case mergedPullRequest(Int, String)
     case noReliableEvidence
 }
 
@@ -50,8 +51,6 @@ public struct GitHubWorkflowExecutionCorrelation: Equatable, Sendable {
 /// Branch names, timestamps and workflow names are intentionally not treated as
 /// correlation evidence. Those attributes are useful for presentation and later
 /// tie-breaking, but using them alone can incorrectly join unrelated pushes.
-/// Post-merge PR -> main correlation for squash/rebase merges requires explicit
-/// PR/commit ancestry evidence and is deliberately left for a higher layer.
 public struct GitHubWorkflowExecutionCorrelator: Sendable {
     public init() {}
 
@@ -90,12 +89,65 @@ public struct GitHubWorkflowExecutionCorrelator: Sendable {
             )
         }
 
+        return unknownCorrelation(
+            repositoryID: repositoryID,
+            left: left,
+            right: right
+        )
+    }
+
+    /// Correlates the final workflow run for a merged pull request with a base-branch run.
+    ///
+    /// `merge_commit_sha` is intentionally not treated as correlation evidence because
+    /// GitHub removed that field from pull-request responses in REST API version
+    /// `2026-03-10`. Exact post-merge correlation instead requires an explicit
+    /// association between the base run's commit and the pull request, plus evidence
+    /// that the pull-request run represents the PR's final head commit.
+    public func correlateMergedPullRequest(
+        repositoryID: Int64,
+        pullRequest: GitHubPullRequestMetadata,
+        pullRequestRun: GitHubWorkflowRun,
+        baseRun: GitHubWorkflowRun,
+        baseCommitPullRequestNumbers: [Int] = []
+    ) -> GitHubWorkflowExecutionCorrelation {
+        let direct = correlate(
+            repositoryID: repositoryID,
+            left: pullRequestRun,
+            right: baseRun
+        )
+        if direct.confidence == .exact {
+            return direct
+        }
+
+        let pullRequestNumber = pullRequest.number
+        let runPullRequestNumbers = Set(pullRequestRun.pullRequestNumbers.filter { $0 > 0 })
+        let associatedPullRequestNumbers = Set(baseCommitPullRequestNumbers.filter { $0 > 0 })
+        let metadataHeadSHA = normalizedSHA(pullRequest.headSHA)
+        let runHeadSHA = normalizedSHA(pullRequestRun.headSHA)
+        let baseRunSHA = normalizedSHA(baseRun.headSHA)
+        let metadataBaseRef = pullRequest.baseRef.trimmingCharacters(in: .whitespacesAndNewlines)
+        let baseRunRef = baseRun.headBranch?.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard pullRequest.isMerged,
+              pullRequest.mergedAt != nil,
+              pullRequestNumber > 0,
+              runPullRequestNumbers.contains(pullRequestNumber),
+              associatedPullRequestNumbers.contains(pullRequestNumber),
+              !metadataHeadSHA.isEmpty,
+              runHeadSHA == metadataHeadSHA,
+              !metadataBaseRef.isEmpty,
+              baseRunRef == metadataBaseRef,
+              !baseRunSHA.isEmpty
+        else {
+            return direct
+        }
+
         return GitHubWorkflowExecutionCorrelation(
             repositoryID: repositoryID,
-            leftRunID: left.id,
-            rightRunID: right.id,
-            confidence: .unknown,
-            reason: .noReliableEvidence
+            leftRunID: pullRequestRun.id,
+            rightRunID: baseRun.id,
+            confidence: .exact,
+            reason: .mergedPullRequest(pullRequestNumber, baseRunSHA)
         )
     }
 
@@ -146,6 +198,20 @@ public struct GitHubWorkflowExecutionCorrelator: Sendable {
 
     private func normalizedSHA(_ value: String) -> String {
         value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    }
+
+    private func unknownCorrelation(
+        repositoryID: Int64,
+        left: GitHubWorkflowRun,
+        right: GitHubWorkflowRun
+    ) -> GitHubWorkflowExecutionCorrelation {
+        GitHubWorkflowExecutionCorrelation(
+            repositoryID: repositoryID,
+            leftRunID: left.id,
+            rightRunID: right.id,
+            confidence: .unknown,
+            reason: .noReliableEvidence
+        )
     }
 
     private func candidateSort(lhs: Candidate, rhs: Candidate) -> Bool {
