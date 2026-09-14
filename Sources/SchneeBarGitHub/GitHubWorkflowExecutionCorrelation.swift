@@ -96,52 +96,23 @@ public struct GitHubWorkflowExecutionCorrelator: Sendable {
         )
     }
 
-    /// Correlates the final workflow run for a merged pull request with a base-branch run.
+    /// Returns only direct workflow evidence for now.
     ///
-    /// GitHub changes `merge_commit_sha` after merge to the commit that actually landed on
-    /// the base branch for merge, squash, and rebase strategies. SchneeBar only promotes
-    /// this to exact evidence when the PR run is also for the PR's final head commit.
-    /// This deliberately excludes stale/superseded PR runs.
+    /// `merge_commit_sha` is intentionally not treated as correlation evidence.
+    /// GitHub removed that field from pull-request responses in REST API version
+    /// `2026-03-10`, so exact post-merge correlation must be supplied by an
+    /// explicit commit-to-pull-request association instead of PR metadata.
     public func correlateMergedPullRequest(
         repositoryID: Int64,
         pullRequest: GitHubPullRequestMetadata,
         pullRequestRun: GitHubWorkflowRun,
         baseRun: GitHubWorkflowRun
     ) -> GitHubWorkflowExecutionCorrelation {
-        let direct = correlate(
+        _ = pullRequest
+        return correlate(
             repositoryID: repositoryID,
             left: pullRequestRun,
             right: baseRun
-        )
-        if direct.confidence == .exact {
-            return direct
-        }
-
-        let pullRequestNumber = pullRequest.number
-        let pullRequestNumbers = Set(pullRequestRun.pullRequestNumbers.filter { $0 > 0 })
-        let metadataHeadSHA = normalizedSHA(pullRequest.headSHA)
-        let runHeadSHA = normalizedSHA(pullRequestRun.headSHA)
-        let mergeCommitSHA = normalizedSHA(pullRequest.mergeCommitSHA ?? "")
-        let baseRunSHA = normalizedSHA(baseRun.headSHA)
-
-        guard pullRequest.isMerged,
-              pullRequest.mergedAt != nil,
-              pullRequestNumber > 0,
-              pullRequestNumbers.contains(pullRequestNumber),
-              !metadataHeadSHA.isEmpty,
-              runHeadSHA == metadataHeadSHA,
-              !mergeCommitSHA.isEmpty,
-              baseRunSHA == mergeCommitSHA
-        else {
-            return direct
-        }
-
-        return GitHubWorkflowExecutionCorrelation(
-            repositoryID: repositoryID,
-            leftRunID: pullRequestRun.id,
-            rightRunID: baseRun.id,
-            confidence: .exact,
-            reason: .mergedPullRequest(pullRequestNumber, mergeCommitSHA)
         )
     }
 
