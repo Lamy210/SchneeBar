@@ -3,7 +3,7 @@ import SchneeBarGitHub
 import Testing
 
 @Test
-func mergedPullRequestCommitProvidesExactCorrelation() throws {
+func deprecatedMergeCommitSHAIsNotCorrelationEvidence() throws {
     let metadata = try mergedCorrelationMetadata(
         number: 25,
         isMerged: true,
@@ -31,8 +31,8 @@ func mergedPullRequestCommitProvidesExactCorrelation() throws {
         baseRun: baseRun
     )
 
-    #expect(result.confidence == .exact)
-    #expect(result.reason == .mergedPullRequest(25, "squash-main"))
+    #expect(result.confidence == .unknown)
+    #expect(result.reason == .noReliableEvidence)
 }
 
 @Test
