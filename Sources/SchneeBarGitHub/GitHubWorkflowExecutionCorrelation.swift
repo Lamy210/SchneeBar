@@ -228,5 +228,4 @@ public struct GitHubWorkflowExecutionCorrelator: Sendable {
 private struct Candidate: Sendable {
     let run: GitHubWorkflowRun
     let confidence: GitHubWorkflowExecutionCorrelationConfidence
-    let reason: GitHubWorkflowExecutionCorrelationReason
 }
