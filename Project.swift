@@ -150,6 +150,7 @@ let project = Project(
                 ]
             ),
             sources: ["Sources/SchneeBarApp/**"],
+            resources: ["Resources/AppIcon.icon"],
             dependencies: [
                 .target(name: "SchneeBarCore"),
                 .target(name: "SchneeBarWidgetFeature"),
@@ -161,7 +162,12 @@ let project = Project(
                 .target(name: "SchneeBarGitHubProfiles"),
                 .target(name: "SchneeBarGitHubFeature"),
                 .target(name: "SchneeBarGitHubActivityProvider"),
-            ]
+            ],
+            settings: .settings(
+                base: [
+                    "ASSETCATALOG_COMPILER_APPICON_NAME": "AppIcon",
+                ]
+            )
         ),
         .target(
             name: "SchneeBarVisualHarness",
