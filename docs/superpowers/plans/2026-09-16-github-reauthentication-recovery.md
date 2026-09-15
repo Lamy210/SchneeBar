@@ -230,7 +230,7 @@ let transport = SessionQueueTransport(results: [
 and assert:
 
 ```swift
-await #expect(throws: URLError(.notConnectedToInternet)) {
+await #expect(throws: URLError.self) {
     try await coordinator.recover(
         connection: connection,
         expectedIdentity: expected,
@@ -793,6 +793,21 @@ Map account mismatch to:
 "GitHub authorized a different account. Sign in as @\(profile.account.login) and try again."
 ```
 
+For recovery failure status handling use normalized session errors rather than changing the row to a generic unavailable state:
+
+```swift
+if let sessionError = error as? GitHubConnectionSessionError {
+    switch sessionError {
+    case .credentialNotFound, .reauthenticationRequired, .accountMismatch:
+        statusByConnectionID[profile.id] = .authenticationRequired
+    case .connectionEndpointMismatch:
+        statusByConnectionID[profile.id] = .unavailable
+    }
+}
+```
+
+For Device Flow cancellation, network/VPN errors, or authorization-waiter failures, leave the pre-recovery row status unchanged and surface the failure only in `recoveryPhase`. A later normal refresh may independently update the row status.
+
 - [ ] **Step 6: Add per-connection generation guards to normal refresh**
 
 Implement:
@@ -908,13 +923,7 @@ Wire:
 
 - [ ] **Step 3: Register exact visual-harness scenes**
 
-In `SchneeBarVisualHarnessApp.swift`, add navigation/preview entries following the file's existing fixture switch style for:
-
-```swift
-GitHubConnectionsFixture.needsAttention
-```
-
-and recovery views in these phases:
+In `SchneeBarVisualHarnessApp.swift`, add entries following the file's existing fixture switch style for `GitHubConnectionsFixture.needsAttention` and recovery views in these phases:
 
 ```swift
 .waitingForAuthorization(GitHubConnectionRecoveryFixture.authorization)
@@ -1017,7 +1026,7 @@ Use title:
 feat: add GitHub connection recovery
 ```
 
-Use this PR structure with actual commit/run identifiers filled from the completed work:
+Use this PR structure with the completed RED/GREEN commit SHAs and workflow run identifiers recorded from execution:
 
 ```markdown
 ## Summary
@@ -1027,10 +1036,10 @@ Use this PR structure with actual commit/run identifiers filled from the complet
 - prevents stale token refresh from overwriting recovered credentials
 
 ## TDD evidence
-- Session RED commit: record the failing-test commit SHA
-- Session GREEN commit: record the passing implementation commit SHA
-- Runtime RED commit: record the failing-test commit SHA
-- Runtime GREEN commit: record the passing implementation commit SHA
+- Session RED commit and failing run
+- Session GREEN commit and passing run
+- Runtime RED commit and failing run
+- Runtime GREEN commit and passing run
 
 ## Verification
 - Tuist generate: pass
