@@ -87,6 +87,67 @@ public actor GitHubConnectionSessionCoordinator {
         }
     }
 
+    public func rebindEstablishedSession(
+        _ session: GitHubConnectionSession,
+        from sourceConnection: GitHubConnection,
+        to targetConnection: GitHubConnection
+    ) async throws -> GitHubConnectionSession {
+        let sourceKey = credentialKey(
+            connection: sourceConnection,
+            identity: session.account.identity
+        )
+        guard sourceKey == session.credentialKey,
+              let credential = try await credentialStore.load(for: sourceKey)
+        else {
+            throw GitHubConnectionSessionError.credentialNotFound
+        }
+
+        let targetKey = credentialKey(
+            connection: targetConnection,
+            identity: session.account.identity
+        )
+        let capabilities = capabilityEvaluator.evaluate(
+            connection: targetConnection,
+            inventory: session.inventory
+        )
+
+        guard targetKey != sourceKey else {
+            return GitHubConnectionSession(
+                connectionID: targetConnection.id,
+                account: session.account,
+                credentialKey: targetKey,
+                inventory: session.inventory,
+                capabilities: capabilities
+            )
+        }
+
+        let previousTargetCredential = try await credentialStore.load(for: targetKey)
+        refreshTasks[sourceKey]?.cancel()
+        refreshTasks[sourceKey] = nil
+        refreshTasks[targetKey]?.cancel()
+        refreshTasks[targetKey] = nil
+
+        try await credentialStore.save(credential, for: targetKey)
+        do {
+            try await credentialStore.delete(for: sourceKey)
+        } catch {
+            if let previousTargetCredential {
+                try? await credentialStore.save(previousTargetCredential, for: targetKey)
+            } else {
+                try? await credentialStore.delete(for: targetKey)
+            }
+            throw error
+        }
+
+        return GitHubConnectionSession(
+            connectionID: targetConnection.id,
+            account: session.account,
+            credentialKey: targetKey,
+            inventory: session.inventory,
+            capabilities: capabilities
+        )
+    }
+
     public func restore(
         connection: GitHubConnection,
         identity: GitHubAccountIdentity,
