@@ -62,10 +62,12 @@ Implemented foundation:
 - Actions polling preflight that blocks only definitive capability unavailability while keeping unknown/missing evidence requestable
 - separate attempted/blocked Activity accounting so capability blocks do not consume the network polling budget
 - Actions access availability surfaced in repository management with per-repository badges and monitoring-scope summaries
+- same-endpoint/same-account reconnect reconciliation that preserves connection identity, repository selection, monitoring state, and original creation time
+- same-endpoint/different-account coexistence with connection-scoped credential isolation
+- deterministic connection ordering for stable multi-account UI and polling behavior
 
 Remaining:
 
-- multi-account lifecycle and switching UX hardening
 - connection recovery / credential-expiry UX
 - broader enterprise connection validation before Phase 5
 - extend capability presentation to review requests, Checks, and deployments as those product surfaces land
@@ -135,7 +137,7 @@ Still required:
 
 ## Current implementation priority
 
-1. Harden the remaining Phase 2 connection UX: multi-account lifecycle, credential recovery, and enterprise validation.
+1. Harden the remaining Phase 2 connection UX: credential recovery / reauthentication and enterprise validation.
 2. Add Phase 3 review requests and Checks, extending capability presentation with those product surfaces.
 3. Integrate existing correlation primitives into the Phase 4 delivery timeline.
 4. Add deployments/environments and recovery states.

@@ -24,6 +24,16 @@ public enum GitHubConnectionsFixture: String, CaseIterable, Hashable, Sendable {
                     isEnabled: true
                 ),
                 GitHubConnectionCardModel(
+                    id: UUID(uuidString: "20000000-0000-0000-0000-000000000004")!,
+                    displayName: "Work GitHub",
+                    host: "github.com",
+                    accountLogin: "lamy-work",
+                    deploymentLabel: "GitHub.com",
+                    repositorySelectionLabel: "6 selected repositories",
+                    status: .connected(repositoryCount: 18),
+                    isEnabled: true
+                ),
+                GitHubConnectionCardModel(
                     id: UUID(uuidString: "20000000-0000-0000-0000-000000000002")!,
                     displayName: "Company Cloud",
                     host: "company.ghe.com",

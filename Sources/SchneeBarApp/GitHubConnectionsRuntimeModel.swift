@@ -70,7 +70,7 @@ final class GitHubConnectionsRuntimeModel {
     }
 
     var connectionCards: [GitHubConnectionCardModel] {
-        profiles.map { profile in
+        GitHubConnectionProfileOrdering.sorted(profiles).map { profile in
             GitHubConnectionCardModel(
                 id: profile.id,
                 displayName: profile.connection.displayName,
@@ -178,7 +178,9 @@ final class GitHubConnectionsRuntimeModel {
 
     func load() async {
         do {
-            profiles = try await profileStore.loadAll()
+            profiles = GitHubConnectionProfileOrdering.sorted(
+                try await profileStore.loadAll()
+            )
         } catch {
             profiles = []
             return
@@ -310,16 +312,15 @@ final class GitHubConnectionsRuntimeModel {
                 )
 
                 let now = Date.now
-                let profile = GitHubConnectionProfile(
-                    connection: connection,
+                let profile = GitHubConnectionProfileReconciler().reconcile(
+                    existingProfiles: profiles,
+                    authenticatedConnection: connection,
                     account: session.account.identity,
                     authenticationMethod: .deviceFlow,
                     clientID: clientID,
-                    repositorySelection: .allAccessible,
-                    isEnabled: true,
-                    createdAt: now,
-                    lastConnectedAt: now
+                    now: now
                 )
+                let previousProfile = profiles.first(where: { $0.id == profile.id })
 
                 do {
                     try Task.checkCancellation()
@@ -332,10 +333,39 @@ final class GitHubConnectionsRuntimeModel {
                     throw error
                 }
 
+                var finalizedSession = session
+                if profile.id != connection.id {
+                    do {
+                        finalizedSession = try await sessionCoordinator.rebindEstablishedSession(
+                            session,
+                            from: connection,
+                            to: profile.connection
+                        )
+                    } catch {
+                        if let previousProfile {
+                            try? await profileStore.save(previousProfile)
+                        }
+                        try? await sessionCoordinator.disconnect(
+                            connection: connection,
+                            identity: session.account.identity
+                        )
+                        throw error
+                    }
+                }
+
+                await activityProvider.reset(connectionID: profile.id)
                 upsert(profile)
-                inventoryByConnectionID[profile.id] = session.inventory
-                capabilitiesByConnectionID[profile.id] = session.capabilities
-                statusByConnectionID[profile.id] = presentationStatus(for: session.inventory)
+                if profile.isEnabled {
+                    inventoryByConnectionID[profile.id] = finalizedSession.inventory
+                    capabilitiesByConnectionID[profile.id] = finalizedSession.capabilities
+                    statusByConnectionID[profile.id] = presentationStatus(
+                        for: finalizedSession.inventory
+                    )
+                } else {
+                    inventoryByConnectionID.removeValue(forKey: profile.id)
+                    capabilitiesByConnectionID.removeValue(forKey: profile.id)
+                    statusByConnectionID[profile.id] = .disabled
+                }
                 onActivitySourceChanged?()
                 onboardingTask = nil
                 onboardingPhase = .configuration
@@ -621,6 +651,7 @@ final class GitHubConnectionsRuntimeModel {
         } else {
             profiles.append(profile)
         }
+        profiles = GitHubConnectionProfileOrdering.sorted(profiles)
     }
 
     private func errorMessage(for error: Error) -> String {
