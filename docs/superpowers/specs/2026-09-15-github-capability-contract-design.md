@@ -26,9 +26,11 @@ The capability contract therefore becomes session-scoped, evidence-based, and re
 - Distinguish definite unavailability from incomplete evidence.
 - Avoid extra REST probes during normal connection refresh.
 - Allow GitHub Activity polling to skip repositories that are definitively unable to provide Actions data.
-- Keep raw bearer credentials and raw installation permission dictionaries out of App/UI state.
+- Make the capability evaluator the only consumer that interprets raw installation permission keys for capability decisions; App/UI presentation must consume normalized assessments instead.
 - Remain conservative for untested GHES versions: uncertainty must not become a false unsupported result.
 - Preserve public-repository fallback opportunities when GitHub documents that an endpoint can work without the fine-grained permission for public resources.
+
+Existing App code may continue to carry `GitHubAccessInventory` for repository management. This design does not attempt to remove the raw `permissions` dictionary from that existing inventory model; it prevents new capability/presentation code from interpreting it outside `SchneeBarGitHub`.
 
 ## Non-goals
 
@@ -38,6 +40,7 @@ The capability contract therefore becomes session-scoped, evidence-based, and re
 - Automatically modifying GitHub App permissions.
 - Implementing review requests, Checks, deployments, environments, workflow writes, merge queue, releases, or security alerts themselves.
 - Treating GitHub's compatibility test range as a hard product-support cutoff.
+- Refactoring the existing repository-management inventory model solely to hide its permission dictionary.
 
 ## Verified GitHub permission constraints
 
@@ -110,32 +113,48 @@ public struct GitHubRepositoryCapabilityAssessment: Equatable, Sendable {
 public enum GitHubCapabilityState: Equatable, Sendable {
     case available
     case unavailable(GitHubCapabilityBlocker)
-    case unknown(GitHubCapabilityUncertainty)
+    case unknown(Set<GitHubCapabilityUncertainty>)
 }
 ```
 
+`unknown` must contain at least one normalized uncertainty. A set is used because multiple independent uncertainties can coexist, for example an untested GHES version and unproven public-repository permission fallback.
+
 `GitHubCapabilityState` is intentionally not persisted. It represents current-session evidence and may change when installation permissions, repository visibility, credentials, or server compatibility change.
 
-### Normalized blockers
+### Normalized repository blocker
 
-Blockers are provider-domain values, not raw GitHub permission strings exposed to UI:
+A repository-level blocker represents evidence that is sufficient to stop a request before network I/O:
 
 ```swift
 public enum GitHubCapabilityBlocker: Equatable, Sendable {
     case missingPermission
-    case installationSuspended
-    case installationForbidden
-    case installationNotFound
-    case installationUnavailable
 }
 ```
 
-Repositories are currently only returned for `.available` installation inventory entries, so installation-level failures cannot always be attributed to a specific repository ID. The connection assessment therefore also carries normalized installation issues separately instead of inventing repository associations.
+Installation failures are modeled separately because repositories are currently only returned for `.available` installation inventory entries. Assigning suspended/forbidden installation failures to repository IDs would invent associations that the inventory does not contain.
+
+### Normalized installation issues
+
+```swift
+public struct GitHubInstallationCapabilityIssue: Equatable, Sendable {
+    public let installationID: Int64
+    public let reason: GitHubInstallationCapabilityIssueReason
+}
+
+public enum GitHubInstallationCapabilityIssueReason: Equatable, Sendable {
+    case suspended
+    case forbidden
+    case notFound
+    case unavailable
+}
+```
+
+These issues are connection-level evidence. They can support future UI diagnostics without pretending that an unavailable installation exposed repository membership.
 
 ### Normalized uncertainty
 
 ```swift
-public enum GitHubCapabilityUncertainty: Equatable, Sendable {
+public enum GitHubCapabilityUncertainty: Hashable, Sendable {
     case publicRepositoryPermissionNotProven
     case untestedEnterpriseVersion
     case unknownEnterpriseVersion
@@ -177,8 +196,8 @@ For the four initial read capabilities (`actions`, `pullRequests`, `checks`, `de
 Reuse `GitHubEnterpriseCompatibilityPolicy`:
 
 - tested GHES version -> platform evidence is supported for the four initial read capabilities
-- older/newer untested GHES version -> platform evidence is unknown
-- missing/unparseable server version -> platform evidence is unknown
+- older/newer untested GHES version -> add `.untestedEnterpriseVersion` uncertainty
+- missing/unparseable server version -> add `.unknownEnterpriseVersion` uncertainty
 
 An untested GHES version must never be converted directly into `unavailable`. If the required permission is present but platform support is uncertain, the effective state remains `unknown` and consumers are allowed to try the request.
 
@@ -198,13 +217,14 @@ The evaluator normalizes values case-insensitively:
 Evaluation rules for the four mapped read capabilities:
 
 1. Platform supported + required read permission present -> `available`.
-2. Platform unknown + required read permission present -> `unknown(platform...)`.
+2. Platform uncertainty + required read permission present -> `unknown` containing the platform uncertainty.
 3. Required permission missing on a private repository -> `unavailable(.missingPermission)`.
-4. Required permission missing on a public repository -> `unknown(.publicRepositoryPermissionNotProven)` because GitHub documents public-resource access without that fine-grained permission for these endpoints.
-5. Unrecognized permission level -> `unknown(.unrecognizedPermissionLevel)`.
-6. Capability without a v1 permission policy -> `unknown(.unmappedCapability)`.
+4. Required permission missing on a public repository -> add `.publicRepositoryPermissionNotProven` uncertainty because GitHub documents public-resource access without that fine-grained permission for these endpoints.
+5. Unrecognized permission level -> add `.unrecognizedPermissionLevel` uncertainty.
+6. Capability without a v1 permission policy -> `unknown([.unmappedCapability])`.
+7. When more than one uncertainty applies, preserve all applicable values in the unknown set.
 
-Definite blockers take precedence over platform uncertainty. For example, a private repository with no required permission remains unavailable even when the GHES version is untested.
+Definite blockers take precedence over uncertainty. For example, a private repository with no required permission remains unavailable even when the GHES version is untested.
 
 ## Duplicate and conflicting inventory evidence
 
@@ -212,7 +232,7 @@ Repository IDs are the identity boundary. The evaluator must not silently pick o
 
 If duplicate repository entries produce identical capability states, they collapse deterministically.
 
-If duplicate entries produce conflicting capability states, the repository capability becomes `unknown(.conflictingEvidence)` for the conflicting capability. This is safer than choosing the most permissive or most restrictive installation without knowing which evidence GitHub will apply to the user access token.
+If duplicate entries produce conflicting capability states, the repository capability becomes `unknown` and includes `.conflictingEvidence` plus any uncertainties already present. This is safer than choosing the most permissive or most restrictive installation without knowing which evidence GitHub will apply to the user access token.
 
 ## Session integration
 
@@ -231,6 +251,8 @@ load account -> load inventory -> evaluate capabilities -> return session
 The evaluator performs no network I/O.
 
 The App runtime caches capability assessments by connection ID alongside `inventoryByConnectionID` and clears both on disable, disconnect, or authentication invalidation. Capability results are not written to the profile store.
+
+The App runtime may still hold `GitHubAccessInventory` because repository-management UI already consumes normalized repository/installation data from it. Capability-aware App/UI code must not inspect `installation.permissions`; it receives `GitHubConnectionCapabilityAssessment` instead.
 
 ## GitHub Activity integration
 
@@ -272,13 +294,13 @@ This keeps "network request attempted" semantically accurate while still surfaci
 - Authentication failures remain session errors and are not capability states.
 - Network failures during inventory refresh remain connection runtime states and do not overwrite the last capability assessment with fabricated values.
 - A successful later refresh recomputes capability assessment from fresh inventory and naturally recovers from permission changes.
-- A capability assessment must never contain tokens, request URLs containing credentials, or private error payloads.
+- A capability assessment must never contain tokens, request URLs containing credentials, raw server error payloads, or raw permission dictionaries.
 
 ## Existing type migration
 
 `GitHubCapability` remains the capability vocabulary.
 
-The existing unused `GitHubCapabilitySet` boolean wrapper is removed or replaced by the richer assessment model. It currently has no repository consumers, so retaining a parallel boolean capability abstraction would create contradictory sources of truth.
+Remove the existing unused `GitHubCapabilitySet` boolean wrapper when introducing the assessment model. It currently has no repository consumers, and retaining a parallel boolean capability abstraction would create contradictory sources of truth.
 
 Source-file placement is an implementation detail; the preferred structure is a focused `GitHubCapabilityAssessment.swift` rather than expanding `GitHubConnection.swift` further.
 
@@ -298,15 +320,16 @@ Implementation must follow TDD. The first failing tests should cover the pure ev
 8. tested GHES + permission -> available
 9. untested/newer GHES + permission -> unknown, never unavailable solely from version
 10. missing GHES version + permission -> unknown
-11. duplicate identical evidence collapses deterministically
-12. duplicate conflicting evidence -> unknown / conflicting evidence
-13. suspended/forbidden/not-found/unavailable installations appear as normalized installation issues without invented repository IDs
+11. multiple simultaneous uncertainties are preserved
+12. duplicate identical evidence collapses deterministically
+13. duplicate conflicting evidence -> unknown / conflicting evidence
+14. suspended/forbidden/not-found/unavailable installations appear as normalized installation issues without invented repository IDs
 
 ### Session coordinator tests
 
 1. `establish` returns the assessment computed from its fresh inventory
 2. `restore` returns a newly computed assessment after inventory changes
-3. credentials are not exposed through capability types
+3. credentials and raw permission dictionaries are not copied into capability assessment types
 
 ### `SchneeBarGitHubActivityProviderTests`
 
@@ -341,11 +364,12 @@ The capability contract is complete when:
 - capability assessment is computed from connection + current inventory without extra network requests
 - private repositories with definitively missing required permissions are marked unavailable
 - public repositories with missing permission evidence remain unknown rather than falsely unavailable
+- multiple simultaneous uncertainty sources are preserved
 - untested/unknown GHES versions do not cause false unsupported results
 - Actions polling skips only definitively unavailable repositories
 - unknown capability states are still allowed to attempt normal read requests
 - activity accounting distinguishes network attempts from capability-blocked repositories
-- raw installation permission dictionaries do not reach App/UI presentation models
+- capability-aware App/UI code consumes normalized assessment rather than interpreting raw installation permission keys
 - capability results are session-scoped and recomputed on successful refresh
 - unit tests cover the evaluator and Activity gating rules
 - CI, Visual Regression, and CodeQL pass on the final implementation head
