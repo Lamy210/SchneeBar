@@ -20,6 +20,7 @@ The recovery feature therefore needs a dedicated transaction that keeps the exis
 - Require the newly authenticated account ID to match the account ID already bound to the connection.
 - Keep different GitHub accounts on the same endpoint isolated.
 - Do not overwrite the stored credential until remote validation succeeds.
+- Prevent an older token-refresh task from overwriting a successfully recovered credential.
 - Recompute repository inventory and capability assessment after recovery.
 - Refresh Developer Activity immediately after successful recovery.
 - Reuse the existing Device Flow transport, authorization waiter, credential store, endpoint model, capability evaluator, and presentation primitives where they already fit.
@@ -69,8 +70,9 @@ GitHubConnectionSessionCoordinator.recover
   2. require expected account ID
   3. fetch repository inventory
   4. evaluate capabilities
-  5. check cancellation
-  6. save credential to expected key
+  5. quiesce older refresh task
+  6. check cancellation
+  7. save credential to expected key
           |
           v
 Runtime persists same profile identity
@@ -82,7 +84,7 @@ Runtime persists same profile identity
        Connected
 ```
 
-The key design rule is validate first, persist second.
+The key design rule is validate first, quiesce competing credential writers, then persist.
 
 ## Why onboarding reuse alone is insufficient
 
@@ -116,16 +118,18 @@ The operation performs these steps in order:
 6. If inventory returns 401, map to `reauthenticationRequired`.
 7. Evaluate `GitHubConnectionCapabilityAssessment` from the validated connection and inventory.
 8. Derive the credential key from the existing connection ID and expected account identity.
-9. Cancel any in-flight refresh task for that credential key.
+9. If a refresh task exists for that key, cancel it and await its completion before continuing. Ignore its terminal error for recovery purposes and clear it from `refreshTasks`.
 10. Call `Task.checkCancellation()` immediately before durable credential mutation.
 11. Persist the new credential exactly once through `GitHubCredentialStore.save`.
 12. Return a `GitHubConnectionSession` containing the existing connection ID, authenticated account, expected credential key, inventory, and capabilities.
 
-No credential-store mutation occurs before steps 1-10 succeed. This provides logical transactionality at the session layer: wrong-account authorization, rejected credentials, repository-inventory failure, network failure, and cancellation observed before the final save leave the previously stored credential untouched.
+No recovery credential-store mutation occurs before steps 1-10 succeed. This provides logical transactionality at the session layer: wrong-account authorization, rejected credentials, repository-inventory failure, network failure, and cancellation observed before the final save leave the recovery credential unpersisted.
 
-The cancellation check is deliberately inside the coordinator, not only in the UI runtime. A sheet dismissal can cancel the parent task after remote validation has completed; the coordinator must observe that cancellation before crossing the durable Keychain boundary.
+Step 9 is required because `authorizedCredential` currently performs refresh-token work in a child task that can itself save a refreshed credential. Cancellation alone is not a sufficient ordering guarantee: a refresh task could already be completing its save. Waiting for that task to terminate before the recovery save ensures the recovery credential is the last credential write from the pre-recovery generation.
 
-The credential store itself remains responsible for the atomicity of its single save operation. This change does not add a second shadow credential record or a two-phase Keychain protocol.
+The cancellation check is deliberately inside the coordinator, not only in the UI runtime. A sheet dismissal can cancel the parent task after remote validation has completed; the coordinator must observe that cancellation before crossing the durable recovery-save boundary.
+
+The credential store itself remains responsible for the atomicity of each individual save operation. This change does not add a second shadow credential record or a two-phase Keychain protocol.
 
 ## Runtime state and orchestration
 
@@ -229,7 +233,7 @@ Network errors during Device Flow or validation do not change the stored credent
 
 ### Cancellation
 
-Cancelling the recovery sheet cancels the recovery task. The coordinator performs a cancellation check immediately before its only durable credential save, so cancellation observed before that boundary leaves Keychain unchanged. Once the validated save has completed, cancellation must not attempt rollback.
+Cancelling the recovery sheet cancels the recovery task. The coordinator first quiesces any pre-existing refresh writer and then performs a cancellation check immediately before its recovery credential save. Cancellation observed before that boundary prevents the recovery credential from being written. Once the validated save has completed, cancellation must not attempt rollback.
 
 ### Missing client ID
 
@@ -282,10 +286,11 @@ The recovery design must preserve these invariants:
 1. **Account binding:** a connection ID remains bound to the same stable GitHub account ID.
 2. **Endpoint binding:** recovery always uses the endpoint already stored on the target profile.
 3. **Credential isolation:** the credential key remains `(connectionID, accountID)`; recovering one account cannot overwrite another account on the same GitHub endpoint.
-4. **No premature credential replacement:** remote identity, inventory, capability evaluation, and a final cancellation check complete before the one credential save.
-5. **No token exposure:** access and refresh tokens never enter a presentation model, log message, visual fixture, or error string.
-6. **No implicit account switching:** wrong-account Device Flow is an error, not a profile-reconciliation opportunity.
-7. **No destructive fallback:** failed recovery does not disconnect or delete the profile.
+4. **Ordered credential writers:** any pre-existing refresh writer for the same key is cancelled and awaited before the recovery save.
+5. **No premature recovery replacement:** remote identity, inventory, capability evaluation, refresh-writer quiescence, and a final cancellation check complete before the recovery credential save.
+6. **No token exposure:** access and refresh tokens never enter a presentation model, log message, visual fixture, or error string.
+7. **No implicit account switching:** wrong-account Device Flow is an error, not a profile-reconciliation opportunity.
+8. **No destructive fallback:** failed recovery does not disconnect or delete the profile.
 
 ## Concurrency and stale-result handling
 
@@ -293,7 +298,9 @@ The recovery transaction is tied to the target profile ID captured at start.
 
 Before applying successful results, the runtime must verify that the target profile still exists and still represents the same connection/account binding. If the profile was disconnected or replaced while recovery was in progress, the result must not update runtime caches or profile state.
 
-Normal refresh and Activity polling may still be in flight when recovery begins. Recovery completion becomes the newest source of truth for that connection. The implementation should prevent a stale refresh result started before recovery from overwriting the post-recovery status/cache. The preferred mechanism is a lightweight per-connection generation/token or equivalent identity check already consistent with the runtime's stale-result handling patterns, rather than serializing all GitHub network work globally.
+Credential-writer ordering is enforced in `GitHubConnectionSessionCoordinator`: recovery cannot save until an older refresh task for the same `(connectionID, accountID)` has terminated. This prevents a stale refresh credential from being persisted after recovery.
+
+Normal `refresh(profileID:)` and Activity polling may still be in flight at the runtime/cache layer when recovery begins. Recovery completion becomes the newest source of truth for that connection. The implementation should prevent a stale refresh result started before recovery from overwriting the post-recovery status/cache. The preferred mechanism is a lightweight per-connection generation/token or equivalent identity check already consistent with the runtime's stale-result handling patterns, rather than serializing all GitHub network work globally.
 
 If current runtime behavior proves that `refresh(profileID:)` can race with recovery cache replacement, the implementation plan must include this guard as part of the recovery change rather than deferring it.
 
@@ -325,11 +332,12 @@ Required cases:
 3. account endpoint 401 throws `reauthenticationRequired` without changing stored credential;
 4. inventory 401 throws `reauthenticationRequired` without changing stored credential;
 5. inventory/network failure leaves stored credential unchanged;
-6. cancellation after remote validation but before save leaves stored credential unchanged;
-7. successful recovery evaluates and returns fresh capabilities;
-8. recovery of account A cannot mutate account B's credential on the same endpoint.
+6. cancellation after remote validation but before recovery save prevents the recovery credential write;
+7. an in-flight refresh task is cancelled and awaited before recovery save, so it cannot late-overwrite the recovered credential;
+8. successful recovery evaluates and returns fresh capabilities;
+9. recovery of account A cannot mutate account B's credential on the same endpoint.
 
-Credential-store test doubles should record save/delete calls so ordering and non-mutation are asserted directly.
+Credential-store test doubles should record save/delete calls and ordering so non-mutation and last-writer guarantees are asserted directly.
 
 ### Runtime tests
 
@@ -368,7 +376,7 @@ Before merge:
 5. normal CI passes on the exact PR head
 6. CodeQL passes once the PR is ready for review under the repository's current draft gating
 
-The PR description should include RED/GREEN evidence for the recovery contract, especially the wrong-account and no-premature-Keychain-write cases.
+The PR description should include RED/GREEN evidence for the recovery contract, especially the wrong-account, ordered-writer, and no-premature-Keychain-write cases.
 
 ## Rollout and compatibility
 
@@ -397,9 +405,9 @@ The change is complete when all of the following are true:
 - Reauthentication uses the existing connection endpoint and stored client ID without allowing endpoint/account editing.
 - Authorizing the expected GitHub account restores the existing connection without changing its UUID or repository selection.
 - Authorizing a different GitHub account is rejected and does not create or modify another connection.
-- Stored credentials are not replaced until account identity and repository inventory validation succeed and cancellation is checked immediately before persistence.
+- The recovery credential is not saved until account identity and repository inventory validation succeed, an older refresh writer has terminated, and cancellation is checked immediately before persistence.
 - A successful recovery refreshes capability assessment and Developer Activity inputs.
 - Failed or cancelled recovery leaves the existing profile intact.
 - Multiple accounts on the same GitHub endpoint remain credential-isolated.
-- Automated tests cover success, wrong-account, validation failure, cancellation, multi-account isolation, and stale-result behavior.
+- Automated tests cover success, wrong-account, validation failure, cancellation, refresh-writer ordering, multi-account isolation, and stale-result behavior.
 - CI, visual regression, and CodeQL pass on the merge candidate.
