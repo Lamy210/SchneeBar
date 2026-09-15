@@ -14,19 +14,61 @@ public enum GitHubRepositorySelectionPresentationMode: String, CaseIterable, Has
     }
 }
 
+public enum GitHubRepositoryActivityAccessPresentation: Equatable, Sendable {
+    case available
+    case unverified
+    case unavailable
+
+    fileprivate var badgeLabel: String? {
+        switch self {
+        case .available:
+            return nil
+        case .unverified:
+            return "Actions access unverified"
+        case .unavailable:
+            return "Actions unavailable"
+        }
+    }
+
+    fileprivate var badgeSystemImage: String {
+        switch self {
+        case .available:
+            return "checkmark.circle"
+        case .unverified:
+            return "questionmark.circle"
+        case .unavailable:
+            return "xmark.circle"
+        }
+    }
+
+    fileprivate var tint: Color {
+        switch self {
+        case .available:
+            return .secondary
+        case .unverified:
+            return .orange
+        case .unavailable:
+            return .red
+        }
+    }
+}
+
 public struct GitHubRepositoryOptionModel: Identifiable, Equatable, Sendable {
     public let id: Int64
     public let fullName: String
     public let isPrivate: Bool
+    public let actionsAccess: GitHubRepositoryActivityAccessPresentation
 
     public init(
         id: Int64,
         fullName: String,
-        isPrivate: Bool
+        isPrivate: Bool,
+        actionsAccess: GitHubRepositoryActivityAccessPresentation
     ) {
         self.id = id
         self.fullName = fullName
         self.isPrivate = isPrivate
+        self.actionsAccess = actionsAccess
     }
 }
 
@@ -200,6 +242,8 @@ public struct GitHubConnectionManagementView: View {
                     }
                 }
 
+                actionsAccessSummary
+
                 if model.repositories.isEmpty {
                     ContentUnavailableView(
                         "Repository inventory unavailable",
@@ -243,6 +287,31 @@ public struct GitHubConnectionManagementView: View {
     }
 
     @ViewBuilder
+    private var actionsAccessSummary: some View {
+        if unavailableActionsRepositoryCount > 0 || unverifiedActionsRepositoryCount > 0 {
+            VStack(alignment: .leading, spacing: 5) {
+                if unavailableActionsRepositoryCount > 0 {
+                    Label(
+                        unavailableActionsSummaryLabel,
+                        systemImage: "xmark.circle.fill"
+                    )
+                    .foregroundStyle(.red)
+                }
+
+                if unverifiedActionsRepositoryCount > 0 {
+                    Label(
+                        unverifiedActionsSummaryLabel,
+                        systemImage: "questionmark.circle.fill"
+                    )
+                    .foregroundStyle(.orange)
+                }
+            }
+            .font(.caption)
+            .padding(.vertical, 2)
+        }
+    }
+
+    @ViewBuilder
     private func repositoryRow(_ repository: GitHubRepositoryOptionModel) -> some View {
         let isSelected = selectionMode == .allAccessible
             || selectedRepositoryIDs.contains(repository.id)
@@ -279,6 +348,20 @@ public struct GitHubConnectionManagementView: View {
                 .truncationMode(.middle)
 
             Spacer(minLength: 12)
+
+            if let badgeLabel = repository.actionsAccess.badgeLabel {
+                Label(badgeLabel, systemImage: repository.actionsAccess.badgeSystemImage)
+                    .font(.caption2)
+                    .foregroundStyle(repository.actionsAccess.tint)
+                    .lineLimit(1)
+                    .fixedSize(horizontal: true, vertical: false)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 3)
+                    .background(
+                        repository.actionsAccess.tint.opacity(0.10),
+                        in: Capsule()
+                    )
+            }
 
             if repository.isPrivate {
                 Text("Private")
@@ -337,6 +420,37 @@ public struct GitHubConnectionManagementView: View {
         return model.repositories.filter {
             $0.fullName.localizedCaseInsensitiveContains(query)
         }
+    }
+
+    private var monitoredRepositories: [GitHubRepositoryOptionModel] {
+        switch selectionMode {
+        case .allAccessible:
+            return model.repositories
+        case .selected:
+            return model.repositories.filter { selectedRepositoryIDs.contains($0.id) }
+        }
+    }
+
+    private var unavailableActionsRepositoryCount: Int {
+        monitoredRepositories.count { $0.actionsAccess == .unavailable }
+    }
+
+    private var unverifiedActionsRepositoryCount: Int {
+        monitoredRepositories.count { $0.actionsAccess == .unverified }
+    }
+
+    private var unavailableActionsSummaryLabel: String {
+        if unavailableActionsRepositoryCount == 1 {
+            return "1 repository cannot provide Actions activity"
+        }
+        return "\(unavailableActionsRepositoryCount) repositories cannot provide Actions activity"
+    }
+
+    private var unverifiedActionsSummaryLabel: String {
+        if unverifiedActionsRepositoryCount == 1 {
+            return "1 repository has unverified Actions access"
+        }
+        return "\(unverifiedActionsRepositoryCount) repositories have unverified Actions access"
     }
 
     private var monitoringExplanation: String {
