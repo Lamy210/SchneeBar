@@ -295,5 +295,21 @@ let project = Project(
                 .target(name: "SchneeBarGitHubProfiles"),
             ]
         ),
+        .target(
+            name: "SchneeBarAppTests",
+            destinations: .macOS,
+            product: .unitTests,
+            bundleId: "dev.lamy.schneebar.app-tests",
+            deploymentTargets: deploymentTarget,
+            sources: ["Tests/SchneeBarAppTests/**"],
+            dependencies: [
+                .target(name: "SchneeBar"),
+                .target(name: "SchneeBarCore"),
+                .target(name: "SchneeBarGitHub"),
+                .target(name: "SchneeBarGitHubProfiles"),
+                .target(name: "SchneeBarGitHubFeature"),
+                .target(name: "SchneeBarGitHubActivityProvider"),
+            ]
+        ),
     ]
 )

@@ -106,6 +106,7 @@ public struct GitHubConnectionsView: View {
     private let connections: [GitHubConnectionCardModel]
     private let onAdd: () -> Void
     private let onRefresh: (UUID) -> Void
+    private let onReauthenticate: (UUID) -> Void
     private let onManage: (UUID) -> Void
     private let onSetEnabled: (UUID, Bool) -> Void
 
@@ -113,12 +114,14 @@ public struct GitHubConnectionsView: View {
         connections: [GitHubConnectionCardModel],
         onAdd: @escaping () -> Void,
         onRefresh: @escaping (UUID) -> Void,
+        onReauthenticate: @escaping (UUID) -> Void,
         onManage: @escaping (UUID) -> Void,
         onSetEnabled: @escaping (UUID, Bool) -> Void
     ) {
         self.connections = connections
         self.onAdd = onAdd
         self.onRefresh = onRefresh
+        self.onReauthenticate = onReauthenticate
         self.onManage = onManage
         self.onSetEnabled = onSetEnabled
     }
@@ -210,11 +213,18 @@ public struct GitHubConnectionsView: View {
 
                 Spacer(minLength: 12)
 
-                Button("Refresh") {
-                    onRefresh(connection.id)
+                if case .authenticationRequired = connection.status {
+                    Button("Re-authenticate") {
+                        onReauthenticate(connection.id)
+                    }
+                    .buttonStyle(.borderless)
+                } else {
+                    Button("Refresh") {
+                        onRefresh(connection.id)
+                    }
+                    .buttonStyle(.borderless)
+                    .disabled(!connection.isEnabled)
                 }
-                .buttonStyle(.borderless)
-                .disabled(!connection.isEnabled)
 
                 Button("Manage") {
                     onManage(connection.id)

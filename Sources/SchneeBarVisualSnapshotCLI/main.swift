@@ -91,6 +91,25 @@ private enum GitHubOnboardingSnapshotScenario: String, CaseIterable {
     }
 }
 
+private enum GitHubRecoverySnapshotScenario: String, CaseIterable {
+    case deviceCode = "device-code"
+    case wrongAccount = "wrong-account"
+    case finalizing
+
+    var phase: GitHubConnectionRecoveryPhase {
+        switch self {
+        case .deviceCode:
+            return .waitingForAuthorization(GitHubConnectionRecoveryFixture.authorization)
+        case .wrongAccount:
+            return .failed(
+                message: "GitHub authorized a different account. Sign in as @snow-user and try again."
+            )
+        case .finalizing:
+            return .finalizing
+        }
+    }
+}
+
 private enum SnapshotError: Error {
     case missingOutputDirectory
     case cannotCreateBitmap
@@ -247,6 +266,7 @@ private func githubConnectionsRoot(
                 connections: fixture.connections,
                 onAdd: {},
                 onRefresh: { _ in },
+                onReauthenticate: { _ in },
                 onManage: { _ in },
                 onSetEnabled: { _, _ in }
             )
@@ -271,6 +291,27 @@ private func githubOnboardingRoot(
             draft: .constant(scenario.draft),
             phase: scenario.phase,
             onConnect: {},
+            onOpenVerificationPage: { _ in },
+            onCancel: {}
+        )
+        .padding(24)
+    }
+    .frame(width: 580)
+    .environment(\.colorScheme, appearance.colorScheme)
+}
+
+@MainActor
+private func githubRecoveryRoot(
+    scenario: GitHubRecoverySnapshotScenario,
+    appearance: SnapshotAppearance
+) -> some View {
+    ZStack {
+        appearance.background
+
+        GitHubConnectionRecoveryView(
+            context: GitHubConnectionRecoveryFixture.context,
+            phase: scenario.phase,
+            onRetry: {},
             onOpenVerificationPage: { _ in },
             onCancel: {}
         )
@@ -380,6 +421,19 @@ private func run() throws {
                 rootView: githubOnboardingRoot(scenario: scenario, appearance: appearance),
                 appearance: appearance,
                 filename: "github-onboarding-\(scenario.rawValue)-\(appearance.rawValue).png",
+                outputDirectory: outputDirectory,
+                width: 580,
+                initialHeight: 720
+            )
+        }
+    }
+
+    for scenario in GitHubRecoverySnapshotScenario.allCases {
+        for appearance in SnapshotAppearance.allCases {
+            try render(
+                rootView: githubRecoveryRoot(scenario: scenario, appearance: appearance),
+                appearance: appearance,
+                filename: "github-recovery-\(scenario.rawValue)-\(appearance.rawValue).png",
                 outputDirectory: outputDirectory,
                 width: 580,
                 initialHeight: 720

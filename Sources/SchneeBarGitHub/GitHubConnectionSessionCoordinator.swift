@@ -88,6 +88,58 @@ public actor GitHubConnectionSessionCoordinator {
         }
     }
 
+    public func recover(
+        connection: GitHubConnection,
+        expectedIdentity: GitHubAccountIdentity,
+        credential: GitHubCredential
+    ) async throws -> GitHubConnectionSession {
+        let account: GitHubAuthenticatedAccount
+        do {
+            account = try await accessClient.authenticatedAccount(
+                connection: connection,
+                credential: credential
+            )
+        } catch GitHubAccessClientError.httpStatus(401) {
+            throw GitHubConnectionSessionError.reauthenticationRequired
+        }
+
+        guard account.identity.id == expectedIdentity.id else {
+            throw GitHubConnectionSessionError.accountMismatch(
+                expectedID: expectedIdentity.id,
+                actualID: account.identity.id
+            )
+        }
+
+        let inventory: GitHubAccessInventory
+        do {
+            inventory = try await accessClient.inventory(
+                connection: connection,
+                credential: credential
+            )
+        } catch GitHubAccessClientError.httpStatus(401) {
+            throw GitHubConnectionSessionError.reauthenticationRequired
+        }
+
+        let capabilities = capabilityEvaluator.evaluate(
+            connection: connection,
+            inventory: inventory
+        )
+        let key = credentialKey(connection: connection, identity: expectedIdentity)
+
+        try Task.checkCancellation()
+        await cancelAndDrainRefreshTask(for: key)
+        try Task.checkCancellation()
+        try await credentialStore.save(credential, for: key)
+
+        return GitHubConnectionSession(
+            connectionID: connection.id,
+            account: account,
+            credentialKey: key,
+            inventory: inventory,
+            capabilities: capabilities
+        )
+    }
+
     public func rebindEstablishedSession(
         _ session: GitHubConnectionSession,
         from sourceConnection: GitHubConnection,
@@ -273,6 +325,14 @@ public actor GitHubConnectionSessionCoordinator {
             refreshTasks[key] = nil
             throw error
         }
+    }
+
+    private func cancelAndDrainRefreshTask(for key: GitHubCredentialKey) async {
+        guard let task = refreshTasks.removeValue(forKey: key) else {
+            return
+        }
+        task.cancel()
+        _ = try? await task.value
     }
 
     private func credentialKey(
