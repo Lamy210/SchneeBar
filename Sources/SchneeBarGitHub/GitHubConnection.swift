@@ -82,15 +82,3 @@ public enum GitHubCapability: String, Codable, CaseIterable, Hashable, Sendable 
     case securityAlerts
     case workflowWrite
 }
-
-public struct GitHubCapabilitySet: Codable, Equatable, Sendable {
-    public var supported: Set<GitHubCapability>
-
-    public init(supported: Set<GitHubCapability> = []) {
-        self.supported = supported
-    }
-
-    public func supports(_ capability: GitHubCapability) -> Bool {
-        supported.contains(capability)
-    }
-}
