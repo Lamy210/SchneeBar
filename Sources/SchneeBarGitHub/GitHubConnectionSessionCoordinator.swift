@@ -5,17 +5,20 @@ public struct GitHubConnectionSession: Equatable, Sendable {
     public let account: GitHubAuthenticatedAccount
     public let credentialKey: GitHubCredentialKey
     public let inventory: GitHubAccessInventory
+    public let capabilities: GitHubConnectionCapabilityAssessment
 
     public init(
         connectionID: UUID,
         account: GitHubAuthenticatedAccount,
         credentialKey: GitHubCredentialKey,
-        inventory: GitHubAccessInventory
+        inventory: GitHubAccessInventory,
+        capabilities: GitHubConnectionCapabilityAssessment
     ) {
         self.connectionID = connectionID
         self.account = account
         self.credentialKey = credentialKey
         self.inventory = inventory
+        self.capabilities = capabilities
     }
 }
 
@@ -29,6 +32,7 @@ public actor GitHubConnectionSessionCoordinator {
     private let credentialStore: any GitHubCredentialStore
     private let accessClient: GitHubAccessClient
     private let deviceFlowClient: GitHubDeviceFlowClient
+    private let capabilityEvaluator: GitHubCapabilityEvaluator
     private let now: @Sendable () -> Date
     private let refreshLeeway: TimeInterval
     private var refreshTasks: [GitHubCredentialKey: Task<GitHubCredential, Error>] = [:]
@@ -37,12 +41,14 @@ public actor GitHubConnectionSessionCoordinator {
         credentialStore: any GitHubCredentialStore,
         accessClient: GitHubAccessClient = GitHubAccessClient(),
         deviceFlowClient: GitHubDeviceFlowClient = GitHubDeviceFlowClient(),
+        capabilityEvaluator: GitHubCapabilityEvaluator = .init(),
         now: @escaping @Sendable () -> Date = { .now },
         refreshLeeway: TimeInterval = 300
     ) {
         self.credentialStore = credentialStore
         self.accessClient = accessClient
         self.deviceFlowClient = deviceFlowClient
+        self.capabilityEvaluator = capabilityEvaluator
         self.now = now
         self.refreshLeeway = max(0, refreshLeeway)
     }
@@ -64,11 +70,16 @@ public actor GitHubConnectionSessionCoordinator {
                 connection: connection,
                 credential: credential
             )
+            let capabilities = capabilityEvaluator.evaluate(
+                connection: connection,
+                inventory: inventory
+            )
             return GitHubConnectionSession(
                 connectionID: connection.id,
                 account: account,
                 credentialKey: key,
-                inventory: inventory
+                inventory: inventory,
+                capabilities: capabilities
             )
         } catch GitHubAccessClientError.httpStatus(401) {
             try? await credentialStore.delete(for: key)
@@ -115,11 +126,16 @@ public actor GitHubConnectionSessionCoordinator {
             throw GitHubConnectionSessionError.reauthenticationRequired
         }
 
+        let capabilities = capabilityEvaluator.evaluate(
+            connection: connection,
+            inventory: inventory
+        )
         return GitHubConnectionSession(
             connectionID: connection.id,
             account: account,
             credentialKey: key,
-            inventory: inventory
+            inventory: inventory,
+            capabilities: capabilities
         )
     }
 

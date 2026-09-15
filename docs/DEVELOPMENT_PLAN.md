@@ -56,10 +56,14 @@ Implemented foundation:
 - GHES endpoint discovery foundation
 - REST API version policy
 - GitHub.com / enterprise-aware request construction boundaries
+- session-scoped, repository-aware capability assessment for Actions, Pull Requests, Checks, and Deployments
+- conservative public-repository and untested/unknown-GHES capability evidence handling
+- fresh capability recomputation from access inventory on session establish/restore, with App-local normalized assessment caching
+- Actions polling preflight that blocks only definitive capability unavailability while keeping unknown/missing evidence requestable
+- separate attempted/blocked Activity accounting so capability blocks do not consume the network polling budget
 
 Remaining:
 
-- capability negotiation as an explicit connection-level contract
 - clearer unsupported-capability states in UI
 - multi-account lifecycle and switching UX hardening
 - connection recovery / credential-expiry UX
@@ -130,7 +134,7 @@ Still required:
 
 ## Current implementation priority
 
-1. Finish the Phase 2 capability contract and connection-state hardening.
+1. Harden the remaining Phase 2 connection UX: unsupported-capability presentation, multi-account lifecycle, and credential recovery.
 2. Add Phase 3 review requests and Checks before building a larger Inbox UI.
 3. Integrate existing correlation primitives into the Phase 4 delivery timeline.
 4. Add deployments/environments and recovery states.

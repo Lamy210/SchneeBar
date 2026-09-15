@@ -39,6 +39,9 @@ final class GitHubConnectionsRuntimeModel {
     private var inventoryByConnectionID: [UUID: GitHubAccessInventory] = [:]
 
     @ObservationIgnored
+    private var capabilitiesByConnectionID: [UUID: GitHubConnectionCapabilityAssessment] = [:]
+
+    @ObservationIgnored
     private var onboardingTask: Task<Void, Never>?
 
     init(
@@ -189,7 +192,7 @@ final class GitHubConnectionsRuntimeModel {
     func loadActivityItems() async throws -> [ActivityItem] {
         var items: [ActivityItem] = []
         var allFailures: [GitHubRepositoryActivityFailure] = []
-        var attemptedRepositoryCount = 0
+        var consideredRepositoryCount = 0
         var successfulRepositoryCount = 0
 
         let enabledProfiles = profiles.filter(\.isEnabled)
@@ -200,7 +203,8 @@ final class GitHubConnectionsRuntimeModel {
 
             let result = await activityProvider.load(
                 profile: profile,
-                inventory: inventory
+                inventory: inventory,
+                capabilities: capabilitiesByConnectionID[profile.id]
             )
 
             guard let currentProfile = profiles.first(where: { $0.id == profile.id }),
@@ -211,7 +215,7 @@ final class GitHubConnectionsRuntimeModel {
                 continue
             }
 
-            attemptedRepositoryCount += result.attemptedRepositoryCount
+            consideredRepositoryCount += result.consideredRepositoryCount
             successfulRepositoryCount += result.successfulRepositoryCount
             allFailures.append(contentsOf: result.failures)
 
@@ -229,7 +233,7 @@ final class GitHubConnectionsRuntimeModel {
             )
         }
 
-        if attemptedRepositoryCount > 0,
+        if consideredRepositoryCount > 0,
            successfulRepositoryCount == 0,
            !allFailures.isEmpty
         {
@@ -323,6 +327,7 @@ final class GitHubConnectionsRuntimeModel {
 
                 upsert(profile)
                 inventoryByConnectionID[profile.id] = session.inventory
+                capabilitiesByConnectionID[profile.id] = session.capabilities
                 statusByConnectionID[profile.id] = presentationStatus(for: session.inventory)
                 onActivitySourceChanged?()
                 onboardingTask = nil
@@ -341,6 +346,7 @@ final class GitHubConnectionsRuntimeModel {
         guard let profile = profiles.first(where: { $0.id == profileID }) else { return }
         guard profile.isEnabled else {
             let hadInventory = inventoryByConnectionID.removeValue(forKey: profileID) != nil
+            capabilitiesByConnectionID.removeValue(forKey: profileID)
             await activityProvider.reset(connectionID: profileID)
             statusByConnectionID[profileID] = .disabled
             if hadInventory {
@@ -357,6 +363,7 @@ final class GitHubConnectionsRuntimeModel {
                 clientID: profile.clientID
             )
             inventoryByConnectionID[profileID] = session.inventory
+            capabilitiesByConnectionID[profileID] = session.capabilities
             statusByConnectionID[profileID] = presentationStatus(for: session.inventory)
 
             var updated = profile
@@ -368,6 +375,7 @@ final class GitHubConnectionsRuntimeModel {
                 GitHubConnectionSessionError.reauthenticationRequired,
                 GitHubConnectionSessionError.accountMismatch(_, _) {
             let hadInventory = inventoryByConnectionID.removeValue(forKey: profileID) != nil
+            capabilitiesByConnectionID.removeValue(forKey: profileID)
             await activityProvider.reset(connectionID: profileID)
             statusByConnectionID[profileID] = .authenticationRequired
             if hadInventory {
@@ -401,6 +409,7 @@ final class GitHubConnectionsRuntimeModel {
             }
         } else {
             let hadInventory = inventoryByConnectionID.removeValue(forKey: profileID) != nil
+            capabilitiesByConnectionID.removeValue(forKey: profileID)
             let activityProvider = activityProvider
             Task {
                 await activityProvider.reset(connectionID: profileID)
@@ -422,6 +431,7 @@ final class GitHubConnectionsRuntimeModel {
             try await profileStore.delete(id: profileID)
             profiles.removeAll(where: { $0.id == profileID })
             inventoryByConnectionID.removeValue(forKey: profileID)
+            capabilitiesByConnectionID.removeValue(forKey: profileID)
             await activityProvider.reset(connectionID: profileID)
             statusByConnectionID.removeValue(forKey: profileID)
             onActivitySourceChanged?()
@@ -451,7 +461,7 @@ final class GitHubConnectionsRuntimeModel {
         profileID: UUID,
         inventory: GitHubAccessInventory
     ) {
-        guard result.attemptedRepositoryCount > 0 else { return }
+        guard result.consideredRepositoryCount > 0 else { return }
 
         if result.successfulRepositoryCount > 0 {
             statusByConnectionID[profileID] = presentationStatus(for: inventory)
@@ -467,7 +477,9 @@ final class GitHubConnectionsRuntimeModel {
         }) {
             statusByConnectionID[profileID] = .unavailable
         } else if result.failures.allSatisfy({
-            $0.reason == .forbidden || $0.reason == .notFound
+            $0.reason == .forbidden
+                || $0.reason == .notFound
+                || $0.reason == .capabilityUnavailable
         }) {
             statusByConnectionID[profileID] = .unavailable
         }
