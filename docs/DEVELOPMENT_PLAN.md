@@ -1,6 +1,8 @@
 # Development Plan
 
-## Phase 0 — Foundation (completed in bootstrap PR)
+## Phase 0 — Foundation ✅
+
+Completed in the bootstrap work:
 
 - Native AppKit `NSStatusItem` shell
 - SwiftUI popover
@@ -11,9 +13,11 @@
 - Swift Testing
 - CodeQL / Dependabot / public-repo security policy
 
-## Phase 1 — Widget Engine (current)
+## Phase 1 — Widget Engine ✅
 
-Implemented in the current branch:
+The widget engine foundation is complete enough to build product features on top of it.
+
+Implemented:
 
 - provider-neutral `WidgetProvider` contract
 - widget descriptors and snapshots
@@ -29,44 +33,90 @@ Implemented in the current branch:
 - Menu Bar rendering from visible widget snapshots
 - shared Widget Feature UI
 - deterministic Widget Visual Regression scenarios
+- widget ordering, enable/disable, and representation preferences
+- persisted widget configuration
+- provider-neutral runtime diagnostics and stale/failed provider health state
+- race-safe provider replacement and overlapping refresh handling
+- macOS sleep/wake lifecycle handling with stale async-work rejection
 
-Remaining before Phase 1 is considered complete:
+Deferred intentionally:
 
-- settings for widget ordering, enable/disable, and representation preference
-- persistence for widget configuration
-- wake/sleep refresh handling
-- runtime diagnostics for provider failures/stale snapshots
-- additional system widgets only after the engine contract proves stable
+- additional system widgets until Developer Activity and the runtime contract have more real-world usage
 
-## Phase 2 — GitHub connection foundation
+## Phase 2 — GitHub connection foundation 🚧
 
-- Keychain credential storage
-- GitHubConnection model
-- Device Flow for local-first GitHub.com auth
-- installation/repository selection
-- endpoint and capability negotiation
-- multi-account support
+Implemented foundation:
 
-## Phase 3 — Developer Activity
+- Keychain-backed credential storage
+- `GitHubConnection` and persistent connection profile models
+- Device Flow for local-first GitHub.com authentication
+- session coordination
+- repository access and monitored-repository selection
+- endpoint resolution without hard-coding `api.github.com`
+- GHES endpoint discovery foundation
+- REST API version policy
+- GitHub.com / enterprise-aware request construction boundaries
 
-- Actions workflow runs/jobs
-- Pull Requests / review requests
-- Checks
-- priority-based Inbox
-- matrix aggregation
-- superseded-run handling
+Remaining:
 
-## Phase 4 — Delivery Timeline
+- capability negotiation as an explicit connection-level contract
+- clearer unsupported-capability states in UI
+- multi-account lifecycle and switching UX hardening
+- connection recovery / credential-expiry UX
+- broader enterprise connection validation before Phase 5
 
-- PR → merge → main correlation
-- Deployments/environments
-- confidence-aware correlation
+## Phase 3 — Developer Activity 🚧
+
+Implemented foundation:
+
+- GitHub Actions workflow runs
+- workflow jobs and normalized job summaries
+- lazy job-detail loading
+- monitored repository management
+- provider destinations for opening GitHub activity
+- Pull Request metadata loading
+- Developer Activity integration into the widget engine
+
+Next:
+
+- review-request activity
+- Checks / check-suite activity
+- priority-based Inbox semantics
+- matrix-job aggregation
+- superseded-run handling in the user-facing model
+- deterministic fixtures for the new activity states before UI expansion
+
+## Phase 4 — Delivery Timeline 🚧
+
+Implemented correlation primitives:
+
+- workflow execution correlation
+- safe run-to-run correlation
+- merged Pull Request correlation
+- current GitHub REST API compatible commit → associated Pull Request evidence
+- conservative rejection of stale, mismatched, or ambiguous evidence
+
+Next:
+
+- surface correlation evidence in the user-facing delivery timeline
+- PR → merge → default-branch execution timeline presentation
+- deployments / environments
+- confidence-aware correlation states
 - recovery notifications
 
 ## Phase 5 — Enterprise
 
+Foundation already available from earlier phases:
+
+- provider-specific endpoint resolution behind adapters
+- GHES discovery primitives
+- REST API version policy
+- connection profiles that do not assume GitHub.com-only hosts
+
+Still required:
+
 - GitHub Enterprise Cloud / SAML / EMU states
-- GHE.com endpoint support
+- GHE.com product UX and validation
 - self-hosted GHES connection wizard
 - GHES capability/API-version negotiation
 - VPN/private-network-aware error states
@@ -77,6 +127,23 @@ Remaining before Phase 1 is considered complete:
 - provider/plugin contracts
 - declarative external widgets
 - additional CI providers after GitHub architecture proves stable
+
+## Current implementation priority
+
+1. Finish the Phase 2 capability contract and connection-state hardening.
+2. Add Phase 3 review requests and Checks before building a larger Inbox UI.
+3. Integrate existing correlation primitives into the Phase 4 delivery timeline.
+4. Add deployments/environments and recovery states.
+5. Only then broaden system widgets or external provider/plugin scope.
+
+## Engineering constraints
+
+- Domain/Application code must remain independent of SwiftUI and AppKit.
+- Provider DTOs must be normalized before they reach generic UI state.
+- Provider-specific behavior stays behind port/adapter boundaries.
+- Prefer Swift Concurrency (`async`/`await`, actors, `AsyncSequence`) over callback/GCD abstractions.
+- UI-visible states should have deterministic fixtures where practical for Visual CI.
+- Secrets, tokens, private enterprise URLs, and private repository data must never be committed.
 
 ## Non-goals for early phases
 
