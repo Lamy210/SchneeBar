@@ -69,7 +69,8 @@ GitHubConnectionSessionCoordinator.recover
   2. require expected account ID
   3. fetch repository inventory
   4. evaluate capabilities
-  5. save credential to expected key
+  5. check cancellation
+  6. save credential to expected key
           |
           v
 Runtime persists same profile identity
@@ -116,10 +117,13 @@ The operation performs these steps in order:
 7. Evaluate `GitHubConnectionCapabilityAssessment` from the validated connection and inventory.
 8. Derive the credential key from the existing connection ID and expected account identity.
 9. Cancel any in-flight refresh task for that credential key.
-10. Persist the new credential exactly once through `GitHubCredentialStore.save`.
-11. Return a `GitHubConnectionSession` containing the existing connection ID, authenticated account, expected credential key, inventory, and capabilities.
+10. Call `Task.checkCancellation()` immediately before durable credential mutation.
+11. Persist the new credential exactly once through `GitHubCredentialStore.save`.
+12. Return a `GitHubConnectionSession` containing the existing connection ID, authenticated account, expected credential key, inventory, and capabilities.
 
-No credential-store mutation occurs before steps 1-7 succeed. This provides logical transactionality at the session layer: wrong-account authorization, rejected credentials, repository-inventory failure, network failure, and cancellation before finalization leave the previously stored credential untouched.
+No credential-store mutation occurs before steps 1-10 succeed. This provides logical transactionality at the session layer: wrong-account authorization, rejected credentials, repository-inventory failure, network failure, and cancellation observed before the final save leave the previously stored credential untouched.
+
+The cancellation check is deliberately inside the coordinator, not only in the UI runtime. A sheet dismissal can cancel the parent task after remote validation has completed; the coordinator must observe that cancellation before crossing the durable Keychain boundary.
 
 The credential store itself remains responsible for the atomicity of its single save operation. This change does not add a second shadow credential record or a two-phase Keychain protocol.
 
@@ -225,7 +229,7 @@ Network errors during Device Flow or validation do not change the stored credent
 
 ### Cancellation
 
-Cancelling the recovery sheet cancels the recovery task. If cancellation occurs before the coordinator's final credential save, no durable state changes. Once recovery has completed the validated save, cancellation must not attempt rollback.
+Cancelling the recovery sheet cancels the recovery task. The coordinator performs a cancellation check immediately before its only durable credential save, so cancellation observed before that boundary leaves Keychain unchanged. Once the validated save has completed, cancellation must not attempt rollback.
 
 ### Missing client ID
 
@@ -278,7 +282,7 @@ The recovery design must preserve these invariants:
 1. **Account binding:** a connection ID remains bound to the same stable GitHub account ID.
 2. **Endpoint binding:** recovery always uses the endpoint already stored on the target profile.
 3. **Credential isolation:** the credential key remains `(connectionID, accountID)`; recovering one account cannot overwrite another account on the same GitHub endpoint.
-4. **No premature credential replacement:** remote identity, inventory, and capability evaluation complete before the one credential save.
+4. **No premature credential replacement:** remote identity, inventory, capability evaluation, and a final cancellation check complete before the one credential save.
 5. **No token exposure:** access and refresh tokens never enter a presentation model, log message, visual fixture, or error string.
 6. **No implicit account switching:** wrong-account Device Flow is an error, not a profile-reconciliation opportunity.
 7. **No destructive fallback:** failed recovery does not disconnect or delete the profile.
@@ -321,8 +325,9 @@ Required cases:
 3. account endpoint 401 throws `reauthenticationRequired` without changing stored credential;
 4. inventory 401 throws `reauthenticationRequired` without changing stored credential;
 5. inventory/network failure leaves stored credential unchanged;
-6. successful recovery evaluates and returns fresh capabilities;
-7. recovery of account A cannot mutate account B's credential on the same endpoint.
+6. cancellation after remote validation but before save leaves stored credential unchanged;
+7. successful recovery evaluates and returns fresh capabilities;
+8. recovery of account A cannot mutate account B's credential on the same endpoint.
 
 Credential-store test doubles should record save/delete calls so ordering and non-mutation are asserted directly.
 
@@ -392,7 +397,7 @@ The change is complete when all of the following are true:
 - Reauthentication uses the existing connection endpoint and stored client ID without allowing endpoint/account editing.
 - Authorizing the expected GitHub account restores the existing connection without changing its UUID or repository selection.
 - Authorizing a different GitHub account is rejected and does not create or modify another connection.
-- Stored credentials are not replaced until account identity and repository inventory validation succeed.
+- Stored credentials are not replaced until account identity and repository inventory validation succeed and cancellation is checked immediately before persistence.
 - A successful recovery refreshes capability assessment and Developer Activity inputs.
 - Failed or cancelled recovery leaves the existing profile intact.
 - Multiple accounts on the same GitHub endpoint remain credential-isolated.
