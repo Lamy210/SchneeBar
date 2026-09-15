@@ -26,6 +26,7 @@ public enum GitHubConnectionSessionError: Error, Equatable, Sendable {
     case credentialNotFound
     case reauthenticationRequired
     case accountMismatch(expectedID: String, actualID: String)
+    case connectionEndpointMismatch
 }
 
 public actor GitHubConnectionSessionCoordinator {
@@ -92,6 +93,13 @@ public actor GitHubConnectionSessionCoordinator {
         from sourceConnection: GitHubConnection,
         to targetConnection: GitHubConnection
     ) async throws -> GitHubConnectionSession {
+        guard try matchingEndpoint(
+            sourceConnection,
+            targetConnection
+        ) else {
+            throw GitHubConnectionSessionError.connectionEndpointMismatch
+        }
+
         let sourceKey = credentialKey(
             connection: sourceConnection,
             identity: session.account.identity
@@ -275,6 +283,26 @@ public actor GitHubConnectionSessionCoordinator {
             connectionID: connection.id,
             accountID: identity.id
         )
+    }
+
+    private func matchingEndpoint(
+        _ lhs: GitHubConnection,
+        _ rhs: GitHubConnection
+    ) throws -> Bool {
+        guard lhs.deploymentKind == rhs.deploymentKind else {
+            return false
+        }
+
+        let lhsEndpoint = try GitHubEndpointResolver.resolve(
+            deploymentKind: lhs.deploymentKind,
+            webBaseURL: lhs.webBaseURL
+        ).webBaseURL
+        let rhsEndpoint = try GitHubEndpointResolver.resolve(
+            deploymentKind: rhs.deploymentKind,
+            webBaseURL: rhs.webBaseURL
+        ).webBaseURL
+
+        return lhsEndpoint == rhsEndpoint
     }
 
     private func shouldRefresh(_ credential: GitHubCredential) -> Bool {
