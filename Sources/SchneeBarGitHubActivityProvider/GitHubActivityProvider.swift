@@ -8,6 +8,7 @@ public enum GitHubRepositoryActivityFailureReason: Equatable, Sendable {
     case notFound
     case networkUnavailable
     case unavailable
+    case capabilityUnavailable
 }
 
 public struct GitHubRepositoryActivityFailure: Equatable, Sendable {
@@ -31,17 +32,24 @@ public struct GitHubActivityLoadResult: Equatable, Sendable {
     public let failures: [GitHubRepositoryActivityFailure]
     public let successfulRepositoryCount: Int
     public let attemptedRepositoryCount: Int
+    public let blockedRepositoryCount: Int
+
+    public var consideredRepositoryCount: Int {
+        attemptedRepositoryCount + blockedRepositoryCount
+    }
 
     public init(
         items: [ActivityItem],
         failures: [GitHubRepositoryActivityFailure],
         successfulRepositoryCount: Int,
-        attemptedRepositoryCount: Int
+        attemptedRepositoryCount: Int,
+        blockedRepositoryCount: Int = 0
     ) {
         self.items = items
         self.failures = failures
         self.successfulRepositoryCount = successfulRepositoryCount
         self.attemptedRepositoryCount = attemptedRepositoryCount
+        self.blockedRepositoryCount = blockedRepositoryCount
     }
 }
 
@@ -87,7 +95,8 @@ public actor GitHubActivityProvider {
 
     public func load(
         profile: GitHubConnectionProfile,
-        inventory: GitHubAccessInventory
+        inventory: GitHubAccessInventory,
+        capabilities: GitHubConnectionCapabilityAssessment? = nil
     ) async -> GitHubActivityLoadResult {
         guard profile.isEnabled else {
             reset(connectionID: profile.id)
@@ -110,17 +119,50 @@ public actor GitHubActivityProvider {
             return result
         }
 
+        let blockedRepositories = repositories.filter { repository in
+            guard let state = capabilities?.state(
+                for: .actions,
+                repositoryID: repository.id
+            ) else {
+                return false
+            }
+            if case .unavailable = state {
+                return true
+            }
+            return false
+        }
+        let blockedRepositoryIDs = Set(blockedRepositories.map(\.id))
+        let eligibleRepositories = repositories.filter {
+            !blockedRepositoryIDs.contains($0.id)
+        }
+        removeCachedState(
+            connectionID: profile.id,
+            repositoryIDs: blockedRepositoryIDs
+        )
+
+        var failures = blockedRepositories.map { repository in
+            GitHubRepositoryActivityFailure(
+                repositoryID: repository.id,
+                repositoryFullName: repository.fullName,
+                reason: .capabilityUnavailable
+            )
+        }
+        failures.sort(by: failureSort)
+
         let repositoriesToPoll = repositoriesForRefresh(
             connectionID: profile.id,
-            repositories: repositories
+            repositories: eligibleRepositories
         )
         guard !repositoriesToPoll.isEmpty else {
-            return cachedResult(
+            let result = cachedResult(
                 connectionID: profile.id,
-                failures: [],
+                failures: failures,
                 successfulRepositoryCount: 0,
-                attemptedRepositoryCount: 0
+                attemptedRepositoryCount: 0,
+                blockedRepositoryCount: blockedRepositories.count
             )
+            lastResultByConnectionID[profile.id] = result
+            return result
         }
 
         let generation = generationByConnectionID[profile.id, default: 0]
@@ -136,7 +178,6 @@ public actor GitHubActivityProvider {
             return lastResultByConnectionID[profile.id] ?? emptyResult()
         }
 
-        var failures: [GitHubRepositoryActivityFailure] = []
         var successfulRepositoryCount = 0
 
         for outcome in outcomes {
@@ -159,7 +200,8 @@ public actor GitHubActivityProvider {
             connectionID: profile.id,
             failures: failures,
             successfulRepositoryCount: successfulRepositoryCount,
-            attemptedRepositoryCount: repositoriesToPoll.count
+            attemptedRepositoryCount: repositoriesToPoll.count,
+            blockedRepositoryCount: blockedRepositories.count
         )
         lastResultByConnectionID[profile.id] = result
         return result
@@ -177,7 +219,8 @@ public actor GitHubActivityProvider {
         connectionID: UUID,
         failures: [GitHubRepositoryActivityFailure],
         successfulRepositoryCount: Int,
-        attemptedRepositoryCount: Int
+        attemptedRepositoryCount: Int,
+        blockedRepositoryCount: Int = 0
     ) -> GitHubActivityLoadResult {
         let activities = cachedActivities
             .filter { $0.key.connectionID == connectionID }
@@ -189,7 +232,8 @@ public actor GitHubActivityProvider {
             items: activities.map(makeActivityItem),
             failures: failures,
             successfulRepositoryCount: successfulRepositoryCount,
-            attemptedRepositoryCount: attemptedRepositoryCount
+            attemptedRepositoryCount: attemptedRepositoryCount,
+            blockedRepositoryCount: blockedRepositoryCount
         )
     }
 
@@ -311,6 +355,19 @@ public actor GitHubActivityProvider {
         }
         cachedActivities = cachedActivities.filter { key, _ in
             key.connectionID != connectionID || validRepositoryIDs.contains(key.repositoryID)
+        }
+    }
+
+    private func removeCachedState(
+        connectionID: UUID,
+        repositoryIDs: Set<Int64>
+    ) {
+        guard !repositoryIDs.isEmpty else { return }
+        pollState = pollState.filter { key, _ in
+            key.connectionID != connectionID || !repositoryIDs.contains(key.repositoryID)
+        }
+        cachedActivities = cachedActivities.filter { key, _ in
+            key.connectionID != connectionID || !repositoryIDs.contains(key.repositoryID)
         }
     }
 
