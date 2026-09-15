@@ -4,7 +4,7 @@
 
 **Goal:** Add a safe, user-facing GitHub `Re-authenticate` flow that repairs an existing connection without changing its account binding, repository selection, monitoring state, or connection identity.
 
-**Architecture:** `SchneeBarGitHub` owns the recovery transaction: validate the fresh Device Flow credential, require the existing account identity, fetch inventory, recompute capabilities, drain any older refresh task, then atomically replace the Keychain credential. `GitHubConnectionsRuntimeModel` owns the UI transaction and stale-result generation, while `SchneeBarGitHubFeature` renders a dedicated non-editable recovery sheet and an explicit `Re-authenticate` action for `.authenticationRequired` connections.
+**Architecture:** `SchneeBarGitHub` owns the recovery transaction: validate a fresh Device Flow credential, require the existing account identity, fetch inventory, recompute capabilities, drain any older refresh task, then replace the Keychain credential. `GitHubConnectionsRuntimeModel` owns the UI transaction and per-connection stale-result generation, while `SchneeBarGitHubFeature` renders a dedicated non-editable recovery sheet and an explicit `Re-authenticate` action for `.authenticationRequired` connections.
 
 **Tech Stack:** Swift 6.3, Swift Testing, Swift Concurrency/actors, SwiftUI, Observation, Tuist 4.203.1, Xcode 26.6, macOS 15+, GitHub Actions CI/Visual Regression/CodeQL.
 
@@ -23,7 +23,7 @@
 - Before recovery saves a credential, any older refresh task for the same credential key must be cancelled and drained so it cannot write an older rotated credential afterward.
 - Failed or cancelled recovery must not disconnect, delete, or silently replace the existing profile.
 - Repository selection, enabled state, connection UUID, creation time, authentication method, endpoint, display configuration, and client ID remain unchanged by successful recovery.
-- Bearer tokens and refresh tokens must not enter UI models, error strings, fixtures, logs, docs, or committed test data that resembles real credentials.
+- Bearer tokens and refresh tokens must not enter UI models, error strings, fixtures, logs, docs, or committed data that resembles real credentials.
 - Do not add generic cross-provider authentication abstractions in this change.
 - SSO/SAML recovery remains out of scope; `.ssoRequired` is unchanged.
 
@@ -32,22 +32,23 @@
 - `Sources/SchneeBarGitHub/GitHubConnectionSessionCoordinator.swift` — recovery transaction, credential replacement ordering, refresh-task draining.
 - `Tests/SchneeBarGitHubTests/GitHubConnectionSessionCoordinatorTests.swift` — provider/session RED/GREEN contract and race tests.
 - `Sources/SchneeBarGitHubFeature/GitHubConnectionRecoveryView.swift` — dedicated recovery presentation and phases.
-- `Sources/SchneeBarGitHubFeature/GitHubConnectionsView.swift` — choose `Re-authenticate` vs `Refresh` from normalized presentation status.
+- `Sources/SchneeBarGitHubFeature/GitHubConnectionsView.swift` — choose `Re-authenticate` or `Refresh` from normalized presentation status.
 - `Sources/SchneeBarApp/GitHubConnectionsRuntimeModel.swift` — recovery orchestration, profile/cache update, auth-operation exclusivity, stale-result generations.
 - `Sources/SchneeBarApp/SettingsView.swift` — recovery sheet wiring.
 - `Project.swift` — add `SchneeBarAppTests` so runtime orchestration is directly testable.
 - `Tests/SchneeBarAppTests/GitHubConnectionsRuntimeModelRecoveryTests.swift` — runtime state, preservation, cancellation, multi-account, and stale-refresh tests.
 - `Sources/SchneeBarPreviewSupport/GitHubConnectionFixtures.swift` — deterministic authentication-required and recovery fixtures.
-- `Sources/SchneeBarVisualHarness/**` and/or `Sources/SchneeBarVisualSnapshotCLI/**` — register recovery visual states using existing harness conventions.
-- `docs/DEVELOPMENT_PLAN.md` — mark Phase 2 credential recovery/reauthentication UX complete after implementation passes verification.
+- `Sources/SchneeBarVisualHarness/SchneeBarVisualHarnessApp.swift` — interactive recovery visual scenes.
+- `Sources/SchneeBarVisualSnapshotCLI/main.swift` — deterministic recovery snapshot registrations.
+- `docs/DEVELOPMENT_PLAN.md` — mark Phase 2 credential recovery/reauthentication UX complete after verification.
 
 ## Execution Prerequisite
 
 Merge the approved design/plan documentation into `main`, then create `feat/github-reauthentication-recovery` from that exact `main`. Production code must not be implemented on the documentation branch.
 
 ```bash
-# Conceptual repository workflow:
-# 1. Open and merge the docs PR from docs/github-reauthentication-recovery-design.
+# Repository workflow:
+# 1. Merge the docs PR from docs/github-reauthentication-recovery-design.
 # 2. Create feat/github-reauthentication-recovery from the resulting main SHA.
 # 3. Execute Tasks 1-5 in order.
 ```
@@ -78,9 +79,77 @@ public func recover(
 private func cancelAndDrainRefreshTask(for key: GitHubCredentialKey) async
 ```
 
-- [ ] **Step 1: Write RED tests for validation-before-persistence and account binding**
+- [ ] **Step 1: Extend test doubles so validation failures and refresh races are controllable**
 
-Extend `GitHubConnectionSessionCoordinatorTests.swift` with deterministic tests that seed an old credential before recovery and assert the old value survives all validation failures.
+Replace the response-only transport queue with a result queue that can return HTTP responses or throw a concrete error:
+
+```swift
+private enum SessionStubResult: Sendable {
+    case response(SessionStubResponse)
+    case failure(URLError)
+}
+
+private actor SessionQueueTransport: GitHubHTTPTransport {
+    private var results: [SessionStubResult]
+    private var requests: [URLRequest] = []
+
+    init(_ responses: [SessionStubResponse]) {
+        self.results = responses.map(SessionStubResult.response)
+    }
+
+    init(results: [SessionStubResult]) {
+        self.results = results
+    }
+
+    func data(for request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+        requests.append(request)
+        guard !results.isEmpty else {
+            throw URLError(.badServerResponse)
+        }
+        switch results.removeFirst() {
+        case let .failure(error):
+            throw error
+        case let .response(response):
+            let httpResponse = try #require(
+                HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: response.statusCode,
+                    httpVersion: "HTTP/1.1",
+                    headerFields: nil
+                )
+            )
+            return (Data(response.json.utf8), httpResponse)
+        }
+    }
+
+    func recordedRequests() -> [URLRequest] {
+        requests
+    }
+}
+```
+
+Add an async gate for the refresh-race test:
+
+```swift
+private actor SessionAsyncGate {
+    private var continuation: CheckedContinuation<Void, Never>?
+
+    func wait() async {
+        await withCheckedContinuation { continuation in
+            self.continuation = continuation
+        }
+    }
+
+    func open() {
+        continuation?.resume()
+        continuation = nil
+    }
+}
+```
+
+- [ ] **Step 2: Write RED tests for validation-before-persistence and account binding**
+
+Add these test cases before adding `recover`:
 
 ```swift
 @Test
@@ -94,8 +163,8 @@ func recoverMatchingAccountValidatesBeforeReplacingCredential() async throws {
     let connection = try sessionConnection()
     let expected = GitHubAccountIdentity(id: "42", login: "octocat")
     let key = GitHubCredentialKey(connectionID: connection.id, accountID: expected.id)
-    let old = GitHubCredential(accessToken: "old-token")
-    let fresh = GitHubCredential(accessToken: "fresh-token")
+    let old = GitHubCredential(accessToken: "test-old-token")
+    let fresh = GitHubCredential(accessToken: "test-fresh-token")
     try await store.save(old, for: key)
     let baselineSaves = await store.saves()
     let coordinator = makeCoordinator(transport: transport, store: store)
@@ -123,7 +192,7 @@ func recoverRejectsDifferentAccountWithoutMutatingCredentialStore() async throws
     let connection = try sessionConnection()
     let expected = GitHubAccountIdentity(id: "42", login: "octocat")
     let key = GitHubCredentialKey(connectionID: connection.id, accountID: expected.id)
-    let old = GitHubCredential(accessToken: "old-token")
+    let old = GitHubCredential(accessToken: "test-old-token")
     try await store.save(old, for: key)
     let baselineSaves = await store.saves()
     let coordinator = makeCoordinator(transport: transport, store: store)
@@ -137,7 +206,7 @@ func recoverRejectsDifferentAccountWithoutMutatingCredentialStore() async throws
         try await coordinator.recover(
             connection: connection,
             expectedIdentity: expected,
-            credential: GitHubCredential(accessToken: "wrong-account-token")
+            credential: GitHubCredential(accessToken: "test-wrong-account-token")
         )
     }
 
@@ -147,30 +216,32 @@ func recoverRejectsDifferentAccountWithoutMutatingCredentialStore() async throws
 }
 ```
 
-Add the remaining RED cases with these exact assertions:
+Add `recoverAccountLookup401LeavesExistingCredentialUntouched`, `recoverInventory401LeavesExistingCredentialUntouched`, `recoverNetworkFailureLeavesExistingCredentialUntouched`, `recoverReturnsFreshCapabilityAssessment`, and `recoveringAccountADoesNotMutateAccountB`. Each test seeds the original credential, captures `baselineSaves`, invokes `recover`, and asserts both the expected error/result and exact credential-store contents afterward.
+
+For the network case use:
 
 ```swift
-// account lookup 401
-await #expect(throws: GitHubConnectionSessionError.reauthenticationRequired) { ... }
-#expect(await store.credential(for: key) == old)
-#expect(await store.saves() == baselineSaves)
-
-// inventory 401 after successful identity lookup
-await #expect(throws: GitHubConnectionSessionError.reauthenticationRequired) { ... }
-#expect(await store.credential(for: key) == old)
-#expect(await store.saves() == baselineSaves)
-
-// transport/network error during inventory
-await #expect(throws: URLError.self) { ... }
-#expect(await store.credential(for: key) == old)
-#expect(await store.saves() == baselineSaves)
-
-// same endpoint, second account B has a different key
-#expect(await store.credential(for: accountAKey) == recoveredA)
-#expect(await store.credential(for: accountBKey) == accountBOld)
+let transport = SessionQueueTransport(results: [
+    .response(SessionStubResponse(userJSON(id: 42, login: "octocat"))),
+    .failure(URLError(.notConnectedToInternet)),
+])
 ```
 
-- [ ] **Step 2: Run the GitHub test suite and verify RED**
+and assert:
+
+```swift
+await #expect(throws: URLError(.notConnectedToInternet)) {
+    try await coordinator.recover(
+        connection: connection,
+        expectedIdentity: expected,
+        credential: GitHubCredential(accessToken: "test-fresh-token")
+    )
+}
+#expect(await store.credential(for: key) == old)
+#expect(await store.saves() == baselineSaves)
+```
+
+- [ ] **Step 3: Run tests and verify RED**
 
 ```bash
 mise exec -- tuist test -- -skipMacroValidation CODE_SIGNING_ALLOWED=NO
@@ -178,9 +249,9 @@ mise exec -- tuist test -- -skipMacroValidation CODE_SIGNING_ALLOWED=NO
 
 Expected: compile/test failure because `GitHubConnectionSessionCoordinator.recover` does not exist.
 
-- [ ] **Step 3: Implement minimal `recover` with validate-first/persist-second ordering**
+- [ ] **Step 4: Implement minimal `recover` with validate-first/persist-second ordering**
 
-Add the public actor method with this order:
+Add this method to the coordinator:
 
 ```swift
 public func recover(
@@ -234,11 +305,7 @@ public func recover(
         capabilities: capabilities
     )
 }
-```
 
-Implement task draining so an older refresh cannot save after recovery:
-
-```swift
 private func cancelAndDrainRefreshTask(for key: GitHubCredentialKey) async {
     guard let task = refreshTasks.removeValue(forKey: key) else {
         return
@@ -248,25 +315,33 @@ private func cancelAndDrainRefreshTask(for key: GitHubCredentialKey) async {
 }
 ```
 
-Do not add rollback deletion. Recovery performs exactly one credential save after validation.
+No credential delete or rollback path is added. Validation failure means no store mutation; successful validation means exactly one final save.
 
-- [ ] **Step 4: Add RED/GREEN coverage for the refresh-task race and cancellation-before-save**
+- [ ] **Step 5: Add RED/GREEN tests for stale refresh and cancellation during drain**
 
-Create a controllable refresh transport/store gate so an existing `restore(...)` starts token refresh and is suspended before its save. Start recovery for the same key, release the old refresh, and assert the final stored credential is the recovery credential.
+Create a controlled transport for the refresh-token POST that waits on `SessionAsyncGate` before returning the rotated credential. The test sequence is fixed:
 
-The test must end with:
+1. Seed an expiring credential for account A.
+2. Start `restore(connection:identity:clientID:)` so `refreshTasks[key]` exists and is waiting on the gate.
+3. Start `recover` for the same key with `recoveryCredential`.
+4. Open the refresh gate.
+5. Await both operations.
+6. Assert the final credential is `recoveryCredential`, proving the old refresh cannot win after recovery.
+
+The final assertion is:
 
 ```swift
 #expect(await store.credential(for: key) == recoveryCredential)
 ```
 
-Add a cancellation test where recovery is cancelled after remote validation is released but before the final store write. Use a credential-store save gate and assert that cancellation prevents the replacement save:
+For cancellation, use the same blocked old-refresh setup. Start recovery, cancel its Task while `cancelAndDrainRefreshTask` is waiting, then open the old-refresh gate. The second `Task.checkCancellation()` must prevent the recovery save. Assert the old refresh result is the last durable value and the recovery credential was never written:
 
 ```swift
-#expect(await store.credential(for: key) == oldCredential)
+#expect(await store.credential(for: key) == refreshedOldCredential)
+#expect(await store.credential(for: key) != recoveryCredential)
 ```
 
-- [ ] **Step 5: Run tests to GREEN and commit**
+- [ ] **Step 6: Run the complete test suite to GREEN and commit**
 
 ```bash
 mise exec -- tuist test -- -skipMacroValidation CODE_SIGNING_ALLOWED=NO
@@ -312,7 +387,7 @@ onReauthenticate: @escaping (UUID) -> Void
 
 - [ ] **Step 1: Add the presentation types and dedicated recovery view**
 
-Create `GitHubConnectionRecoveryView.swift`. The view must not expose editable endpoint/account/client-ID fields. Its initializer is:
+Create `GitHubConnectionRecoveryView.swift`. The view must not expose editable endpoint, account, deployment, display-name, or client-ID fields. Its initializer is:
 
 ```swift
 public init(
@@ -324,7 +399,7 @@ public init(
 )
 ```
 
-The header identifies the immutable target:
+The header is:
 
 ```swift
 Text("Re-authenticate GitHub")
@@ -336,28 +411,33 @@ Text(context.host)
     .foregroundStyle(.secondary)
 ```
 
-State rendering is exact:
+State rendering is:
 
 ```swift
 switch phase {
 case .requestingCode:
-    progress("Requesting a GitHub authorization code…")
+    progress(message: "Requesting a GitHub authorization code…")
 case let .waitingForAuthorization(presentation):
     authorizationCode(presentation)
 case .finalizing:
-    progress("Validating account and repository access…")
+    progress(message: "Validating account and repository access…")
 case let .failed(message):
-    Label(message, systemImage: "exclamationmark.triangle.fill")
-        .foregroundStyle(.red)
-    Button("Try Again", action: onRetry)
+    VStack(alignment: .leading, spacing: 12) {
+        Label(message, systemImage: "exclamationmark.triangle.fill")
+            .font(.caption)
+            .foregroundStyle(.red)
+            .textSelection(.enabled)
+        Button("Try Again", action: onRetry)
+            .buttonStyle(.borderedProminent)
+    }
 }
 ```
 
-The waiting state reuses the same one-time code copy and `Open GitHub Authorization Page` interaction as onboarding. Keep Cancel available throughout; runtime decides whether dismissal is interactive while active.
+The authorization state reuses the one-time code, verification URL, and `Open GitHub Authorization Page` concepts from onboarding. Keep Cancel available in every phase.
 
 - [ ] **Step 2: Change the connection-row action without changing other statuses**
 
-Extend `GitHubConnectionsView` with `onReauthenticate`. In the action row:
+Extend `GitHubConnectionsView` storage and initializer with `onReauthenticate`. In the action row use:
 
 ```swift
 if case .authenticationRequired = connection.status {
@@ -374,13 +454,11 @@ if case .authenticationRequired = connection.status {
 }
 ```
 
-`Manage` remains present in both branches. Do not disable `Re-authenticate` because monitoring is disabled; a disabled connection may still be repaired.
+`Manage` remains present after this conditional. `Re-authenticate` remains enabled even when monitoring is disabled.
 
-- [ ] **Step 3: Add deterministic fixtures**
+- [ ] **Step 3: Add deterministic recovery fixtures**
 
-In `GitHubConnectionsFixture.needsAttention`, retain the existing authentication-required connection and make it the visual proof that `Re-authenticate` appears even when `isEnabled == false`.
-
-Add recovery fixture constants using non-real values:
+Keep the existing `.needsAttention` authentication-required row. Add:
 
 ```swift
 public enum GitHubConnectionRecoveryFixture {
@@ -399,7 +477,7 @@ public enum GitHubConnectionRecoveryFixture {
 }
 ```
 
-- [ ] **Step 4: Build before runtime wiring and commit**
+- [ ] **Step 4: Generate/build before runtime wiring and commit**
 
 ```bash
 mise exec -- tuist generate
@@ -420,31 +498,31 @@ git commit -m "feat: add GitHub reauthentication presentation"
 - Create: `Tests/SchneeBarAppTests/GitHubConnectionsRuntimeModelRecoveryTests.swift`
 
 **Interfaces:**
-- Consumes: `GitHubConnectionSessionCoordinator.recover(...)`, `GitHubDeviceFlowClient.begin(...)`, `GitHubDeviceAuthorizationWaiter.waitForAuthorization(...)`, profile store, Activity provider.
-- Produces runtime state/actions:
+- Consumes: `GitHubConnectionSessionCoordinator.recover(...)`, `GitHubDeviceFlowClient.begin(...)`, `GitHubDeviceAuthorizationWaiter.waitForAuthorization(...)`, `GitHubConnectionProfileStore`, `GitHubActivityProvider`.
+- Produces:
 
 ```swift
 var recoveringConnectionID: UUID?
 var recoveryPhase: GitHubConnectionRecoveryPhase
-var recoveryContext: GitHubConnectionRecoveryContext?
-var recoveryIsActive: Bool
+var recoveryContext: GitHubConnectionRecoveryContext? { get }
+var recoveryIsActive: Bool { get }
 
 func beginRecovery(profileID: UUID)
 func retryRecovery()
 func cancelRecovery()
 ```
 
-- Internal stale-result mechanism:
+- Internal stale-result API:
 
 ```swift
-private var operationGenerationByConnectionID: [UUID: UInt64] = [:]
+private var operationGenerationByConnectionID: [UUID: UInt64]
 private func advanceOperationGeneration(for connectionID: UUID) -> UInt64
 private func isCurrentOperationGeneration(_ generation: UInt64, for connectionID: UUID) -> Bool
 ```
 
 - [ ] **Step 1: Add `SchneeBarAppTests` to Tuist**
 
-Add a unit-test target after the existing test targets:
+Add:
 
 ```swift
 .target(
@@ -465,76 +543,95 @@ Add a unit-test target after the existing test targets:
 )
 ```
 
-Run generation immediately:
+Run:
 
 ```bash
 mise exec -- tuist generate
 ```
 
-Expected: generated project includes `SchneeBarAppTests`.
+Expected: the generated project contains the `SchneeBarAppTests` test bundle and resolves all target dependencies.
 
-- [ ] **Step 2: Write RED runtime tests before adding recovery methods**
+- [ ] **Step 2: Create runtime test doubles and write RED tests**
 
-Create `GitHubConnectionsRuntimeModelRecoveryTests.swift` using `@testable import SchneeBar` and actor-based in-memory doubles. At minimum implement these tests with fixed UUIDs/dates:
+The test file starts with:
+
+```swift
+@testable import SchneeBar
+import Foundation
+import SchneeBarCore
+import SchneeBarGitHub
+import SchneeBarGitHubActivityProvider
+import SchneeBarGitHubFeature
+import Testing
+```
+
+Provide an actor-backed in-memory `GitHubConnectionProfileStore` implementing all protocol requirements and a `GitHubWorkflowRunLoading` stub that returns an empty workflow-run list so the real `GitHubActivityProvider` can be instantiated deterministically.
+
+Write these tests before adding runtime recovery methods:
 
 ```swift
 @Test @MainActor
-func successfulRecoveryPreservesProfileConfiguration() async throws {
-    let fixture = try RuntimeRecoveryFixture.make()
-    let original = fixture.profile
-    fixture.model.profiles = [original]
-    fixture.model.statusByConnectionID[original.id] = .authenticationRequired
-
-    fixture.model.beginRecovery(profileID: original.id)
-    await fixture.completeAuthorizationAsExpectedAccount(login: "renamed-user")
-    await fixture.waitUntilRecoveryFinishes()
-
-    let updated = try #require(
-        fixture.model.profiles.first(where: { $0.id == original.id })
-    )
-    #expect(updated.id == original.id)
-    #expect(updated.account.id == original.account.id)
-    #expect(updated.account.login == "renamed-user")
-    #expect(updated.repositorySelection == original.repositorySelection)
-    #expect(updated.isEnabled == original.isEnabled)
-    #expect(updated.createdAt == original.createdAt)
-    #expect(updated.authenticationMethod == original.authenticationMethod)
-    #expect(updated.clientID == original.clientID)
-}
+func successfulRecoveryPreservesProfileConfiguration() async throws
 
 @Test @MainActor
-func wrongAccountRecoveryDoesNotCreateOrReplaceProfile() async throws {
-    let fixture = try RuntimeRecoveryFixture.make()
-    let original = fixture.profile
-    fixture.model.profiles = [original]
-    fixture.model.statusByConnectionID[original.id] = .authenticationRequired
+func wrongAccountRecoveryDoesNotCreateOrReplaceProfile() async throws
 
-    fixture.model.beginRecovery(profileID: original.id)
-    await fixture.completeAuthorizationAsAccount(id: "99", login: "other-user")
-    await fixture.waitUntilRecoveryFails()
+@Test @MainActor
+func recoveryWorksWhileMonitoringIsDisabled() async throws
 
-    #expect(fixture.model.profiles == [original])
-    #expect(fixture.model.statusByConnectionID[original.id] == .authenticationRequired)
-    #expect(fixture.model.recoveringConnectionID == original.id)
-}
+@Test @MainActor
+func recoveryMissingClientIDFailsWithoutDeletingProfile() async throws
+
+@Test @MainActor
+func cancellingRecoveryLeavesProfileAndStatusUnchanged() async throws
+
+@Test @MainActor
+func recoveringAccountADoesNotChangeAccountBOnSameEndpoint() async throws
+
+@Test @MainActor
+func beginOnboardingCancelsActiveRecovery() async throws
+
+@Test @MainActor
+func beginRecoveryCancelsActiveOnboarding() async throws
+
+@Test @MainActor
+func staleRefreshCannotOverwriteSuccessfulRecovery() async throws
 ```
 
-Also implement exact behavior checks for:
+The successful case must assert:
 
 ```swift
-@Test @MainActor func recoveryWorksWhileMonitoringIsDisabled() async throws
-@Test @MainActor func recoveryMissingClientIDFailsWithoutDeletingProfile() async throws
-@Test @MainActor func cancellingRecoveryLeavesProfileAndStatusUnchanged() async throws
-@Test @MainActor func recoveringAccountADoesNotChangeAccountBOnSameEndpoint() async throws
-@Test @MainActor func beginOnboardingCancelsOrRejectsActiveRecovery() async throws
-@Test @MainActor func beginRecoveryCancelsOrRejectsActiveOnboarding() async throws
-@Test @MainActor func staleRefreshCannotOverwriteSuccessfulRecovery() async throws
+let updated = try #require(
+    fixture.model.profiles.first(where: { $0.id == original.id })
+)
+#expect(updated.id == original.id)
+#expect(updated.account.id == original.account.id)
+#expect(updated.account.login == "renamed-user")
+#expect(updated.repositorySelection == original.repositorySelection)
+#expect(updated.isEnabled == original.isEnabled)
+#expect(updated.createdAt == original.createdAt)
+#expect(updated.authenticationMethod == original.authenticationMethod)
+#expect(updated.clientID == original.clientID)
 ```
 
-For missing client ID, assert the phase is:
+The wrong-account case must assert:
 
 ```swift
-.failed(message: "This saved GitHub connection is missing the client ID required for re-authentication. Add the connection again to repair it.")
+#expect(fixture.model.profiles == [original])
+#expect(fixture.model.statusByConnectionID[original.id] == .authenticationRequired)
+#expect(fixture.model.recoveringConnectionID == original.id)
+```
+
+The missing-client-ID case must assert:
+
+```swift
+#expect(
+    fixture.model.recoveryPhase
+        == .failed(
+            message: "This saved GitHub connection is missing the client ID required for re-authentication. Add the connection again to repair it."
+        )
+)
+#expect(fixture.model.profiles == [original])
 ```
 
 - [ ] **Step 3: Run tests and verify RED**
@@ -543,11 +640,11 @@ For missing client ID, assert the phase is:
 mise exec -- tuist test -- -skipMacroValidation CODE_SIGNING_ALLOWED=NO
 ```
 
-Expected: `SchneeBarAppTests` compiles far enough to report missing recovery state/methods, or fails at those references.
+Expected: tests fail because the runtime recovery state/actions do not exist.
 
-- [ ] **Step 4: Implement recovery state and authentication-operation exclusivity**
+- [ ] **Step 4: Implement recovery state, context, and auth-operation exclusivity**
 
-Add runtime state:
+Add:
 
 ```swift
 var recoveringConnectionID: UUID?
@@ -560,7 +657,7 @@ private var recoveryTask: Task<Void, Never>?
 private var operationGenerationByConnectionID: [UUID: UInt64] = [:]
 ```
 
-Expose context from the currently bound profile:
+Add:
 
 ```swift
 var recoveryContext: GitHubConnectionRecoveryContext? {
@@ -575,15 +672,25 @@ var recoveryContext: GitHubConnectionRecoveryContext? {
         accountLogin: profile.account.login
     )
 }
+
+var recoveryIsActive: Bool {
+    switch recoveryPhase {
+    case .requestingCode, .waitingForAuthorization, .finalizing:
+        return recoveringConnectionID != nil
+    case .failed:
+        return false
+    }
+}
 ```
 
-Use a single invariant for auth transactions: beginning onboarding cancels recovery; beginning recovery cancels onboarding before starting. Do not allow both tasks to remain live.
+Authentication operations are exclusive. `beginOnboarding` must call `cancelRecovery()` before configuring onboarding. `beginRecovery` must call `cancelOnboarding()` before starting recovery.
 
-Implement:
+Add:
 
 ```swift
 func beginRecovery(profileID: UUID) {
     cancelOnboarding()
+    recoveringConnectionID = profileID
     startRecovery(profileID: profileID)
 }
 
@@ -600,13 +707,11 @@ func cancelRecovery() {
 }
 ```
 
-Keep `recoveringConnectionID` bound on `.failed` so Retry has a deterministic target.
+- [ ] **Step 5: Implement Device Flow recovery and profile/cache update**
 
-- [ ] **Step 5: Implement the Device Flow recovery transaction and profile update**
+`startRecovery(profileID:)` snapshots the target profile and trims its stored client ID. Empty client ID immediately produces the exact failure message from Step 2.
 
-`startRecovery(profileID:)` must snapshot the profile binding at start and require non-empty `clientID`.
-
-Use this sequence inside the Task:
+For a valid client ID, use:
 
 ```swift
 let generation = advanceOperationGeneration(for: profile.id)
@@ -637,7 +742,7 @@ let session = try await sessionCoordinator.recover(
 try Task.checkCancellation()
 ```
 
-Before applying success, verify all of:
+Before applying success require:
 
 ```swift
 guard isCurrentOperationGeneration(generation, for: profile.id),
@@ -649,7 +754,7 @@ else {
 }
 ```
 
-Build the updated profile with preserved configuration and refreshed account metadata/connection timestamp:
+Build the updated profile with preserved configuration:
 
 ```swift
 let updated = GitHubConnectionProfile(
@@ -664,7 +769,7 @@ let updated = GitHubConnectionProfile(
 )
 ```
 
-After profile-store save succeeds:
+After `profileStore.save(updated)` succeeds:
 
 ```swift
 await activityProvider.reset(connectionID: updated.id)
@@ -680,23 +785,40 @@ recoveringConnectionID = nil
 recoveryPhase = .requestingCode
 ```
 
-If profile persistence fails after the credential was saved, keep the credential, keep the durable old profile, set immediate status `.unavailable`, and show a failed recovery phase. Do not call `disconnect`.
+If profile persistence fails after the credential was saved, keep the credential, leave the durable old profile untouched, set `.unavailable`, and keep the recovery sheet in `.failed`. Do not call `disconnect`.
 
-Wrong-account errors must map to a user-facing message that mentions the expected login, not numeric IDs:
+Map account mismatch to:
 
 ```swift
 "GitHub authorized a different account. Sign in as @\(profile.account.login) and try again."
 ```
 
-- [ ] **Step 6: Guard normal refresh results with the same per-connection generation**
+- [ ] **Step 6: Add per-connection generation guards to normal refresh**
 
-At the beginning of `refresh(profileID:)`, capture:
+Implement:
+
+```swift
+private func advanceOperationGeneration(for connectionID: UUID) -> UInt64 {
+    let next = (operationGenerationByConnectionID[connectionID] ?? 0) &+ 1
+    operationGenerationByConnectionID[connectionID] = next
+    return next
+}
+
+private func isCurrentOperationGeneration(
+    _ generation: UInt64,
+    for connectionID: UUID
+) -> Bool {
+    operationGenerationByConnectionID[connectionID] == generation
+}
+```
+
+At the beginning of `refresh(profileID:)`, after resolving the target profile, capture:
 
 ```swift
 let generation = advanceOperationGeneration(for: profileID)
 ```
 
-Before every cache/status/profile application from that refresh, require:
+Before applying a successful refresh session, before writing an authentication/network/unavailable failure status, and before persisting refreshed profile metadata, require:
 
 ```swift
 guard isCurrentOperationGeneration(generation, for: profileID) else {
@@ -704,7 +826,7 @@ guard isCurrentOperationGeneration(generation, for: profileID) else {
 }
 ```
 
-Starting recovery advances the same generation, making all older refresh results stale. Do not globally serialize unrelated connections.
+Starting recovery advances the same generation, so a refresh started earlier cannot overwrite recovery results. Connections with different UUIDs remain independent.
 
 - [ ] **Step 7: Run all tests to GREEN and commit**
 
@@ -724,37 +846,43 @@ git commit -m "feat: orchestrate GitHub connection recovery"
 **Files:**
 - Modify: `Sources/SchneeBarApp/SettingsView.swift`
 - Modify: `Sources/SchneeBarPreviewSupport/GitHubConnectionFixtures.swift`
-- Modify the existing GitHub visual-harness registration file under `Sources/SchneeBarVisualHarness/` discovered by searching for `GitHubConnectionsFixture`.
-- Modify the existing snapshot registration under `Sources/SchneeBarVisualSnapshotCLI/` if the harness and CLI use separate registration tables.
+- Modify: `Sources/SchneeBarVisualHarness/SchneeBarVisualHarnessApp.swift`
+- Modify: `Sources/SchneeBarVisualSnapshotCLI/main.swift`
 
 **Interfaces:**
-- Consumes: `beginRecovery(profileID:)`, `retryRecovery()`, `cancelRecovery()`, `recoveryContext`, `recoveryPhase`, `GitHubConnectionRecoveryView`.
+- Consumes: `beginRecovery(profileID:)`, `retryRecovery()`, `cancelRecovery()`, `recoveryContext`, `recoveryPhase`, `recoveryIsActive`, `GitHubConnectionRecoveryView`.
 - Produces no new domain interfaces.
 
-- [ ] **Step 1: Wire the row action and recovery sheet**
+- [ ] **Step 1: Wire the connection-row recovery action**
 
-Pass the new callback:
+Change the existing `GitHubConnectionsView` call to include:
 
 ```swift
-GitHubConnectionsView(
-    connections: githubModel.connectionCards,
-    onAdd: { githubModel.beginOnboarding(defaultClientID: bundledGitHubClientID) },
-    onRefresh: { id in
-        Task { @MainActor in
-            await githubModel.refresh(profileID: id)
-        }
-    },
-    onReauthenticate: { id in
-        githubModel.beginRecovery(profileID: id)
-    },
-    onManage: presentManagement,
-    onSetEnabled: { id, isEnabled in
-        githubModel.setEnabled(isEnabled, profileID: id)
-    }
-)
+onReauthenticate: { id in
+    githubModel.beginRecovery(profileID: id)
+},
 ```
 
-Add a recovery sheet using a `Binding<Bool>` derived from `recoveringConnectionID != nil`. Render unavailable context as `ContentUnavailableView` rather than fabricating account/host data.
+Keep the existing refresh callback unchanged for non-authentication states.
+
+- [ ] **Step 2: Add a recovery sheet binding and sheet**
+
+Add:
+
+```swift
+private var recoveryIsPresented: Binding<Bool> {
+    Binding(
+        get: { githubModel.recoveringConnectionID != nil },
+        set: { isPresented in
+            if !isPresented {
+                githubModel.cancelRecovery()
+            }
+        }
+    )
+}
+```
+
+Wire:
 
 ```swift
 .sheet(isPresented: recoveryIsPresented) {
@@ -773,59 +901,65 @@ Add a recovery sheet using a `Binding<Bool>` derived from `recoveringConnectionI
             systemImage: "exclamationmark.triangle",
             description: Text("Close this sheet and refresh the GitHub connection list.")
         )
+        .frame(minWidth: 520, minHeight: 320)
     }
 }
 ```
 
-- [ ] **Step 2: Register visual states**
+- [ ] **Step 3: Register exact visual-harness scenes**
 
-Add deterministic scenes for:
+In `SchneeBarVisualHarnessApp.swift`, add navigation/preview entries following the file's existing fixture switch style for:
 
 ```swift
 GitHubConnectionsFixture.needsAttention
-GitHubConnectionRecoveryView(
-    context: GitHubConnectionRecoveryFixture.context,
-    phase: .waitingForAuthorization(GitHubConnectionRecoveryFixture.authorization),
-    onRetry: {},
-    onOpenVerificationPage: { _ in },
-    onCancel: {}
-)
-GitHubConnectionRecoveryView(
-    context: GitHubConnectionRecoveryFixture.context,
-    phase: .failed(
-        message: "GitHub authorized a different account. Sign in as @snow-user and try again."
-    ),
-    onRetry: {},
-    onOpenVerificationPage: { _ in },
-    onCancel: {}
-)
 ```
 
-If the visual harness snapshots progress states already, also register `.finalizing`; otherwise the two recovery scenes above plus the connection-card scene are sufficient.
+and recovery views in these phases:
 
-- [ ] **Step 3: Generate current snapshots and inspect diff locally**
+```swift
+.waitingForAuthorization(GitHubConnectionRecoveryFixture.authorization)
+.failed(
+    message: "GitHub authorized a different account. Sign in as @snow-user and try again."
+)
+.finalizing
+```
+
+All callbacks are inert closures in the harness.
+
+- [ ] **Step 4: Register exact snapshot CLI scenes**
+
+In `Sources/SchneeBarVisualSnapshotCLI/main.swift`, add deterministic snapshot names:
+
+```text
+github-connections-needs-attention
+github-recovery-device-code
+github-recovery-wrong-account
+github-recovery-finalizing
+```
+
+Render each with the same fixed size/appearance convention already used by the current GitHub connection snapshots. Use only `GitHubConnectionRecoveryFixture` values.
+
+- [ ] **Step 5: Generate snapshots, build, test, and commit**
 
 ```bash
 mise exec -- tuist run SchneeBarVisualSnapshotCLI -- --output .visual/current
-```
-
-Expected visual behavior:
-- authentication-required row says `Re-authenticate`, not `Refresh`;
-- action is present even when monitoring is disabled;
-- recovery sheet shows immutable connection/account context;
-- no token/client secret/private host is rendered;
-- wrong-account message identifies only expected login.
-
-- [ ] **Step 4: Build/test and commit**
-
-```bash
 mise exec -- tuist build -- -skipMacroValidation CODE_SIGNING_ALLOWED=NO
 mise exec -- tuist test -- -skipMacroValidation CODE_SIGNING_ALLOWED=NO
 git add Sources/SchneeBarApp/SettingsView.swift \
   Sources/SchneeBarPreviewSupport/GitHubConnectionFixtures.swift \
-  Sources/SchneeBarVisualHarness \
-  Sources/SchneeBarVisualSnapshotCLI
+  Sources/SchneeBarVisualHarness/SchneeBarVisualHarnessApp.swift \
+  Sources/SchneeBarVisualSnapshotCLI/main.swift
 git commit -m "feat: wire GitHub reauthentication recovery UI"
+```
+
+Inspect the generated images and confirm:
+
+```text
+- authentication-required row shows Re-authenticate rather than Refresh
+- Re-authenticate remains available when monitoring is disabled
+- recovery sheet shows immutable connection/account context
+- no token, client secret, or private host appears
+- wrong-account error names only the expected login
 ```
 
 ---
@@ -834,28 +968,26 @@ git commit -m "feat: wire GitHub reauthentication recovery UI"
 
 **Files:**
 - Modify: `docs/DEVELOPMENT_PLAN.md`
-- No production changes unless verification exposes a defect; any defect fix must get its own RED test before the fix.
 
 **Interfaces:**
 - No new interfaces.
 
-- [ ] **Step 1: Update Phase 2 status**
+- [ ] **Step 1: Update Phase 2 development-plan status**
 
-Move credential recovery/reauthentication from remaining Phase 2 work into implemented work. Keep broader enterprise validation as remaining. The Phase 2 remaining list becomes conceptually:
-
-```markdown
-Remaining:
-- broader GitHub Enterprise validation before Phase 5
-- capability presentation for review requests, Checks, and deployments as those surfaces land
-```
-
-Add implemented bullets for:
+Move credential recovery/reauthentication into implemented work with these bullets:
 
 ```markdown
 - dedicated existing-connection Device Flow reauthentication
 - same-account binding enforcement during recovery
 - validate-before-Keychain replacement semantics
-- refresh/recovery race protection
+- stale refresh / recovery race protection
+```
+
+Leave these as remaining Phase 2 work:
+
+```markdown
+- broader GitHub Enterprise validation before Phase 5
+- capability presentation for review requests, Checks, and deployments as those surfaces land
 ```
 
 - [ ] **Step 2: Run the complete local verification gate**
@@ -868,7 +1000,7 @@ mise exec -- tuist test -- -skipMacroValidation CODE_SIGNING_ALLOWED=NO
 mise exec -- tuist run SchneeBarVisualSnapshotCLI -- --output .visual/current
 ```
 
-Do not report success from partial commands. Record the final test count/output and exact commit SHA for the PR description.
+Record the final test result and exact commit SHA. Do not report success from a partial gate.
 
 - [ ] **Step 3: Commit documentation**
 
@@ -877,58 +1009,56 @@ git add docs/DEVELOPMENT_PLAN.md
 git commit -m "docs: complete GitHub recovery milestone"
 ```
 
-- [ ] **Step 4: Open a draft PR with RED/GREEN evidence**
+- [ ] **Step 4: Open a draft PR with explicit TDD evidence**
 
-Use a title matching the repository's recent style:
+Use title:
 
 ```text
 feat: add GitHub connection recovery
 ```
 
-The PR body must explicitly record:
+Use this PR structure with actual commit/run identifiers filled from the completed work:
 
 ```markdown
 ## Summary
 - adds dedicated reauthentication for existing GitHub connections
 - preserves account/connection/repository-selection identity
-- validates account + inventory before replacing Keychain credential
+- validates account and inventory before replacing the Keychain credential
 - prevents stale token refresh from overwriting recovered credentials
 
 ## TDD evidence
-- RED: session recovery tests fail before `recover(...)`
-- GREEN: matching-account, wrong-account, 401, network, cancellation, multi-account, and refresh-race tests pass
-- RED: runtime recovery tests fail before orchestration state/actions exist
-- GREEN: profile preservation, cancellation, disabled-monitoring recovery, auth exclusivity, and stale-refresh tests pass
+- Session RED commit: record the failing-test commit SHA
+- Session GREEN commit: record the passing implementation commit SHA
+- Runtime RED commit: record the failing-test commit SHA
+- Runtime GREEN commit: record the passing implementation commit SHA
 
 ## Verification
-- `mise exec -- tuist generate`
-- `mise exec -- tuist build -- -skipMacroValidation CODE_SIGNING_ALLOWED=NO`
-- `mise exec -- tuist test -- -skipMacroValidation CODE_SIGNING_ALLOWED=NO`
-- deterministic visual snapshots generated and reviewed
+- Tuist generate: pass
+- Tuist build: pass
+- Tuist test: pass
+- Visual snapshots: generated and reviewed
 ```
 
-Create it as Draft first so CodeQL remains deferred under the current repository workflow.
+Create the PR as Draft so CodeQL remains deferred under the repository's current draft gating.
 
 - [ ] **Step 5: Verify GitHub Actions on the exact head, then mark Ready**
 
-Before marking Ready, require normal CI and Visual Regression to pass for the exact current PR head. If either fails, fix with a regression test and repeat local verification.
+Require normal CI and Visual Regression to pass on the exact current PR head. If a failure occurs, add a regression test before the corresponding fix, rerun the local gate, and push the new head.
 
-After CI/Visual are green, mark the PR Ready for review so CodeQL runs. Require CodeQL to pass on that same logical final head before merge.
+After CI and Visual Regression are green, mark the PR Ready for review so CodeQL runs. Require CodeQL to pass before merge.
 
 - [ ] **Step 6: Final review checklist**
 
-Confirm all of these are true before merge:
-
 ```text
-[ ] No recovery path can create a second profile when the wrong account is authorized.
-[ ] No failed validation mutates the existing Keychain credential.
-[ ] No older refresh task can overwrite the recovered credential.
-[ ] Cancellation before final save is non-destructive.
+[ ] Wrong-account authorization cannot create or replace a profile.
+[ ] Failed remote validation cannot mutate the existing Keychain credential.
+[ ] An older refresh task cannot overwrite the recovered credential.
+[ ] Cancellation while recovery is draining an older refresh prevents the recovery save.
 [ ] Disabled monitoring does not prevent explicit reauthentication.
-[ ] Profile UUID, selection, enabled state, creation time, endpoint, and client ID survive recovery.
+[ ] Profile UUID, repository selection, enabled state, creation time, endpoint, and client ID survive recovery.
 [ ] Two accounts on github.com remain credential-isolated.
 [ ] Recovery UI contains no editable endpoint/account/client-ID fields.
-[ ] CI passes on exact PR head.
-[ ] Visual Regression passes on exact PR head.
-[ ] CodeQL passes after Ready-for-review transition.
+[ ] CI passes on the exact PR head.
+[ ] Visual Regression passes on the exact PR head.
+[ ] CodeQL passes after the Ready-for-review transition.
 ```
