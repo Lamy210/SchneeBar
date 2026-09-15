@@ -93,6 +93,10 @@ final class GitHubConnectionsRuntimeModel {
         let repositories = inventoryByConnectionID[profileID]
             .map(accessibleRepositories)
             ?? []
+        let actionsAccess = GitHubActionsAccessSummary.evaluate(
+            repositoryIDs: Set(repositories.map(\.id)),
+            assessment: capabilitiesByConnectionID[profileID]
+        )
 
         return GitHubConnectionManagementModel(
             id: profile.id,
@@ -103,7 +107,10 @@ final class GitHubConnectionsRuntimeModel {
                 GitHubRepositoryOptionModel(
                     id: $0.id,
                     fullName: $0.fullName,
-                    isPrivate: $0.isPrivate
+                    isPrivate: $0.isPrivate,
+                    actionsAccess: actionsAccessPresentation(
+                        actionsAccess.accessByRepositoryID[$0.id]
+                    )
                 )
             }
         )
@@ -454,6 +461,19 @@ final class GitHubConnectionsRuntimeModel {
                 }
                 return lhs.id < rhs.id
             }
+    }
+
+    private func actionsAccessPresentation(
+        _ access: GitHubActionsAccess?
+    ) -> GitHubRepositoryActivityAccessPresentation {
+        switch access {
+        case .available:
+            return .available
+        case .unavailable:
+            return .unavailable
+        case .unverified, nil:
+            return .unverified
+        }
     }
 
     private func applyActivityStatus(
