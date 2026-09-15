@@ -42,6 +42,9 @@ struct SettingsView: View {
                         await githubModel.refresh(profileID: id)
                     }
                 },
+                onReauthenticate: { id in
+                    githubModel.beginRecovery(profileID: id)
+                },
                 onManage: presentManagement,
                 onSetEnabled: { id, isEnabled in
                     githubModel.setEnabled(isEnabled, profileID: id)
@@ -73,6 +76,31 @@ struct SettingsView: View {
                 }
             )
             .interactiveDismissDisabled(githubModel.onboardingIsActive)
+        }
+        .sheet(isPresented: recoveryIsPresented) {
+            if let context = githubModel.recoveryContext {
+                GitHubConnectionRecoveryView(
+                    context: context,
+                    phase: githubModel.recoveryPhase,
+                    onRetry: {
+                        githubModel.retryRecovery()
+                    },
+                    onOpenVerificationPage: { url in
+                        openURL(url)
+                    },
+                    onCancel: {
+                        githubModel.cancelRecovery()
+                    }
+                )
+                .interactiveDismissDisabled(githubModel.recoveryIsActive)
+            } else {
+                ContentUnavailableView(
+                    "Connection unavailable",
+                    systemImage: "exclamationmark.triangle",
+                    description: Text("Close this sheet and refresh the GitHub connection list.")
+                )
+                .frame(minWidth: 520, minHeight: 320)
+            }
         }
         .sheet(isPresented: managementIsPresented) {
             if let id = managingConnectionID,
@@ -116,6 +144,17 @@ struct SettingsView: View {
                 .frame(minWidth: 520, minHeight: 320)
             }
         }
+    }
+
+    private var recoveryIsPresented: Binding<Bool> {
+        Binding(
+            get: { githubModel.recoveringConnectionID != nil },
+            set: { isPresented in
+                if !isPresented {
+                    githubModel.cancelRecovery()
+                }
+            }
+        )
     }
 
     private var managementIsPresented: Binding<Bool> {

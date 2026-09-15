@@ -13,6 +13,8 @@ final class GitHubConnectionsRuntimeModel {
     var isPresentingOnboarding = false
     var onboardingDraft = GitHubConnectionDraft()
     var onboardingPhase: GitHubConnectionOnboardingPhase = .configuration
+    var recoveringConnectionID: UUID?
+    var recoveryPhase: GitHubConnectionRecoveryPhase = .requestingCode
 
     @ObservationIgnored
     var onActivitySourceChanged: (@MainActor @Sendable () -> Void)?
@@ -44,6 +46,12 @@ final class GitHubConnectionsRuntimeModel {
     @ObservationIgnored
     private var onboardingTask: Task<Void, Never>?
 
+    @ObservationIgnored
+    private var recoveryTask: Task<Void, Never>?
+
+    @ObservationIgnored
+    private var operationGenerationByConnectionID: [UUID: UInt64] = [:]
+
     init(
         profileStore: any GitHubConnectionProfileStore,
         sessionCoordinator: GitHubConnectionSessionCoordinator,
@@ -65,6 +73,30 @@ final class GitHubConnectionsRuntimeModel {
         case .requestingCode, .waitingForAuthorization, .finalizing:
             return true
         case .configuration, .failed:
+            return false
+        }
+    }
+
+    var recoveryContext: GitHubConnectionRecoveryContext? {
+        guard let id = recoveringConnectionID,
+              let profile = profiles.first(where: { $0.id == id })
+        else {
+            return nil
+        }
+
+        return GitHubConnectionRecoveryContext(
+            connectionID: profile.id,
+            displayName: profile.connection.displayName,
+            host: displayHost(for: profile.connection),
+            accountLogin: profile.account.login
+        )
+    }
+
+    var recoveryIsActive: Bool {
+        switch recoveryPhase {
+        case .requestingCode, .waitingForAuthorization, .finalizing:
+            return recoveringConnectionID != nil
+        case .failed:
             return false
         }
     }
@@ -262,6 +294,7 @@ final class GitHubConnectionsRuntimeModel {
     }
 
     func beginOnboarding(defaultClientID: String? = nil) {
+        cancelRecovery()
         onboardingTask?.cancel()
         onboardingDraft = GitHubConnectionDraft(clientID: defaultClientID ?? "")
         onboardingPhase = .configuration
@@ -379,12 +412,39 @@ final class GitHubConnectionsRuntimeModel {
         }
     }
 
+    func beginRecovery(profileID: UUID) {
+        guard profiles.contains(where: { $0.id == profileID }) else { return }
+        cancelOnboarding()
+        recoveringConnectionID = profileID
+        startRecovery(profileID: profileID)
+    }
+
+    func retryRecovery() {
+        guard let profileID = recoveringConnectionID else { return }
+        startRecovery(profileID: profileID)
+    }
+
+    func cancelRecovery() {
+        if let profileID = recoveringConnectionID {
+            _ = advanceOperationGeneration(for: profileID)
+        }
+        recoveryTask?.cancel()
+        recoveryTask = nil
+        recoveringConnectionID = nil
+        recoveryPhase = .requestingCode
+    }
+
     func refresh(profileID: UUID) async {
+        guard !(recoveringConnectionID == profileID && recoveryIsActive) else { return }
         guard let profile = profiles.first(where: { $0.id == profileID }) else { return }
+        let generation = advanceOperationGeneration(for: profileID)
+
         guard profile.isEnabled else {
+            guard isCurrentOperationGeneration(generation, for: profileID) else { return }
             let hadInventory = inventoryByConnectionID.removeValue(forKey: profileID) != nil
             capabilitiesByConnectionID.removeValue(forKey: profileID)
             await activityProvider.reset(connectionID: profileID)
+            guard isCurrentOperationGeneration(generation, for: profileID) else { return }
             statusByConnectionID[profileID] = .disabled
             if hadInventory {
                 onActivitySourceChanged?()
@@ -399,21 +459,29 @@ final class GitHubConnectionsRuntimeModel {
                 identity: profile.account,
                 clientID: profile.clientID
             )
-            inventoryByConnectionID[profileID] = session.inventory
-            capabilitiesByConnectionID[profileID] = session.capabilities
-            statusByConnectionID[profileID] = presentationStatus(for: session.inventory)
+            guard isCurrentOperationGeneration(generation, for: profileID) else { return }
 
             var updated = profile
             updated.lastConnectedAt = .now
             try await profileStore.save(updated)
+            guard isCurrentOperationGeneration(generation, for: profileID) else {
+                await repairProfileStoreAfterStaleWrite(profileID: profileID)
+                return
+            }
+
+            inventoryByConnectionID[profileID] = session.inventory
+            capabilitiesByConnectionID[profileID] = session.capabilities
+            statusByConnectionID[profileID] = presentationStatus(for: session.inventory)
             upsert(updated)
             onActivitySourceChanged?()
         } catch GitHubConnectionSessionError.credentialNotFound,
                 GitHubConnectionSessionError.reauthenticationRequired,
                 GitHubConnectionSessionError.accountMismatch(_, _) {
+            guard isCurrentOperationGeneration(generation, for: profileID) else { return }
             let hadInventory = inventoryByConnectionID.removeValue(forKey: profileID) != nil
             capabilitiesByConnectionID.removeValue(forKey: profileID)
             await activityProvider.reset(connectionID: profileID)
+            guard isCurrentOperationGeneration(generation, for: profileID) else { return }
             statusByConnectionID[profileID] = .authenticationRequired
             if hadInventory {
                 onActivitySourceChanged?()
@@ -424,14 +492,17 @@ final class GitHubConnectionsRuntimeModel {
             || error.code == .dnsLookupFailed
             || error.code == .timedOut
         {
+            guard isCurrentOperationGeneration(generation, for: profileID) else { return }
             statusByConnectionID[profileID] = .networkUnavailable
         } catch {
+            guard isCurrentOperationGeneration(generation, for: profileID) else { return }
             statusByConnectionID[profileID] = .unavailable
         }
     }
 
     func setEnabled(_ isEnabled: Bool, profileID: UUID) {
         guard var profile = profiles.first(where: { $0.id == profileID }) else { return }
+        _ = advanceOperationGeneration(for: profileID)
         profile.isEnabled = isEnabled
         upsert(profile)
 
@@ -460,6 +531,11 @@ final class GitHubConnectionsRuntimeModel {
 
     func disconnect(profileID: UUID) async {
         guard let profile = profiles.first(where: { $0.id == profileID }) else { return }
+        _ = advanceOperationGeneration(for: profileID)
+        if recoveringConnectionID == profileID {
+            cancelRecovery()
+        }
+
         do {
             try await sessionCoordinator.disconnect(
                 connection: profile.connection,
@@ -475,6 +551,175 @@ final class GitHubConnectionsRuntimeModel {
         } catch {
             statusByConnectionID[profileID] = .unavailable
         }
+    }
+
+    private func startRecovery(profileID: UUID) {
+        recoveryTask?.cancel()
+        guard let profile = profiles.first(where: { $0.id == profileID }) else {
+            recoveringConnectionID = nil
+            recoveryPhase = .requestingCode
+            recoveryTask = nil
+            return
+        }
+
+        let clientID = profile.clientID?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !clientID.isEmpty else {
+            recoveryTask = nil
+            recoveryPhase = .failed(
+                message: "This saved GitHub connection is missing the client ID required for re-authentication. Add the connection again to repair it."
+            )
+            return
+        }
+
+        let generation = advanceOperationGeneration(for: profile.id)
+        recoveryPhase = .requestingCode
+
+        recoveryTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                let authorization = try await deviceFlowClient.begin(
+                    connection: profile.connection,
+                    clientID: clientID
+                )
+                try Task.checkCancellation()
+                guard isCurrentOperationGeneration(generation, for: profile.id) else { return }
+
+                recoveryPhase = .waitingForAuthorization(
+                    GitHubDeviceAuthorizationPresentation(
+                        userCode: authorization.userCode,
+                        verificationURI: authorization.verificationURI,
+                        expiresAt: authorization.expiresAt
+                    )
+                )
+
+                let credential = try await authorizationWaiter.waitForAuthorization(
+                    connection: profile.connection,
+                    clientID: clientID,
+                    session: authorization
+                )
+                try Task.checkCancellation()
+                guard isCurrentOperationGeneration(generation, for: profile.id) else { return }
+
+                recoveryPhase = .finalizing
+                let session = try await sessionCoordinator.recover(
+                    connection: profile.connection,
+                    expectedIdentity: profile.account,
+                    credential: credential
+                )
+                try Task.checkCancellation()
+
+                guard isCurrentOperationGeneration(generation, for: profile.id),
+                      let current = profiles.first(where: { $0.id == profile.id }),
+                      current.account.id == profile.account.id,
+                      current.connection.id == profile.connection.id
+                else {
+                    return
+                }
+
+                let updated = GitHubConnectionProfile(
+                    connection: current.connection,
+                    account: session.account.identity,
+                    authenticationMethod: current.authenticationMethod,
+                    clientID: current.clientID,
+                    repositorySelection: current.repositorySelection,
+                    isEnabled: current.isEnabled,
+                    createdAt: current.createdAt,
+                    lastConnectedAt: .now
+                )
+
+                do {
+                    try await profileStore.save(updated)
+                } catch {
+                    guard isCurrentOperationGeneration(generation, for: profile.id) else { return }
+                    statusByConnectionID[profile.id] = .unavailable
+                    recoveryTask = nil
+                    recoveryPhase = .failed(message: recoveryErrorMessage(for: error, profile: profile))
+                    return
+                }
+
+                guard isCurrentOperationGeneration(generation, for: profile.id),
+                      let currentAfterSave = profiles.first(where: { $0.id == profile.id }),
+                      currentAfterSave.account.id == profile.account.id
+                else {
+                    await repairProfileStoreAfterStaleWrite(profileID: profile.id)
+                    return
+                }
+
+                await activityProvider.reset(connectionID: updated.id)
+                guard isCurrentOperationGeneration(generation, for: profile.id) else {
+                    await repairProfileStoreAfterStaleWrite(profileID: profile.id)
+                    return
+                }
+
+                upsert(updated)
+                inventoryByConnectionID[updated.id] = session.inventory
+                capabilitiesByConnectionID[updated.id] = session.capabilities
+                statusByConnectionID[updated.id] = updated.isEnabled
+                    ? presentationStatus(for: session.inventory)
+                    : .disabled
+                onActivitySourceChanged?()
+                recoveryTask = nil
+                recoveringConnectionID = nil
+                recoveryPhase = .requestingCode
+            } catch is CancellationError {
+                if isCurrentOperationGeneration(generation, for: profile.id) {
+                    recoveryTask = nil
+                }
+            } catch {
+                guard isCurrentOperationGeneration(generation, for: profile.id) else { return }
+                applyRecoveryFailureStatus(error, profileID: profile.id)
+                recoveryTask = nil
+                recoveryPhase = .failed(
+                    message: recoveryErrorMessage(for: error, profile: profile)
+                )
+            }
+        }
+    }
+
+    private func advanceOperationGeneration(for connectionID: UUID) -> UInt64 {
+        let next = (operationGenerationByConnectionID[connectionID] ?? 0) &+ 1
+        operationGenerationByConnectionID[connectionID] = next
+        return next
+    }
+
+    private func isCurrentOperationGeneration(
+        _ generation: UInt64,
+        for connectionID: UUID
+    ) -> Bool {
+        operationGenerationByConnectionID[connectionID] == generation
+    }
+
+    private func repairProfileStoreAfterStaleWrite(profileID: UUID) async {
+        if let current = profiles.first(where: { $0.id == profileID }) {
+            try? await profileStore.save(current)
+        } else {
+            try? await profileStore.delete(id: profileID)
+        }
+    }
+
+    private func applyRecoveryFailureStatus(_ error: Error, profileID: UUID) {
+        guard let sessionError = error as? GitHubConnectionSessionError else { return }
+
+        switch sessionError {
+        case .credentialNotFound, .reauthenticationRequired, .accountMismatch:
+            statusByConnectionID[profileID] = .authenticationRequired
+        case .connectionEndpointMismatch:
+            statusByConnectionID[profileID] = .unavailable
+        }
+    }
+
+    private func recoveryErrorMessage(
+        for error: Error,
+        profile: GitHubConnectionProfile
+    ) -> String {
+        if case GitHubConnectionSessionError.accountMismatch = error {
+            return "GitHub authorized a different account. Sign in as @\(profile.account.login) and try again."
+        }
+        if case GitHubConnectionSessionError.reauthenticationRequired = error {
+            return "GitHub rejected the new credential. Request a new authorization code and try again."
+        }
+        return errorMessage(for: error)
     }
 
     private func accessibleRepositories(

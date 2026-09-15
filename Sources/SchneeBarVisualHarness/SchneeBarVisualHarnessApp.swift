@@ -14,10 +14,30 @@ struct SchneeBarVisualHarnessApp: App {
     }
 }
 
+private enum GitHubRecoveryHarnessScenario: String, CaseIterable, Hashable {
+    case deviceCode
+    case wrongAccount
+    case finalizing
+
+    var phase: GitHubConnectionRecoveryPhase {
+        switch self {
+        case .deviceCode:
+            return .waitingForAuthorization(GitHubConnectionRecoveryFixture.authorization)
+        case .wrongAccount:
+            return .failed(
+                message: "GitHub authorized a different account. Sign in as @snow-user and try again."
+            )
+        case .finalizing:
+            return .finalizing
+        }
+    }
+}
+
 private struct VisualHarnessView: View {
     @State private var activityScenario: ActivityFixtureScenario = .mainFailure
     @State private var widgetScenario: WidgetFixtureScenario = .critical
     @State private var githubScenario: GitHubConnectionsFixture = .multiConnection
+    @State private var recoveryScenario: GitHubRecoveryHarnessScenario = .deviceCode
     @State private var managementMode: GitHubRepositorySelectionPresentationMode = .selected
     @State private var managementSelectedIDs = GitHubConnectionManagementFixture.selectedRepositoryIDs
     @State private var appearance: ColorScheme = .dark
@@ -39,6 +59,12 @@ private struct VisualHarnessView: View {
 
                 Picker("GitHub", selection: $githubScenario) {
                     ForEach(GitHubConnectionsFixture.allCases, id: \.rawValue) { scenario in
+                        Text(scenario.rawValue).tag(scenario)
+                    }
+                }
+
+                Picker("Recovery", selection: $recoveryScenario) {
+                    ForEach(GitHubRecoveryHarnessScenario.allCases, id: \.rawValue) { scenario in
                         Text(scenario.rawValue).tag(scenario)
                     }
                 }
@@ -71,12 +97,22 @@ private struct VisualHarnessView: View {
                             connections: githubScenario.connections,
                             onAdd: {},
                             onRefresh: { _ in },
+                            onReauthenticate: { _ in },
                             onManage: { _ in },
                             onSetEnabled: { _, _ in }
                         )
                     }
                     .formStyle(.grouped)
                     .frame(width: 660)
+
+                    GitHubConnectionRecoveryView(
+                        context: GitHubConnectionRecoveryFixture.context,
+                        phase: recoveryScenario.phase,
+                        onRetry: {},
+                        onOpenVerificationPage: { _ in },
+                        onCancel: {}
+                    )
+                    .frame(width: 580)
 
                     GitHubConnectionManagementView(
                         model: GitHubConnectionManagementFixture.model,
