@@ -192,7 +192,7 @@ final class GitHubConnectionsRuntimeModel {
     func loadActivityItems() async throws -> [ActivityItem] {
         var items: [ActivityItem] = []
         var allFailures: [GitHubRepositoryActivityFailure] = []
-        var attemptedRepositoryCount = 0
+        var consideredRepositoryCount = 0
         var successfulRepositoryCount = 0
 
         let enabledProfiles = profiles.filter(\.isEnabled)
@@ -203,7 +203,8 @@ final class GitHubConnectionsRuntimeModel {
 
             let result = await activityProvider.load(
                 profile: profile,
-                inventory: inventory
+                inventory: inventory,
+                capabilities: capabilitiesByConnectionID[profile.id]
             )
 
             guard let currentProfile = profiles.first(where: { $0.id == profile.id }),
@@ -214,7 +215,7 @@ final class GitHubConnectionsRuntimeModel {
                 continue
             }
 
-            attemptedRepositoryCount += result.attemptedRepositoryCount
+            consideredRepositoryCount += result.consideredRepositoryCount
             successfulRepositoryCount += result.successfulRepositoryCount
             allFailures.append(contentsOf: result.failures)
 
@@ -232,7 +233,7 @@ final class GitHubConnectionsRuntimeModel {
             )
         }
 
-        if attemptedRepositoryCount > 0,
+        if consideredRepositoryCount > 0,
            successfulRepositoryCount == 0,
            !allFailures.isEmpty
         {
@@ -460,7 +461,7 @@ final class GitHubConnectionsRuntimeModel {
         profileID: UUID,
         inventory: GitHubAccessInventory
     ) {
-        guard result.attemptedRepositoryCount > 0 else { return }
+        guard result.consideredRepositoryCount > 0 else { return }
 
         if result.successfulRepositoryCount > 0 {
             statusByConnectionID[profileID] = presentationStatus(for: inventory)
@@ -476,7 +477,9 @@ final class GitHubConnectionsRuntimeModel {
         }) {
             statusByConnectionID[profileID] = .unavailable
         } else if result.failures.allSatisfy({
-            $0.reason == .forbidden || $0.reason == .notFound
+            $0.reason == .forbidden
+                || $0.reason == .notFound
+                || $0.reason == .capabilityUnavailable
         }) {
             statusByConnectionID[profileID] = .unavailable
         }
