@@ -99,68 +99,38 @@ public enum GitHubConnectionManagementFixture {
         host: "github.internal.example:8443",
         accountLogin: "lamy",
         repositories: [
-            GitHubRepositoryOptionModel(
-                id: 101,
-                fullName: "SchneeOrg/api-gateway",
-                isPrivate: true,
-                actionsAccess: .unavailable
-            ),
-            GitHubRepositoryOptionModel(
-                id: 102,
-                fullName: "SchneeOrg/authentication-platform",
-                isPrivate: true,
-                actionsAccess: .available
-            ),
-            GitHubRepositoryOptionModel(
-                id: 103,
-                fullName: "SchneeOrg/design-system",
-                isPrivate: false,
-                actionsAccess: .unavailable
-            ),
-            GitHubRepositoryOptionModel(
-                id: 104,
-                fullName: "SchneeOrg/mobile-app",
-                isPrivate: true,
-                actionsAccess: .available
-            ),
-            GitHubRepositoryOptionModel(
-                id: 105,
-                fullName: "SchneeOrg/notification-hub",
-                isPrivate: true,
-                actionsAccess: .unverified
-            ),
-            GitHubRepositoryOptionModel(
-                id: 106,
-                fullName: "SchneeOrg/realtime",
-                isPrivate: true,
-                actionsAccess: .unverified
-            ),
-            GitHubRepositoryOptionModel(
-                id: 107,
-                fullName: "SchneeOrg/schneemail",
-                isPrivate: true,
-                actionsAccess: .available
-            ),
-            GitHubRepositoryOptionModel(
-                id: 108,
-                fullName: "SchneeOrg/software-distribution",
-                isPrivate: false,
-                actionsAccess: .available
-            ),
-            GitHubRepositoryOptionModel(
-                id: 109,
-                fullName: "SchneeOrg/web-console",
-                isPrivate: true,
-                actionsAccess: .available
-            ),
-            GitHubRepositoryOptionModel(
-                id: 110,
-                fullName: "SchneeOrg/worker-runtime",
-                isPrivate: true,
-                actionsAccess: .available
-            ),
+            repository(101, "SchneeOrg/api-gateway", isPrivate: true, actions: .unavailable, reviews: .available, checks: .unverified),
+            repository(102, "SchneeOrg/authentication-platform", isPrivate: true, actions: .available, reviews: .available, checks: .available),
+            repository(103, "SchneeOrg/design-system", isPrivate: false, actions: .unavailable, reviews: .unverified, checks: .unavailable),
+            repository(104, "SchneeOrg/mobile-app", isPrivate: true, actions: .available, reviews: .available, checks: .available),
+            repository(105, "SchneeOrg/notification-hub", isPrivate: true, actions: .unverified, reviews: .unavailable, checks: .available),
+            repository(106, "SchneeOrg/realtime", isPrivate: true, actions: .unverified, reviews: .available, checks: .unverified),
+            repository(107, "SchneeOrg/schneemail", isPrivate: true, actions: .available, reviews: .available, checks: .available),
+            repository(108, "SchneeOrg/software-distribution", isPrivate: false, actions: .available, reviews: .unverified, checks: .available),
+            repository(109, "SchneeOrg/web-console", isPrivate: true, actions: .available, reviews: .available, checks: .unavailable),
+            repository(110, "SchneeOrg/worker-runtime", isPrivate: true, actions: .available, reviews: .available, checks: .available),
         ]
     )
 
     public static let selectedRepositoryIDs: Set<Int64> = [101, 102, 105, 107, 108]
+
+    private static func repository(
+        _ id: Int64,
+        _ fullName: String,
+        isPrivate: Bool,
+        actions: GitHubRepositoryActivityAccessPresentation,
+        reviews: GitHubRepositoryActivityAccessPresentation,
+        checks: GitHubRepositoryActivityAccessPresentation
+    ) -> GitHubRepositoryOptionModel {
+        GitHubRepositoryOptionModel(
+            id: id,
+            fullName: fullName,
+            isPrivate: isPrivate,
+            activityAccess: GitHubRepositoryActivityAccessModel(
+                actions: actions,
+                reviewRequests: reviews,
+                checks: checks
+            )
+        )
+    }
 }
