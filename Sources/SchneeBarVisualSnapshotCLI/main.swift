@@ -322,16 +322,18 @@ private func githubRecoveryRoot(
 }
 
 @MainActor
-private func githubManagementRoot(appearance: SnapshotAppearance) -> some View {
+private func githubManagementRoot(
+    model: GitHubConnectionManagementModel,
+    selectedRepositoryIDs: Set<Int64>,
+    appearance: SnapshotAppearance
+) -> some View {
     ZStack {
         appearance.background
 
         GitHubConnectionManagementView(
-            model: GitHubConnectionManagementFixture.model,
+            model: model,
             selectionMode: .constant(.selected),
-            selectedRepositoryIDs: .constant(
-                GitHubConnectionManagementFixture.selectedRepositoryIDs
-            ),
+            selectedRepositoryIDs: .constant(selectedRepositoryIDs),
             onRefresh: {},
             onSave: {},
             onDisconnect: {},
@@ -370,6 +372,22 @@ private func run() throws {
             )
         }
     }
+
+    for appearance in SnapshotAppearance.allCases {
+        try render(
+            rootView: activityRoot(scenario: .mixedInbox, appearance: appearance),
+            appearance: appearance,
+            filename: "github-activity-mixed-inbox-\(appearance.rawValue).png",
+            outputDirectory: outputDirectory
+        )
+    }
+
+    try render(
+        rootView: activityRoot(scenario: .reviewOnly, appearance: .light),
+        appearance: .light,
+        filename: "github-activity-review-only-light.png",
+        outputDirectory: outputDirectory
+    )
 
     for appearance in SnapshotAppearance.allCases {
         try render(
@@ -443,9 +461,26 @@ private func run() throws {
 
     for appearance in SnapshotAppearance.allCases {
         try render(
-            rootView: githubManagementRoot(appearance: appearance),
+            rootView: githubManagementRoot(
+                model: GitHubConnectionManagementFixture.model,
+                selectedRepositoryIDs: GitHubConnectionManagementFixture.selectedRepositoryIDs,
+                appearance: appearance
+            ),
             appearance: appearance,
             filename: "github-management-selected-\(appearance.rawValue).png",
+            outputDirectory: outputDirectory,
+            width: 760,
+            initialHeight: 820
+        )
+
+        try render(
+            rootView: githubManagementRoot(
+                model: GitHubConnectionManagementFixture.mixedCapabilityModel,
+                selectedRepositoryIDs: GitHubConnectionManagementFixture.mixedCapabilitySelectedRepositoryIDs,
+                appearance: appearance
+            ),
+            appearance: appearance,
+            filename: "github-capability-mixed-surfaces-\(appearance.rawValue).png",
             outputDirectory: outputDirectory,
             width: 760,
             initialHeight: 820
