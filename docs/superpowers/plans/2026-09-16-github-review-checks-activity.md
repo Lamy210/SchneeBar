@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Turn Developer Activity into a bounded priority inbox that combines GitHub Actions, direct Pull Request review requests, and relevant Check Runs without weakening connection isolation, capability gating, or low-idle-overhead behavior.
+**Goal:** Turn Developer Activity into a bounded priority inbox that combines GitHub Actions, direct Pull Request review requests, and relevant Check Runs while preserving connection isolation, capability gating, and low idle overhead.
 
-**Architecture:** `SchneeBarCore` owns provider-neutral activity kind, attention, ordering, and summary semantics. `SchneeBarGitHub` owns authenticated REST clients/services and normalized GitHub models, while `SchneeBarGitHubActivityProvider` owns source scheduling, Workflow evidence, source caches, Check candidate planning, capability preflight, and source-level result accounting. The App runtime composes the services and keeps connection health separate from capability-only blocks; SwiftUI receives only provider-neutral activity plus normalized capability presentation.
+**Architecture:** `SchneeBarCore` owns provider-neutral activity kind, attention, ordering, and summary semantics. `SchneeBarGitHub` owns authenticated REST clients/services and normalized GitHub models. `SchneeBarGitHubActivityProvider` owns source scheduling, Workflow evidence, source caches, Check candidate planning, capability preflight, and source-level result accounting. The App runtime keeps connection health separate from capability-only blocks; SwiftUI receives only provider-neutral activity and normalized capability presentation.
 
 **Tech Stack:** Swift 6.3, Swift Testing, Swift Concurrency/actors, SwiftUI, Observation, Tuist 4.203.1, Xcode 26.6, macOS 15+, GitHub REST API, GitHub Actions CI/Visual Regression/CodeQL.
 
@@ -16,80 +16,81 @@
 - Xcode 26.6 / Swift 6.3 remain the production baseline; Xcode 27 / Swift 6.4 remain canary-only.
 - Tuist stays pinned to 4.203.1 via mise.
 - Domain/Application code remains independent of SwiftUI and AppKit.
-- Raw GitHub REST payloads must be normalized before they cross the `SchneeBarGitHub` adapter boundary.
-- The session coordinator remains the only credential/session authority; bearer and refresh tokens never enter App/UI state, fixtures, logs, or docs.
+- Raw GitHub REST payloads are normalized before crossing the `SchneeBarGitHub` adapter boundary.
+- The session coordinator remains the only credential/session authority; tokens never enter App/UI state, fixtures, logs, or docs.
 - Direct review identity matching uses the connected account's stable GitHub account ID, never login text alone.
 - Team review requests are out of scope; repository access must not be used to infer team membership.
 - Review polling is one page of at most 100 most-recently-updated open Pull Requests per selected repository poll.
 - Check polling is one page of at most 100 Check Runs per candidate ref.
 - Per connection / periodic refresh, activity source list requests are capped at 8 Workflow + 4 Review + 4 Check = 16. Session-layer credential refresh traffic is outside this source-list budget.
-- Check candidate discovery uses direct-review head SHAs plus recently polled Workflow Run head SHAs, including successful Workflow Runs hidden from the top-level inbox.
-- GitHub Actions-owned Check Runs are suppressed only when an equivalent same-repository/same-SHA visible Workflow row exists.
-- Capability `.unavailable` blocks that source without making a network request; `.available` and `.unknown` remain requestable.
+- Check discovery uses direct-review head SHAs plus recently polled Workflow Run head SHAs, including successful Workflow Runs hidden from the top-level inbox.
+- GitHub Actions-owned Check Runs are suppressed only when an equivalent same-repository/same-SHA **visible** Workflow row exists.
+- Capability `.unavailable` blocks that source without a network request; `.available` and `.unknown` remain requestable.
 - Capability-only blocks never downgrade an otherwise healthy GitHub connection to connection-level `.unavailable`.
-- A 401/authentication failure from any attempted source remains connection-wide and enters the existing `.authenticationRequired` recovery path.
+- A 401/authentication failure from any attempted source enters the existing `.authenticationRequired` recovery path.
 - Repository monitoring selection gates Workflow, Review, and Check sources consistently.
-- Provider reset/disable/selection changes must invalidate stale async work across all three sources.
-- Do not add per-source user preferences, team membership discovery, deployment activity, write actions, SQLite persistence, or a generic plugin framework in this change.
+- Provider reset/disable/selection changes invalidate stale async work across all sources.
+- Do not add per-source preferences, team membership discovery, deployments, write actions, SQLite persistence, or a generic plugin framework in this change.
 
 ## File Structure
 
-### Core
+### Core and Activity feature
 
-- `Sources/SchneeBarCore/ActivityItem.swift` — add `ActivityKind`, `ActivityAttention`, `updatedAt`, and backward-compatible Codable behavior.
-- `Sources/SchneeBarCore/ActivityInboxOrdering.swift` — one reusable provider-neutral comparator for global inbox ordering.
-- `Sources/SchneeBarCore/ActivitySummary.swift` — attention-aware counts and non-CI-specific menu-bar summary.
-- `Tests/SchneeBarCoreTests/ActivityItemTests.swift` — decoding/default compatibility.
-- `Tests/SchneeBarCoreTests/ActivityInboxOrderingTests.swift` — attention/state/time/stable tie-break ordering.
-- `Tests/SchneeBarCoreTests/ActivitySummaryTests.swift` — compact summary priority semantics.
+- `Sources/SchneeBarCore/ActivityItem.swift` — `ActivityKind`, `ActivityAttention`, `updatedAt`, backward-compatible Codable.
+- `Sources/SchneeBarCore/ActivityInboxOrdering.swift` — one provider-neutral global comparator.
+- `Sources/SchneeBarCore/ActivitySummary.swift` — attention-aware counts and fixed activity-neutral labels.
+- `Sources/SchneeBarActivityFeature/ActivityWidgetProvider.swift` — map new summary semantics into Widget severity/priority/compact text.
+- `Tests/SchneeBarCoreTests/ActivityItemTests.swift` — legacy decoding/defaults.
+- `Tests/SchneeBarCoreTests/ActivityInboxOrderingTests.swift` — deterministic ordering.
+- `Tests/SchneeBarCoreTests/ActivitySummaryTests.swift` — exact summary copy.
+- `Tests/SchneeBarActivityFeatureTests/ActivityWidgetProviderTests.swift` — Review/Check-aware Widget behavior.
 
 ### GitHub adapter
 
 - `Sources/SchneeBarGitHub/GitHubPullRequestListClient.swift` — one-page open-PR loader and normalized `GitHubReviewRequest`.
-- `Sources/SchneeBarGitHub/GitHubReviewRequestService.swift` — session-authorized `GitHubReviewRequestLoading` service.
-- `Sources/SchneeBarGitHub/GitHubCheckRunClient.swift` — one-page Check Run loader with Check-specific status/conclusion enums.
-- `Sources/SchneeBarGitHub/GitHubCheckRunService.swift` — session-authorized `GitHubCheckRunLoading` service.
-- `Tests/SchneeBarGitHubTests/GitHubPullRequestListClientTests.swift` — request shape, reviewer IDs, bounds, trusted URL, failures.
-- `Tests/SchneeBarGitHubTests/GitHubReviewRequestServiceTests.swift` — session authorization forwarding.
-- `Tests/SchneeBarGitHubTests/GitHubCheckRunClientTests.swift` — status/conclusion normalization, bounds, trusted URL, failures.
-- `Tests/SchneeBarGitHubTests/GitHubCheckRunServiceTests.swift` — session authorization forwarding.
+- `Sources/SchneeBarGitHub/GitHubReviewRequestService.swift` — session-authorized Review loader.
+- `Sources/SchneeBarGitHub/GitHubCheckRunClient.swift` — one-page Check Run loader with Check-specific enums.
+- `Sources/SchneeBarGitHub/GitHubCheckRunService.swift` — session-authorized Check loader.
+- `Tests/SchneeBarGitHubTests/GitHubPullRequestListClientTests.swift`
+- `Tests/SchneeBarGitHubTests/GitHubReviewRequestServiceTests.swift`
+- `Tests/SchneeBarGitHubTests/GitHubCheckRunClientTests.swift`
+- `Tests/SchneeBarGitHubTests/GitHubCheckRunServiceTests.swift`
 
 ### GitHub Activity provider
 
 - `Sources/SchneeBarGitHubActivityProvider/GitHubReviewRequestActivityMapper.swift` — direct-review filtering and Activity mapping.
-- `Sources/SchneeBarGitHubActivityProvider/GitHubCheckRunActivityMapper.swift` — Check visibility/classification and GitHub Actions duplicate suppression.
-- `Sources/SchneeBarGitHubActivityProvider/GitHubWorkflowEvidence.swift` — provider-private Workflow SHA evidence from all polled runs.
-- `Sources/SchneeBarGitHubActivityProvider/GitHubCheckCandidatePlanner.swift` — deterministic review-first / workflow-second SHA selection.
-- `Sources/SchneeBarGitHubActivityProvider/GitHubActivitySurfaceResult.swift` — formal source identity, target failure, and source accounting contract.
-- `Sources/SchneeBarGitHubActivityProvider/GitHubActivityProvider.swift` — multi-source scheduling/caching/generation/capability integration while retaining hot/cold Workflow behavior.
-- `Tests/SchneeBarGitHubActivityProviderTests/GitHubReviewRequestActivityMapperTests.swift` — stable-ID filtering and review Activity semantics.
-- `Tests/SchneeBarGitHubActivityProviderTests/GitHubCheckRunActivityMapperTests.swift` — failure/activity mapping and same-SHA duplicate policy.
-- `Tests/SchneeBarGitHubActivityProviderTests/GitHubCheckCandidatePlannerTests.swift` — hidden-success evidence, dedup, 2-per-repo/4-total budget.
-- `Tests/SchneeBarGitHubActivityProviderTests/GitHubActivityProviderMultiSourceTests.swift` — capability gates, source accounting, cache clearing, request budgets, partial failures, stale generations.
+- `Sources/SchneeBarGitHubActivityProvider/GitHubWorkflowEvidence.swift` — provider-internal SHA evidence from **all** polled Workflow Runs.
+- `Sources/SchneeBarGitHubActivityProvider/GitHubCheckCandidatePlanner.swift` — review-first / workflow-second SHA selection.
+- `Sources/SchneeBarGitHubActivityProvider/GitHubCheckRunActivityMapper.swift` — Check mapping and same-SHA duplicate suppression.
+- `Sources/SchneeBarGitHubActivityProvider/GitHubActivitySurfaceResult.swift` — formal source/target accounting contract.
+- `Sources/SchneeBarGitHubActivityProvider/GitHubActivityProvider.swift` — bounded multi-source scheduling/caching/generation/capability integration.
+- `Tests/SchneeBarGitHubActivityProviderTests/GitHubReviewRequestActivityMapperTests.swift`
+- `Tests/SchneeBarGitHubActivityProviderTests/GitHubCheckCandidatePlannerTests.swift`
+- `Tests/SchneeBarGitHubActivityProviderTests/GitHubCheckRunActivityMapperTests.swift`
+- `Tests/SchneeBarGitHubActivityProviderTests/GitHubActivityProviderMultiSourceTests.swift`
 
 ### Runtime / presentation
 
-- `Sources/SchneeBarApp/SchneeBarApp.swift` — compose Review and Check services into the provider.
-- `Sources/SchneeBarApp/GitHubConnectionsRuntimeModel.swift` — consume formal source results; separate connection health from capability-only blocks; use Core ordering.
-- `Sources/SchneeBarGitHubFeature/GitHubConnectionManagementView.swift` — three-surface capability model and compact unavailable/unverified badges.
-- `Sources/SchneeBarActivityFeature/ActivityPopoverView.swift` — kind-aware inspect affordance/help and generalized activity summary presentation.
-- `Tests/SchneeBarAppTests/GitHubConnectionsRuntimeModelActivityTests.swift` — aggregate ordering and connection-health policy.
-- `Tests/SchneeBarActivityFeatureTests/ActivityPopoverBehaviorTests.swift` — kind-aware local-detail affordance where testable without snapshot coupling.
+- `Sources/SchneeBarApp/SchneeBarApp.swift` — compose Review/Check services.
+- `Sources/SchneeBarApp/GitHubConnectionsRuntimeModel.swift` — consume source results; separate connection health from capability blocks; use Core ordering.
+- `Sources/SchneeBarGitHubFeature/GitHubConnectionManagementView.swift` — three-surface capability presentation.
+- `Sources/SchneeBarActivityFeature/ActivityPopoverView.swift` — kind-aware local detail/browser interaction.
+- `Tests/SchneeBarAppTests/GitHubConnectionsRuntimeModelActivityTests.swift`
+- `Tests/SchneeBarActivityFeatureTests/ActivityPopoverBehaviorTests.swift`
 
 ### Deterministic UI / docs
 
-- `Sources/SchneeBarPreviewSupport/ActivityFixtures.swift` — mixed Review/Check/Workflow fictional inbox fixtures.
-- `Sources/SchneeBarPreviewSupport/GitHubConnectionFixtures.swift` — mixed capability-management fixtures.
-- `Sources/SchneeBarVisualHarness/SchneeBarVisualHarnessApp.swift` — new activity/capability scenes.
-- `Sources/SchneeBarVisualSnapshotCLI/main.swift` — register deterministic snapshots.
-- `docs/DEVELOPMENT_PLAN.md` — mark Review Requests, Checks, and priority Inbox semantics implemented only after final verification.
+- `Sources/SchneeBarPreviewSupport/ActivityFixtures.swift`
+- `Sources/SchneeBarPreviewSupport/GitHubConnectionFixtures.swift`
+- `Sources/SchneeBarVisualHarness/SchneeBarVisualHarnessApp.swift`
+- `Sources/SchneeBarVisualSnapshotCLI/main.swift`
+- `docs/DEVELOPMENT_PLAN.md`
 
 ## Execution Prerequisite
 
-Merge the approved design/plan documentation branch into `main`, then create `feat/github-review-checks-activity` from that exact `main`. Do not implement production code on the documentation branch.
+Merge the approved design/plan documentation branch into `main`, then create `feat/github-review-checks-activity` from that exact `main`. Production code must not be implemented on the documentation branch.
 
 ```bash
-# Repository workflow
 # 1. Merge docs/github-review-checks-activity-design into main.
 # 2. Create feat/github-review-checks-activity from the resulting main SHA.
 # 3. Execute Tasks 1-9 in order.
@@ -97,18 +98,19 @@ Merge the approved design/plan documentation branch into `main`, then create `fe
 
 ---
 
-### Task 1: Add provider-neutral Inbox semantics and backward-compatible Activity decoding
+### Task 1: Add provider-neutral Inbox semantics and make the Activity Widget attention-aware
 
 **Files:**
 - Modify: `Sources/SchneeBarCore/ActivityItem.swift`
 - Create: `Sources/SchneeBarCore/ActivityInboxOrdering.swift`
 - Modify: `Sources/SchneeBarCore/ActivitySummary.swift`
+- Modify: `Sources/SchneeBarActivityFeature/ActivityWidgetProvider.swift`
 - Create or modify: `Tests/SchneeBarCoreTests/ActivityItemTests.swift`
 - Create: `Tests/SchneeBarCoreTests/ActivityInboxOrderingTests.swift`
 - Modify: `Tests/SchneeBarCoreTests/ActivitySummaryTests.swift`
+- Modify: `Tests/SchneeBarActivityFeatureTests/ActivityWidgetProviderTests.swift`
 
 **Interfaces:**
-- Produces:
 
 ```swift
 public enum ActivityKind: String, Codable, CaseIterable, Sendable {
@@ -130,7 +132,7 @@ public struct ActivityInboxOrdering: Sendable {
 }
 ```
 
-- `ActivityItem` keeps its current fields and adds:
+`ActivityItem` adds:
 
 ```swift
 public let kind: ActivityKind
@@ -138,7 +140,7 @@ public let attention: ActivityAttention
 public let updatedAt: Date?
 ```
 
-- Its initializer defaults preserve old call sites:
+and its initializer becomes:
 
 ```swift
 public init(
@@ -156,48 +158,32 @@ public init(
 
 When `attention == nil`, derive `.failed -> .needsAttention`, `.running/.waiting -> .active`, `.success -> .informational`.
 
-- [ ] **Step 1: Write RED tests for old Codable payloads and initializer defaults**
-
-Use Swift Testing and a fixed JSON payload that predates the new fields:
+- [ ] **Step 1: Write RED backward-compatibility tests**
 
 ```swift
-import Foundation
-import SchneeBarCore
-import Testing
-
 @Test
 func decodesLegacyActivityItemWithWorkflowDefaults() throws {
     let json = #"{"id":"legacy-1","repository":"snow/app","context":"main · CI","detail":"Running","state":"running","destinationURL":null}"#
     let item = try JSONDecoder().decode(ActivityItem.self, from: Data(json.utf8))
-
     #expect(item.kind == .workflowRun)
     #expect(item.attention == .active)
     #expect(item.updatedAt == nil)
 }
-
-@Test
-func initializerDerivesAttentionFromStateWhenOmitted() {
-    #expect(ActivityItem(id: "f", repository: "a/b", context: "CI", detail: "Failed", state: .failed).attention == .needsAttention)
-    #expect(ActivityItem(id: "r", repository: "a/b", context: "CI", detail: "Running", state: .running).attention == .active)
-    #expect(ActivityItem(id: "s", repository: "a/b", context: "CI", detail: "Done", state: .success).attention == .informational)
-}
 ```
 
-- [ ] **Step 2: Run Core tests and verify RED**
+Add initializer-default assertions for failed/running/waiting/success.
 
-Run:
+- [ ] **Step 2: Run Core tests and verify RED**
 
 ```bash
 tuist test SchneeBarCoreTests -- -skipMacroValidation CODE_SIGNING_ALLOWED=NO
 ```
 
-Expected: compile/test failure because `ActivityKind`, `ActivityAttention`, and new properties do not exist.
+Expected: compile failure because the new types/properties do not exist.
 
-- [ ] **Step 3: Implement explicit Codable compatibility in `ActivityItem`**
+- [ ] **Step 3: Implement explicit Codable compatibility**
 
-Do not rely on synthesized `Codable`. Add `CodingKeys`, explicit `init(from:)`, and `encode(to:)`. Decode the old fields first, then use `decodeIfPresent` for `kind`, `attention`, and `updatedAt`; derive attention from decoded `state` when absent.
-
-Use one private helper shared by initializer and decoder:
+Do not use synthesized decoding for new required fields. Add `CodingKeys`, explicit `init(from:)`, and `encode(to:)`. Use:
 
 ```swift
 private static func defaultAttention(for state: ActivityState) -> ActivityAttention {
@@ -211,34 +197,18 @@ private static func defaultAttention(for state: ActivityState) -> ActivityAttent
 
 - [ ] **Step 4: Write RED ordering tests**
 
-Create fixed timestamps and assert the exact order:
+Assert exact order `actionRequired -> needsAttention -> active/running -> active/waiting -> informational`. Within equal attention/state, sort newer dated items first, dated before undated, then repository, `kind.rawValue`, ID.
 
 ```swift
-@Test
-func ordersByAttentionThenStateThenRecencyThenStableFields() {
-    let now = Date(timeIntervalSince1970: 2_000)
-    let older = Date(timeIntervalSince1970: 1_000)
-    let items = [
-        ActivityItem(id: "wait", repository: "snow/b", context: "CI", detail: "Waiting", state: .waiting, kind: .workflowRun, attention: .active, updatedAt: now),
-        ActivityItem(id: "run", repository: "snow/a", context: "CI", detail: "Running", state: .running, kind: .workflowRun, attention: .active, updatedAt: older),
-        ActivityItem(id: "fail", repository: "snow/a", context: "Check", detail: "Failed", state: .failed, kind: .checkRun, attention: .needsAttention, updatedAt: now),
-        ActivityItem(id: "review", repository: "snow/a", context: "PR #7", detail: "Review requested", state: .waiting, kind: .reviewRequest, attention: .actionRequired, updatedAt: older),
-    ]
-
-    let sorted = items.sorted(by: ActivityInboxOrdering().areInIncreasingOrder)
-    #expect(sorted.map(\.id) == ["review", "fail", "run", "wait"])
-}
+let sorted = items.sorted(by: ActivityInboxOrdering().areInIncreasingOrder)
+#expect(sorted.map(\.id) == ["review", "failed-check", "running", "waiting", "success"])
 ```
 
-Also add a test proving dated items precede undated items and `repository -> kind.rawValue -> id` breaks final ties deterministically.
-
-- [ ] **Step 5: Implement `ActivityInboxOrdering`**
-
-Use explicit rank functions rather than enum declaration order:
+- [ ] **Step 5: Implement `ActivityInboxOrdering` with explicit ranks**
 
 ```swift
-private func attentionRank(_ attention: ActivityAttention) -> Int {
-    switch attention {
+private func attentionRank(_ value: ActivityAttention) -> Int {
+    switch value {
     case .actionRequired: 0
     case .needsAttention: 1
     case .active: 2
@@ -246,8 +216,8 @@ private func attentionRank(_ attention: ActivityAttention) -> Int {
     }
 }
 
-private func stateRank(_ state: ActivityState) -> Int {
-    switch state {
+private func stateRank(_ value: ActivityState) -> Int {
+    switch value {
     case .failed: 0
     case .running: 1
     case .waiting: 2
@@ -256,49 +226,69 @@ private func stateRank(_ state: ActivityState) -> Int {
 }
 ```
 
-Then compare attention rank, state rank, optional `updatedAt`, repository, `kind.rawValue`, and ID in that order.
+- [ ] **Step 6: Write RED exact-summary tests and implement fixed copy**
 
-- [ ] **Step 6: Write RED summary tests and implement generalized summary**
+`ActivitySummary.menuBarLabel` is fixed to:
 
-Add:
+```text
+actionRequired > 0  -> "Action N"
+needsAttention > 0  -> "Alert N"
+running > 0         -> "Running N"
+waiting > 0         -> "Waiting N"
+otherwise           -> "Clear"
+```
+
+Add `actionRequired` and `needsAttention` counts. Existing `failed/running/waiting/successful` counts remain available.
+
+- [ ] **Step 7: Update the Activity Widget semantics with RED tests first**
+
+Add tests:
 
 ```swift
 @Test
-func actionRequiredSummaryOutranksFailedAndRunning() {
-    let items = [
-        ActivityItem(id: "review", repository: "a/b", context: "PR #1", detail: "Review requested", state: .waiting, kind: .reviewRequest, attention: .actionRequired),
-        ActivityItem(id: "failed", repository: "a/b", context: "Check", detail: "Failed", state: .failed, kind: .checkRun, attention: .needsAttention),
-    ]
-    let summary = ActivitySummary(items: items)
-    #expect(summary.actionRequired == 1)
-    #expect(summary.needsAttention == 1)
-    #expect(summary.menuBarLabel.contains("1"))
-    #expect(!summary.menuBarLabel.hasPrefix("CI"))
+func reviewRequestPromotesWidgetToAttention() async throws {
+    let provider = ActivityWidgetProvider { [reviewActivity()] }
+    let snapshot = try await provider.snapshot()
+    #expect(snapshot.severity == .attention)
+    #expect(snapshot.priority == .attention)
+    #expect(snapshot.content(for: .normal).text == "Action 1")
+    #expect(snapshot.content(for: .compact).text == "!1")
+}
+
+@Test
+func failedCheckStillMakesWidgetCriticalWhenReviewAlsoExists() async throws {
+    let provider = ActivityWidgetProvider { [reviewActivity(), failedCheckActivity()] }
+    let snapshot = try await provider.snapshot()
+    #expect(snapshot.severity == .critical)
+    #expect(snapshot.priority == .critical)
+    #expect(snapshot.content(for: .normal).text == "Action 1")
 }
 ```
 
-Implement `actionRequired` and `needsAttention` counts. Change the compact label to activity-neutral copy with priority `actionRequired -> needsAttention/failed -> running -> waiting -> clear`; keep strings short and deterministic so Visual Regression can lock them later.
+Implement Widget severity/priority:
 
-- [ ] **Step 7: Run Core tests and commit**
+```text
+needsAttention/failed present -> critical / critical
+actionRequired present        -> attention / attention
+running present               -> active / attention
+waiting present               -> attention / normal
+otherwise                     -> nominal / normal
+```
 
-Run:
+Compact copy is fixed to `!N`, `✕N`, `●N`, `◷N`, `✓` in that priority order. Update old `CI ✕1` assertions to the new activity-neutral labels.
+
+- [ ] **Step 8: Run Core + ActivityFeature tests and commit**
 
 ```bash
 tuist test SchneeBarCoreTests -- -skipMacroValidation CODE_SIGNING_ALLOWED=NO
-```
-
-Expected: PASS.
-
-Commit:
-
-```bash
-git add Sources/SchneeBarCore Tests/SchneeBarCoreTests
+tuist test SchneeBarActivityFeatureTests -- -skipMacroValidation CODE_SIGNING_ALLOWED=NO
+git add Sources/SchneeBarCore Sources/SchneeBarActivityFeature/ActivityWidgetProvider.swift Tests/SchneeBarCoreTests Tests/SchneeBarActivityFeatureTests/ActivityWidgetProviderTests.swift
 git commit -m "feat: add activity inbox semantics"
 ```
 
 ---
 
-### Task 2: Add bounded direct Review Request client and authenticated service
+### Task 2: Add the bounded open-PR client and authenticated Review service
 
 **Files:**
 - Create: `Sources/SchneeBarGitHub/GitHubPullRequestListClient.swift`
@@ -307,7 +297,6 @@ git commit -m "feat: add activity inbox semantics"
 - Create: `Tests/SchneeBarGitHubTests/GitHubReviewRequestServiceTests.swift`
 
 **Interfaces:**
-- Produces:
 
 ```swift
 public struct GitHubReviewRequest: Equatable, Sendable {
@@ -337,72 +326,38 @@ public protocol GitHubReviewRequestLoading: Sendable {
 }
 ```
 
-- `GitHubPullRequestListClient.openPullRequests(...)` always requests `state=open&sort=updated&direction=desc&per_page=100` and never follows pagination for this periodic source.
-
 - [ ] **Step 1: Write RED client request/normalization tests**
 
-Use a recording `GitHubHTTPTransport` and a response with two PRs. Assert:
+Use a recording transport. Assert path `/repos/{owner}/{repo}/pulls` and query:
 
-```swift
-@Test
-func loadsOnePageOfRecentOpenPullRequestsAndNormalizesReviewerIDs() async throws {
-    let transport = RecordingGitHubTransport(responseJSON: reviewListJSON)
-    let client = GitHubPullRequestListClient(transport: transport)
-    let requests = try await client.openPullRequests(
-        repository: try reviewRepository(),
-        connection: try reviewConnection(),
-        credential: GitHubCredential(accessToken: "test-token")
-    )
-
-    #expect(requests.count == 2)
-    #expect(requests[0].requestedReviewerIDs == ["42", "99"])
-    #expect(requests[0].headSHA == "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
-
-    let request = try #require(await transport.recordedRequests().first)
-    let components = try #require(URLComponents(url: request.url!, resolvingAgainstBaseURL: false))
-    let query = Dictionary(uniqueKeysWithValues: (components.queryItems ?? []).map { ($0.name, $0.value ?? "") })
-    #expect(query["state"] == "open")
-    #expect(query["sort"] == "updated")
-    #expect(query["direction"] == "desc")
-    #expect(query["per_page"] == "100")
-}
+```text
+state=open
+sort=updated
+direction=desc
+per_page=100
 ```
 
-The fixture PR JSON must include `number`, `title`, `draft`, `updated_at`, `head.sha`, and `requested_reviewers[{id,login}]`.
+Assert reviewer numeric IDs become strings and `head.sha`, title, draft, timestamp normalize correctly.
 
-- [ ] **Step 2: Add RED URL-trust and error tests**
+- [ ] **Step 2: Write RED trust/error tests**
 
-Test that a malicious/different `html_url` in the payload is ignored and the returned URL equals the trusted connection endpoint path `/{owner}/{repo}/pull/{number}`. Add tests for blank credential, invalid repository owner/name, malformed required payload, HTTP 401, 403, and 404.
+A malicious payload `html_url` must be ignored; returned `webURL` must equal the trusted connection endpoint path `/{owner}/{repo}/pull/{number}`. Cover blank credential, invalid repository identity, malformed required payload, and HTTP 401/403/404.
 
 - [ ] **Step 3: Run GitHub tests and verify RED**
-
-Run:
 
 ```bash
 tuist test SchneeBarGitHubTests -- -skipMacroValidation CODE_SIGNING_ALLOWED=NO
 ```
 
-Expected: compile failure because the client/types do not exist.
+- [ ] **Step 4: Implement `GitHubPullRequestListClient`**
 
-- [ ] **Step 4: Implement `GitHubPullRequestListClient` minimally**
+Follow `GitHubPullRequestMetadataClient` headers/API-version conventions. Make exactly one list request; do not follow pagination links.
 
-Follow the existing `GitHubPullRequestMetadataClient` conventions:
+- [ ] **Step 5: Write RED service authorization test**
 
-```swift
-let url = endpoints.restBaseURL
-    .appendingPathComponent("repos", isDirectory: true)
-    .appendingPathComponent(repository.ownerLogin, isDirectory: true)
-    .appendingPathComponent(repository.name, isDirectory: true)
-    .appendingPathComponent("pulls", isDirectory: false)
-```
+Seed a credential in a coordinator fixture, call `GitHubReviewRequestService.reviewRequests`, and assert the recording client transport receives an authorized request through `sessionCoordinator.authorizedCredential(connection:identity:clientID:)`.
 
-Build query items for the fixed one-page policy, send `Accept: application/vnd.github+json`, bearer auth, and current REST version for GitHub.com/GHE.com. Normalize reviewer IDs with `String(reviewer.id)` and reconstruct `webURL` from `endpoints.webBaseURL` rather than payload `html_url`.
-
-- [ ] **Step 5: Write RED authenticated service test**
-
-Use a coordinator/store fixture containing an authorized credential and a recording transport. Verify `GitHubReviewRequestService.reviewRequests` calls the client with a credential obtained through `sessionCoordinator.authorizedCredential(connection:identity:clientID:)`, including refresh behavior already owned by the coordinator.
-
-- [ ] **Step 6: Implement service and run tests**
+- [ ] **Step 6: Implement the service**
 
 ```swift
 public struct GitHubReviewRequestService: GitHubReviewRequestLoading, Sendable {
@@ -437,32 +392,23 @@ public struct GitHubReviewRequestService: GitHubReviewRequestLoading, Sendable {
 }
 ```
 
-Run:
+- [ ] **Step 7: Run tests and commit**
 
 ```bash
 tuist test SchneeBarGitHubTests -- -skipMacroValidation CODE_SIGNING_ALLOWED=NO
-```
-
-Expected: PASS.
-
-- [ ] **Step 7: Commit**
-
-```bash
 git add Sources/SchneeBarGitHub/GitHubPullRequestListClient.swift Sources/SchneeBarGitHub/GitHubReviewRequestService.swift Tests/SchneeBarGitHubTests/GitHubPullRequestListClientTests.swift Tests/SchneeBarGitHubTests/GitHubReviewRequestServiceTests.swift
 git commit -m "feat: load GitHub review requests"
 ```
 
 ---
 
-### Task 3: Map direct review requests into action-required Activity items
+### Task 3: Filter direct Review Requests by stable account ID and map them to Activity
 
 **Files:**
 - Create: `Sources/SchneeBarGitHubActivityProvider/GitHubReviewRequestActivityMapper.swift`
 - Create: `Tests/SchneeBarGitHubActivityProviderTests/GitHubReviewRequestActivityMapperTests.swift`
 
 **Interfaces:**
-- Consumes: `GitHubReviewRequest`, `GitHubAccountIdentity`, `GitHubRepositoryAccess`, `ActivityItem`.
-- Produces:
 
 ```swift
 public struct GitHubReviewRequestActivityMapper: Sendable {
@@ -470,8 +416,7 @@ public struct GitHubReviewRequestActivityMapper: Sendable {
 
     public func visibleRequests(
         requests: [GitHubReviewRequest],
-        identity: GitHubAccountIdentity,
-        repository: GitHubRepositoryAccess
+        identity: GitHubAccountIdentity
     ) -> [GitHubReviewRequest]
 
     public func activityItem(
@@ -481,58 +426,30 @@ public struct GitHubReviewRequestActivityMapper: Sendable {
 }
 ```
 
-- [ ] **Step 1: Write RED stable-identity and team-exclusion tests**
+- [ ] **Step 1: Write RED stable-ID tests**
 
-```swift
-@Test
-func emitsOnlyRequestsContainingConnectedStableAccountID() throws {
-    let mapper = GitHubReviewRequestActivityMapper()
-    let identity = GitHubAccountIdentity(id: "42", login: "renamed-user")
-    let requests = [
-        reviewRequest(number: 7, reviewerIDs: ["42"]),
-        reviewRequest(number: 8, reviewerIDs: ["99"]),
-        reviewRequest(number: 9, reviewerIDs: []),
-    ]
-
-    let visible = mapper.visibleRequests(
-        requests: requests,
-        identity: identity,
-        repository: try reviewRepository()
-    )
-    #expect(visible.map(\.number) == [7])
-}
-```
-
-The empty-reviewer fixture represents team-only/no-direct-user evidence and must not be emitted. Add a renamed-login case showing ID `42` still matches even when login text differs.
+Given identity `id = "42", login = "renamed-user"`, only PRs whose `requestedReviewerIDs` contain `"42"` are emitted. An empty reviewer set represents team-only/no-direct-user evidence and is not emitted. A changed login must not affect ID matching.
 
 - [ ] **Step 2: Write RED Activity mapping test**
 
-Assert exact provider-neutral fields:
+Assert:
 
 ```swift
-let item = mapper.activityItem(request: request, repository: repository)
 #expect(item.id == "github-review:\(repository.id):\(request.number)")
 #expect(item.kind == .reviewRequest)
 #expect(item.attention == .actionRequired)
 #expect(item.state == .waiting)
 #expect(item.context == "PR #\(request.number)")
+#expect(item.detail == "Review requested · \(request.title)")
 #expect(item.updatedAt == request.updatedAt)
 #expect(item.destinationURL == request.webURL)
 ```
 
-- [ ] **Step 3: Run provider tests and verify RED**
+- [ ] **Step 3: Implement mapper and deterministic sorting**
 
-```bash
-tuist test SchneeBarGitHubActivityProviderTests -- -skipMacroValidation CODE_SIGNING_ALLOWED=NO
-```
+Sort visible direct requests by `updatedAt desc`, then PR number ascending for exact ties.
 
-Expected: compile failure because mapper does not exist.
-
-- [ ] **Step 4: Implement mapper and deterministic ordering**
-
-`visibleRequests` filters only stable IDs and sorts newest `updatedAt` first, then PR number ascending for deterministic ties. `activityItem.detail` should be concise and title-bearing, e.g. `"Review requested · \(request.title)"`.
-
-- [ ] **Step 5: Run tests and commit**
+- [ ] **Step 4: Run tests and commit**
 
 ```bash
 tuist test SchneeBarGitHubActivityProviderTests -- -skipMacroValidation CODE_SIGNING_ALLOWED=NO
@@ -542,7 +459,7 @@ git commit -m "feat: map GitHub review activity"
 
 ---
 
-### Task 4: Add bounded Check Run client and authenticated service with Check-specific enums
+### Task 4: Add the bounded Check Run client and authenticated Check service
 
 **Files:**
 - Create: `Sources/SchneeBarGitHub/GitHubCheckRunClient.swift`
@@ -551,7 +468,6 @@ git commit -m "feat: map GitHub review activity"
 - Create: `Tests/SchneeBarGitHubTests/GitHubCheckRunServiceTests.swift`
 
 **Interfaces:**
-- Produces:
 
 ```swift
 public enum GitHubCheckRunStatus: Equatable, Sendable {
@@ -599,47 +515,33 @@ public protocol GitHubCheckRunLoading: Sendable {
 }
 ```
 
-`webURL` is a trusted repository commit/checks destination reconstructed by the client; arbitrary third-party `details_url` is not exposed as navigation.
+- [ ] **Step 1: Write RED enum-normalization tests**
 
-- [ ] **Step 1: Write RED status/conclusion normalization tests**
-
-Create table-driven tests for all known REST values and unknown preservation. Include:
+Cover all known status/conclusion values plus unknown preservation. Explicitly assert:
 
 ```swift
-@Test
-func startupFailureIsNotKnownCheckConclusion() async throws {
-    let run = try await loadSingleCheck(conclusion: "startup_failure")
-    #expect(run.conclusion == .unknown("startup_failure"))
-}
+#expect(try await loadSingleCheck(conclusion: "startup_failure").conclusion == .unknown("startup_failure"))
 ```
 
-Known conclusions are exactly `action_required`, `cancelled`, `failure`, `neutral`, `success`, `skipped`, `stale`, `timed_out`.
+because `startup_failure` is a Workflow Run conclusion, not a known Check Run conclusion.
 
-- [ ] **Step 2: Write RED bounded-request and trusted-URL tests**
+- [ ] **Step 2: Write RED request-bound/trust tests**
 
-Assert the request path is `/repos/{owner}/{repo}/commits/{sha}/check-runs`, `per_page=100`, only one HTTP request is made, and a payload `details_url` on another domain is ignored. Assert returned `webURL` is constructed under the trusted repository URL for the same SHA.
+Assert path `/repos/{owner}/{repo}/commits/{sha}/check-runs`, `per_page=100`, exactly one HTTP request, and that arbitrary payload `details_url` is ignored. Returned `webURL` is reconstructed under the trusted repository endpoint for `commit/{sha}/checks`.
 
 - [ ] **Step 3: Add RED validation/error tests**
 
-Cover blank credential, invalid repository identity, blank/malformed SHA, malformed required response, and HTTP 401/403/404. Preserve unknown status/conclusion strings rather than rejecting otherwise valid payloads.
+Cover blank credential, invalid repository identity, blank SHA, malformed response, HTTP 401/403/404.
 
-- [ ] **Step 4: Run GitHub tests and verify RED**
+- [ ] **Step 4: Implement client**
 
-```bash
-tuist test SchneeBarGitHubTests -- -skipMacroValidation CODE_SIGNING_ALLOWED=NO
-```
+Use existing Accept/API-version policy. Decode one page only. Parse optional timestamps and `app.slug`; do not expose third-party navigation URLs.
 
-Expected: compile failure because Check types/client do not exist.
+- [ ] **Step 5: Write RED service authorization test and implement service**
 
-- [ ] **Step 5: Implement client with one-page policy**
+`GitHubCheckRunService` mirrors `GitHubWorkflowRunService`: obtain `authorizedCredential`, then call the client with repository + SHA.
 
-Use the same headers/API-version policy as other clients. Decode only `check_runs`, normalize `app.slug`, and parse optional timestamps with the existing ISO-8601 approach. Do not follow Link pagination.
-
-- [ ] **Step 6: Write RED service test and implement `GitHubCheckRunService`**
-
-The service mirrors `GitHubWorkflowRunService`: obtain `authorizedCredential` from the session coordinator, then call the client. Verify the credential never appears in the public return model.
-
-- [ ] **Step 7: Run tests and commit**
+- [ ] **Step 6: Run tests and commit**
 
 ```bash
 tuist test SchneeBarGitHubTests -- -skipMacroValidation CODE_SIGNING_ALLOWED=NO
@@ -649,7 +551,7 @@ git commit -m "feat: load GitHub check runs"
 
 ---
 
-### Task 5: Add Workflow evidence, Check candidate planning, and Check Activity mapping
+### Task 5: Add Workflow evidence, deterministic Check candidates, and Check Activity mapping
 
 **Files:**
 - Create: `Sources/SchneeBarGitHubActivityProvider/GitHubWorkflowEvidence.swift`
@@ -659,7 +561,8 @@ git commit -m "feat: load GitHub check runs"
 - Create: `Tests/SchneeBarGitHubActivityProviderTests/GitHubCheckRunActivityMapperTests.swift`
 
 **Interfaces:**
-- Produces provider-private/`internal` evidence:
+
+Provider-private evidence:
 
 ```swift
 struct GitHubWorkflowEvidence: Equatable, Sendable {
@@ -671,7 +574,7 @@ struct GitHubWorkflowEvidence: Equatable, Sendable {
 }
 ```
 
-- Produces planner:
+Candidate planner:
 
 ```swift
 struct GitHubCheckCandidate: Equatable, Sendable {
@@ -690,7 +593,7 @@ struct GitHubCheckCandidatePlanner: Sendable {
 }
 ```
 
-- Produces Check mapper:
+Public mapper does **not** expose the provider-private evidence type:
 
 ```swift
 public struct GitHubCheckRunActivityMapper: Sendable {
@@ -699,79 +602,61 @@ public struct GitHubCheckRunActivityMapper: Sendable {
     public func visibleActivities(
         checks: [GitHubCheckRun],
         repository: GitHubRepositoryAccess,
-        visibleWorkflowEvidence: [GitHubWorkflowEvidence]
+        visibleWorkflowSHAs: Set<String>
     ) -> [ActivityItem]
 }
 ```
 
-- [ ] **Step 1: Write RED candidate tests for review-first ordering and hidden-success Workflow evidence**
+- [ ] **Step 1: Write RED candidate tests**
+
+Assert direct Review SHAs come first, successful hidden Workflow evidence still contributes a SHA, shared Review/Workflow SHAs deduplicate, max two refs per repository, max four total, deterministic repository order.
 
 ```swift
-@Test
-func reviewSHAWinsAndHiddenSuccessfulWorkflowStillSeedsChecks() throws {
-    let planner = GitHubCheckCandidatePlanner()
-    let repository = try repository(id: 10, name: "snow/app")
-    let candidates = planner.candidates(
-        repositories: [repository],
-        reviewRequestsByRepositoryID: [10: [reviewRequest(number: 5, headSHA: "review-sha", updatedAt: date(300))]],
-        workflowEvidenceByRepositoryID: [10: [
-            GitHubWorkflowEvidence(repositoryID: 10, headSHA: "success-sha", classification: .success, updatedAt: date(200), isVisible: false),
-        ]],
-        maximumTotal: 4,
-        maximumPerRepository: 2
-    )
-
-    #expect(candidates.map(\.headSHA) == ["review-sha", "success-sha"])
-}
+#expect(candidates.map(\.headSHA) == ["review-sha", "success-sha"])
 ```
-
-Add dedup test when review and Workflow evidence share the same SHA, maximum-two-per-repository, maximum-four-total across repositories, and deterministic repository order.
 
 - [ ] **Step 2: Implement candidate planner**
 
-For each repository, sort direct reviews by `updatedAt desc`, then Workflow evidence by classification rank (`failed`, `running`, `waiting`, `success`, `ignored`) and `updatedAt desc`. Deduplicate SHA while preserving first occurrence. Enforce per-repository limit before global total limit.
+Within a repository: Reviews sort by `updatedAt desc`; Workflow evidence sorts classification `failed, running, waiting, success, ignored`, then `updatedAt desc`. Deduplicate preserving first occurrence. Enforce per-repository limit before global limit.
 
 - [ ] **Step 3: Write RED Check mapping tests**
 
-Cover:
+Assert failure/action-required/timed-out -> `.failed + .needsAttention`; queued/waiting/requested/pending -> `.waiting + .active`; in-progress -> `.running + .active`; success/neutral/skipped/cancelled/stale are omitted from top-level activity.
 
-```swift
-#expect(map(check(status: .completed, conclusion: .failure)).state == .failed)
-#expect(map(check(status: .completed, conclusion: .failure)).attention == .needsAttention)
-#expect(map(check(status: .inProgress, conclusion: nil)).state == .running)
-#expect(map(check(status: .queued, conclusion: nil)).state == .waiting)
+- [ ] **Step 4: Write RED same-SHA duplicate/fallback tests**
+
+For `appSlug == "github-actions"`:
+
+```text
+SHA in visibleWorkflowSHAs     -> suppress Check row
+SHA not in visibleWorkflowSHAs -> keep Check row
 ```
 
-Also assert success/neutral/skipped/cancelled/stale are omitted by `visibleActivities`.
+External checks such as `codecov` remain eligible even when the same SHA is visible as a Workflow row.
 
-- [ ] **Step 4: Write RED GitHub Actions duplicate tests**
+- [ ] **Step 5: Implement Check mapper**
 
-Use a Check with `appSlug == "github-actions"` and same SHA as visible Workflow evidence; assert it is suppressed. Then change evidence to `isVisible == false` and assert the Check remains visible. Add an external Check (`appSlug == "codecov"`) and assert it remains visible even when same-SHA Workflow evidence is visible.
+Use ID `github-check:{repositoryID}:{checkID}`, `kind = .checkRun`, trusted `webURL`, and `updatedAt = completedAt ?? startedAt`. Duplicate suppression uses only `visibleWorkflowSHAs`, never hidden Workflow evidence.
 
-- [ ] **Step 5: Implement mapper**
-
-Use IDs `github-check:{repositoryID}:{checkID}`, `kind = .checkRun`, trusted `check.webURL`, `updatedAt = completedAt ?? startedAt`, and concise context/detail based on Check name and normalized state.
-
-- [ ] **Step 6: Run provider tests and commit**
+- [ ] **Step 6: Run tests and commit**
 
 ```bash
 tuist test SchneeBarGitHubActivityProviderTests -- -skipMacroValidation CODE_SIGNING_ALLOWED=NO
 git add Sources/SchneeBarGitHubActivityProvider/GitHubWorkflowEvidence.swift Sources/SchneeBarGitHubActivityProvider/GitHubCheckCandidatePlanner.swift Sources/SchneeBarGitHubActivityProvider/GitHubCheckRunActivityMapper.swift Tests/SchneeBarGitHubActivityProviderTests/GitHubCheckCandidatePlannerTests.swift Tests/SchneeBarGitHubActivityProviderTests/GitHubCheckRunActivityMapperTests.swift
-git commit -m "feat: plan GitHub check activity"
+git commit -m "feat: add GitHub check activity planning"
 ```
 
 ---
 
-### Task 6: Introduce formal source results and integrate bounded multi-source scheduling into `GitHubActivityProvider`
+### Task 6: Formalize source results and integrate bounded multi-source scheduling
 
 **Files:**
 - Create: `Sources/SchneeBarGitHubActivityProvider/GitHubActivitySurfaceResult.swift`
 - Modify: `Sources/SchneeBarGitHubActivityProvider/GitHubActivityProvider.swift`
 - Create: `Tests/SchneeBarGitHubActivityProviderTests/GitHubActivityProviderMultiSourceTests.swift`
-- Modify existing provider test fixtures that construct `GitHubActivityProvider`.
+- Modify existing provider tests that construct `GitHubActivityProvider`.
 
 **Interfaces:**
-- Produces:
 
 ```swift
 public enum GitHubActivitySurface: String, CaseIterable, Hashable, Sendable {
@@ -795,34 +680,16 @@ public struct GitHubActivitySurfaceResult: Equatable, Sendable {
     public let attemptedTargetCount: Int
     public let blockedTargetCount: Int
 }
-```
 
-- Evolve aggregate result to retain source identity:
-
-```swift
 public struct GitHubActivityLoadResult: Equatable, Sendable {
     public let items: [ActivityItem]
     public let surfaces: [GitHubActivitySurface: GitHubActivitySurfaceResult]
-
-    public var failures: [GitHubActivityTargetFailure] {
-        surfaces.values.flatMap(\.failures)
-    }
-
-    public var successfulTargetCount: Int {
-        surfaces.values.reduce(0) { $0 + $1.successfulTargetCount }
-    }
-
-    public var attemptedTargetCount: Int {
-        surfaces.values.reduce(0) { $0 + $1.attemptedTargetCount }
-    }
-
-    public var blockedTargetCount: Int {
-        surfaces.values.reduce(0) { $0 + $1.blockedTargetCount }
-    }
 }
 ```
 
-- Provider initializer becomes explicit about all loaders:
+Add helpers `surface(_:)`, aggregate attempted/successful/blocked counts, and deterministic `failures` sorted by surface rank (`workflows`, `reviewRequests`, `checks`), repository ID, repository name, reason rank.
+
+Provider initializer becomes:
 
 ```swift
 public init(
@@ -844,37 +711,21 @@ public init(
 )
 ```
 
-- [ ] **Step 1: Add RED source-result tests**
+- [ ] **Step 1: Add RED source-result identity tests**
 
-Construct a result with Workflow success, Review forbidden, and Checks capability-blocked for one repository. Assert source identity and counts remain separate; no repository-only flattening is allowed.
+Create Workflow success, Review forbidden, and Checks capability-blocked results for the same repository. Assert each surface retains separate counts/failures and aggregate helpers are deterministic.
 
-- [ ] **Step 2: Add loader stubs with call recording**
+- [ ] **Step 2: Add recording Review/Check loader stubs**
 
-Create actor stubs in `GitHubActivityProviderMultiSourceTests.swift`:
-
-```swift
-private actor ReviewLoaderStub: GitHubReviewRequestLoading {
-    private(set) var calls: [(UUID, Int64)] = []
-    var responses: [Int64: Result<[GitHubReviewRequest], Error>]
-    // reviewRequests(...) records (connection.id, repository.id) then returns/throws.
-}
-
-private actor CheckLoaderStub: GitHubCheckRunLoading {
-    private(set) var calls: [(UUID, Int64, String)] = []
-    var responses: [String: Result<[GitHubCheckRun], Error>]
-    // checkRuns(...) records connection/repository/SHA then returns/throws.
-}
-```
-
-Keep the existing Workflow loader stub but make its run fixtures include both visible failures/running runs and successful hidden runs with `headSHA`.
+Use actor stubs that record `(connectionID, repositoryID)` for Reviews and `(connectionID, repositoryID, headSHA)` for Checks and return configured `Result` values.
 
 - [ ] **Step 3: Write RED capability-gate tests**
 
-Test `.pullRequests == .unavailable(.missingPermission)` yields zero Review loader calls and Review `blockedTargetCount > 0`. Test `.checks == .unavailable` yields zero Check calls. Test `.unknown(...)` still calls the corresponding loader.
+`.pullRequests == .unavailable(.missingPermission)` -> zero Review calls + Review blocked count. `.checks == .unavailable` -> zero Check calls. `.unknown(...)` -> request remains allowed.
 
-- [ ] **Step 4: Write RED hard-budget and cold-review fairness tests**
+- [ ] **Step 4: Write RED hard-budget/fairness tests**
 
-With more than 8 eligible repositories and visible/cached candidates, assert per refresh:
+With enough eligible targets:
 
 ```swift
 #expect(await workflowLoader.callCount() <= 8)
@@ -883,27 +734,27 @@ With more than 8 eligible repositories and visible/cached candidates, assert per
 #expect(await workflowLoader.callCount() + reviewLoader.callCount() + checkLoader.callCount() <= 16)
 ```
 
-Across consecutive refreshes, assert at least one previously unpolled Review repository advances even when another Review repository stays hot.
+Across refreshes, at least one cold Review repository advances despite hot Review repositories.
 
-- [ ] **Step 5: Write RED hidden-success Check-discovery regression**
+- [ ] **Step 5: Write RED hidden-success external-Check regression**
 
-Configure one repository with a successful Workflow Run at SHA `abc`, no direct review, and an external failed Check for `abc`. Assert returned Activity includes the external Check even though the successful Workflow itself is absent from `items`.
+Workflow at SHA `abc` succeeds and is hidden; external Check at `abc` fails. Returned top-level items must contain the Check and not the successful Workflow.
 
-- [ ] **Step 6: Write RED same-SHA duplicate and fallback tests**
+- [ ] **Step 6: Write RED duplicate/fallback tests**
 
-Case A: visible failed/running Workflow at SHA `abc` plus `github-actions` Check at `abc` -> only Workflow row appears. Case B: hidden successful Workflow evidence at `abc` plus failed `github-actions` Check -> Check row appears. Case C: Workflow request fails but cached evidence/candidate exists and Check succeeds -> Check row is preserved as fallback.
+Visible Workflow at `abc` + `github-actions` Check at `abc` -> only Workflow row. Hidden successful Workflow evidence at `abc` + failed `github-actions` Check -> Check row remains. External Check always remains eligible.
 
-- [ ] **Step 7: Write RED partial-failure/cache-clearing tests**
+- [ ] **Step 7: Write RED partial-failure/cache replacement tests**
 
-Assert Review failure does not erase current Workflow/Check items. Assert a later successful empty Review response removes previously cached Review items. Assert a later successful empty Check response removes cached Check items for that SHA. Assert repository deselection prunes Workflow evidence and all three source caches.
+Review failure must not erase Workflow/Check items. A later successful empty Review response clears that Review cache. A later successful empty Check response clears that SHA's Check cache. Repository deselection removes all source caches and Workflow evidence for that repository.
 
-- [ ] **Step 8: Write RED authentication and stale-generation tests**
+- [ ] **Step 8: Write RED auth/stale-generation tests**
 
-A 401 from any attempted loader must produce an `.authenticationRequired` failure reason tagged with the correct surface. During an in-flight multi-source refresh, call `reset(connectionID:)`, then release the loader; assert stale completion does not repopulate any source cache/evidence.
+401 from any attempted source creates authentication-required failure on that surface. During an in-flight refresh, `reset(connectionID:)` then release the loader; stale completion must not repopulate any cache/evidence.
 
-- [ ] **Step 9: Implement formal result model and provider state**
+- [ ] **Step 9: Implement provider state**
 
-Add source caches:
+Use separate maps:
 
 ```swift
 private var cachedWorkflowActivities: [RepositoryPollKey: [GitHubWorkflowActivity]] = [:]
@@ -913,37 +764,35 @@ private var cachedCheckActivities: [CheckPollKey: [ActivityItem]] = [:]
 private var reviewPollState: [RepositoryPollKey: RepositoryPollState] = [:]
 ```
 
-Use a `CheckPollKey(connectionID:repositoryID:headSHA:)`. `reset` and pruning must clear each map consistently.
+`CheckPollKey` contains connection ID, repository ID, head SHA. `reset`/pruning clear all maps consistently.
 
-- [ ] **Step 10: Implement Workflow + Review phase, then demand-driven Check phase**
+- [ ] **Step 10: Implement Workflow + Review phase**
 
-Workflow and Review repository loads may execute concurrently under their respective concurrency/budget limits. For each successful Workflow load, compute both visible `GitHubWorkflowActivity` and all-run `GitHubWorkflowEvidence`. For each successful Review load, cache normalized direct requests and map to Activity items.
+For every successful Workflow target, create visible Workflow Activity plus Workflow evidence for **all fetched runs** using the mapper's public classification method. Set `isVisible` by matching visible activity run IDs/SHA evidence. For every successful Review target, filter stable-ID direct requests through `reviewMapper`, cache only those direct requests, and map them to Activity.
 
-After the first phase, guard the connection generation, then build Check candidates from current/cached direct Reviews and Workflow evidence. Load at most four Check refs total / two per repository, respecting `.checks` capability.
+- [ ] **Step 11: Implement demand-driven Check phase**
 
-- [ ] **Step 11: Implement source result aggregation and Core ordering**
+After generation validation, build candidates from direct Review cache + Workflow evidence. Load at most four refs total/two per repository. Build `visibleWorkflowSHAs` from evidence where `isVisible == true`, then pass that `Set<String>` to `checkMapper.visibleActivities`.
 
-Each source returns its own `GitHubActivitySurfaceResult`. Build `GitHubActivityLoadResult.items` from source caches and sort once with:
+- [ ] **Step 12: Aggregate source results and Core-sort once**
+
+Build one `GitHubActivitySurfaceResult` per surface. Combine cached items and sort globally only with:
 
 ```swift
 ActivityInboxOrdering().areInIncreasingOrder
 ```
 
-Do not preserve the old provider-local state-only sort as the global order.
+Remove the old provider-global state-only ordering path.
 
-- [ ] **Step 12: Update existing provider test constructors and run all provider tests**
+- [ ] **Step 13: Update existing provider tests and run**
 
-Every existing test that creates `GitHubActivityProvider(workflowRunLoader:)` must supply deterministic Review and Check loader stubs returning empty success arrays. Do not add production no-op loaders simply to preserve old test call sites.
-
-Run:
+Existing tests that construct `GitHubActivityProvider(workflowRunLoader:)` must now inject deterministic empty-success Review/Check stubs. Do not add production no-op loaders to preserve old test syntax.
 
 ```bash
 tuist test SchneeBarGitHubActivityProviderTests -- -skipMacroValidation CODE_SIGNING_ALLOWED=NO
 ```
 
-Expected: PASS, including old Workflow behavior and new multi-source tests.
-
-- [ ] **Step 13: Commit**
+- [ ] **Step 14: Commit**
 
 ```bash
 git add Sources/SchneeBarGitHubActivityProvider Tests/SchneeBarGitHubActivityProviderTests
@@ -959,11 +808,9 @@ git commit -m "feat: aggregate GitHub activity sources"
 - Modify: `Sources/SchneeBarApp/GitHubConnectionsRuntimeModel.swift`
 - Modify: `Sources/SchneeBarGitHubFeature/GitHubConnectionManagementView.swift`
 - Create: `Tests/SchneeBarAppTests/GitHubConnectionsRuntimeModelActivityTests.swift`
-- Modify existing App/provider fixtures that construct `GitHubActivityProvider`.
+- Modify App tests/fixtures that construct `GitHubActivityProvider`.
 
 **Interfaces:**
-- `AppDelegate` creates one `GitHubReviewRequestService` and one `GitHubCheckRunService` using the same `GitHubConnectionSessionCoordinator` as Workflow services.
-- `GitHubRepositoryOptionModel` replaces a single `actionsAccess` property with:
 
 ```swift
 public struct GitHubRepositoryActivityAccessModel: Equatable, Sendable {
@@ -973,25 +820,25 @@ public struct GitHubRepositoryActivityAccessModel: Equatable, Sendable {
 }
 ```
 
-- [ ] **Step 1: Write RED runtime aggregate-ordering test**
+`GitHubRepositoryOptionModel` replaces its single `actionsAccess` property with `activityAccess`.
 
-Use a provider fixture returning three source items deliberately out of order: running Workflow, failed Check, action-required Review. Call `loadActivityItems()` and assert IDs are ordered Review -> Check -> Workflow using Core ordering.
+- [ ] **Step 1: Write RED aggregate-ordering test**
+
+Provider fixture returns running Workflow, failed Check, action-required Review in scrambled order. `loadActivityItems()` must return Review -> Check -> Workflow.
 
 - [ ] **Step 2: Write RED capability-only health test**
 
-Create a healthy profile/inventory where all monitored repositories have `.actions`, `.pullRequests`, and `.checks` set to `.unavailable(.missingPermission)`. Make all source loaders fail the test if invoked. After `loadActivityItems()`, assert connection presentation status remains `.connected(repositoryCount: N)` and no source network call occurred.
+Healthy session/inventory; all three capabilities unavailable. Source stubs fail if called. `loadActivityItems()` makes zero source calls and leaves status `.connected(repositoryCount: N)`.
 
-- [ ] **Step 3: Write RED attempted-failure status tests**
+- [ ] **Step 3: Write RED operational-failure status tests**
 
-Case A: Workflow succeeds while Review network fails -> connection remains connected and Workflow items remain. Case B: every attempted source fails with network-unavailable and no source succeeds -> connection becomes `.networkUnavailable`. Case C: any attempted source returns authentication-required -> provider resets and runtime status becomes `.authenticationRequired`.
+Workflow succeeds + Review network fails -> connected and Workflow item remains. All attempted sources network-fail with no success -> `.networkUnavailable`. Any auth failure -> `.authenticationRequired` and provider reset.
 
-- [ ] **Step 4: Implement runtime source-result policy**
+- [ ] **Step 4: Implement runtime policy**
 
-Replace repository-count-only `applyActivityStatus` assumptions. Capability-blocked targets do not count as attempted operational failure. If any source target succeeds, restore normal `presentationStatus(for: inventory)`. If there are zero attempts because all sources are blocked, leave/restore normal connected status. Only derive network/unavailable status from attempted non-auth failures when no attempted target succeeds.
+Blocked targets are not attempted operational failures. Any successful attempted target restores normal `presentationStatus(for: inventory)`. Zero attempts because all surfaces are capability-blocked also leaves/restores normal connection status. Derive network/unavailable only from attempted non-auth failures when no attempted target succeeds.
 
 - [ ] **Step 5: Wire production services**
-
-In `AppDelegate.init()`:
 
 ```swift
 let reviewRequestService = GitHubReviewRequestService(sessionCoordinator: sessionCoordinator)
@@ -1003,81 +850,66 @@ let activityProvider = GitHubActivityProvider(
 )
 ```
 
-Update App test fixtures with deterministic empty Review/Check loaders unless the test targets those sources.
+- [ ] **Step 6: Write RED three-surface management mapping tests**
 
-- [ ] **Step 6: Write RED three-surface management-model tests**
+For each repository, map `.available -> available`, `.unknown -> unverified`, `.unavailable -> unavailable` independently for Actions/Reviews/Checks.
 
-For repository capability combinations `.available`, `.unknown`, `.unavailable`, assert `managementModel(profileID:)` maps each capability independently to `available`, `unverified`, or `unavailable`.
+- [ ] **Step 7: Update capability UI**
 
-- [ ] **Step 7: Update `GitHubConnectionManagementView` presentation model**
+Available surfaces stay quiet. Unverified/unavailable surfaces render compact named badges: `Actions`, `Reviews`, `Checks`. Monitoring remains repository-scoped; no source toggles.
 
-Replace `actionsAccess` with `activityAccess`. Available states stay visually quiet. For unavailable/unverified states, render compact named badges such as `Actions unavailable`, `Reviews unverified`, `Checks unavailable`. Summary counts operate over monitored repositories and name the affected surface.
-
-Do not add per-source toggles; monitoring remains repository-scoped.
-
-- [ ] **Step 8: Run App and GitHub feature build/tests**
-
-Run:
+- [ ] **Step 8: Run tests/build and commit**
 
 ```bash
 tuist test SchneeBarAppTests -- -skipMacroValidation CODE_SIGNING_ALLOWED=NO
 tuist build -- -skipMacroValidation CODE_SIGNING_ALLOWED=NO
-```
-
-Expected: PASS.
-
-- [ ] **Step 9: Commit**
-
-```bash
-git add Sources/SchneeBarApp/SchneeBarApp.swift Sources/SchneeBarApp/GitHubConnectionsRuntimeModel.swift Sources/SchneeBarGitHubFeature/GitHubConnectionManagementView.swift Tests/SchneeBarAppTests
+git add Sources/SchneeBarApp Sources/SchneeBarGitHubFeature/GitHubConnectionManagementView.swift Tests/SchneeBarAppTests
 git commit -m "feat: wire GitHub activity inbox"
 ```
 
 ---
 
-### Task 8: Make Activity interaction kind-aware and add deterministic mixed Inbox visuals
+### Task 8: Make the popover kind-aware and add deterministic Visual Regression scenes
 
 **Files:**
 - Modify: `Sources/SchneeBarActivityFeature/ActivityPopoverView.swift`
-- Modify or create: `Tests/SchneeBarActivityFeatureTests/ActivityPopoverBehaviorTests.swift`
+- Create: `Tests/SchneeBarActivityFeatureTests/ActivityPopoverBehaviorTests.swift`
 - Modify: `Sources/SchneeBarPreviewSupport/ActivityFixtures.swift`
 - Modify: `Sources/SchneeBarPreviewSupport/GitHubConnectionFixtures.swift`
 - Modify: `Sources/SchneeBarVisualHarness/SchneeBarVisualHarnessApp.swift`
 - Modify: `Sources/SchneeBarVisualSnapshotCLI/main.swift`
 
 **Interfaces:**
-- `.workflowRun` can invoke the existing local detail loader/chevron.
-- `.reviewRequest` and `.checkRun` are browser-link-only in this phase.
-- No non-workflow row exposes help/accessibility text saying `Inspect workflow jobs`.
 
-- [ ] **Step 1: Extract/test the local-detail affordance rule**
+- `.workflowRun` may show the existing local job-detail chevron.
+- `.reviewRequest` and `.checkRun` are browser-link-only.
 
-If direct SwiftUI hierarchy assertions are brittle, add an internal pure helper in the Activity feature:
+Use an internal pure helper:
 
 ```swift
-func supportsLocalDetail(_ item: ActivityItem) -> Bool {
-    item.kind == .workflowRun
+func supportsLocalDetail(kind: ActivityKind) -> Bool {
+    kind == .workflowRun
 }
 ```
 
-Test:
+- [ ] **Step 1: Write RED behavior test**
 
 ```swift
 @Test
 func onlyWorkflowRunsSupportLocalDetail() {
-    #expect(supportsLocalDetail(activity(kind: .workflowRun)))
-    #expect(!supportsLocalDetail(activity(kind: .reviewRequest)))
-    #expect(!supportsLocalDetail(activity(kind: .checkRun)))
+    #expect(supportsLocalDetail(kind: .workflowRun))
+    #expect(!supportsLocalDetail(kind: .reviewRequest))
+    #expect(!supportsLocalDetail(kind: .checkRun))
 }
 ```
 
-- [ ] **Step 2: Update `ActivityPopoverView` behavior/copy**
+- [ ] **Step 2: Update `ActivityPopoverView`**
 
-Only render the chevron when `onInspect != nil && item.kind == .workflowRun`. Keep browser `Link` navigation for all items with `destinationURL`. Make icon/accessibility/help text generic per kind; workflow rows may still say `Inspect workflow jobs`, while Review/Check rows rely on browser-opening hints only.
+Render the inspect chevron only when `onInspect != nil && supportsLocalDetail(kind: item.kind)`. Keep browser `Link` behavior for any item with `destinationURL`. Non-workflow rows must not expose `Inspect workflow jobs` help/accessibility copy.
 
 - [ ] **Step 3: Add deterministic mixed Inbox fixture**
 
-Create fictional values only:
+Use fictional fixed data only:
 
 ```swift
 public static let mixedInbox: [ActivityItem] = [
@@ -1087,15 +919,15 @@ public static let mixedInbox: [ActivityItem] = [
 ]
 ```
 
-Use the repo's existing deterministic date helper or add a fixed UTC/date constructor; do not use `Date.now`.
+Use an existing deterministic date helper or a fixed epoch helper; never `Date.now`.
 
-- [ ] **Step 4: Add capability visual fixture**
+- [ ] **Step 4: Add mixed capability fixture**
 
-Create one connected management model where Actions is available, Reviews is unverified, and Checks is unavailable. The connection itself must remain visually connected; only source badges communicate capability limitations.
+Connection remains connected while one repository presents Actions available, Reviews unverified, Checks unavailable.
 
-- [ ] **Step 5: Register visual scenes/snapshots**
+- [ ] **Step 5: Register snapshots**
 
-Add at least:
+Add:
 
 ```text
 github-activity-mixed-inbox-light
@@ -1105,54 +937,45 @@ github-capability-mixed-surfaces-light
 github-capability-mixed-surfaces-dark
 ```
 
-Use the existing Visual Harness / Snapshot CLI naming and sizing conventions. Do not overwrite unrelated baseline scenarios.
-
-- [ ] **Step 6: Run feature tests and local snapshot generation path**
-
-Run:
+- [ ] **Step 6: Run feature tests and snapshot build path**
 
 ```bash
 tuist test SchneeBarActivityFeatureTests -- -skipMacroValidation CODE_SIGNING_ALLOWED=NO
 tuist build SchneeBarVisualSnapshotCLI -- -skipMacroValidation CODE_SIGNING_ALLOWED=NO
 ```
 
-Then run the same snapshot-render command used by `.github/workflows/visual.yml` for candidate output and inspect the generated report/images for clipping, badge crowding, and wrong chevrons.
-
-Expected: mixed Inbox shows Review first, failed Check second, Workflow third; Review/Check rows have no local-detail chevron.
+Then run the same candidate-render command used by `.github/workflows/visual.yml`; inspect for clipping, badge crowding, wrong chevrons, and ordering.
 
 - [ ] **Step 7: Commit**
 
 ```bash
-git add Sources/SchneeBarActivityFeature Sources/SchneeBarPreviewSupport Sources/SchneeBarVisualHarness Sources/SchneeBarVisualSnapshotCLI Tests/SchneeBarActivityFeatureTests
+git add Sources/SchneeBarActivityFeature/ActivityPopoverView.swift Sources/SchneeBarPreviewSupport Sources/SchneeBarVisualHarness Sources/SchneeBarVisualSnapshotCLI Tests/SchneeBarActivityFeatureTests/ActivityPopoverBehaviorTests.swift
 git commit -m "feat: present prioritized developer activity"
 ```
 
 ---
 
-### Task 9: Update Phase 3 docs and verify the exact final head
+### Task 9: Update Phase 3 documentation and verify the exact final head
 
 **Files:**
 - Modify: `docs/DEVELOPMENT_PLAN.md`
-- Review all files changed by Tasks 1-8.
+- Review all Task 1-8 changes.
 
-**Interfaces:**
-- No new production API. This task closes the feature only after evidence from tests/build/Visual/CodeQL.
+- [ ] **Step 1: Update `docs/DEVELOPMENT_PLAN.md` after local green**
 
-- [ ] **Step 1: Update `docs/DEVELOPMENT_PLAN.md` only after implementation is green locally**
-
-Move these Phase 3 items into Implemented:
+Move into Phase 3 Implemented:
 
 ```text
 - direct GitHub review-request activity
-- Check Run activity for bounded activity-derived SHAs
+- bounded Check Run activity for activity-derived SHAs
 - provider-neutral priority Inbox semantics
-- three-surface Actions / Reviews / Checks capability presentation
+- Actions / Reviews / Checks capability presentation
 - source-level activity failure/accounting with capability-only connection-health separation
 ```
 
-Leave matrix-job aggregation and superseded-run handling in `Next` unless separately implemented by another change.
+Leave matrix-job aggregation and superseded-run handling in `Next`.
 
-- [ ] **Step 2: Run the full local verification command set**
+- [ ] **Step 2: Run full local verification**
 
 ```bash
 tuist generate
@@ -1160,43 +983,40 @@ tuist build -- -skipMacroValidation CODE_SIGNING_ALLOWED=NO
 tuist test -- -skipMacroValidation CODE_SIGNING_ALLOWED=NO
 ```
 
-Expected: all commands exit 0.
+Expected: all exit 0.
 
-- [ ] **Step 3: Perform security/invariant review before opening the PR**
+- [ ] **Step 3: Perform final invariant review**
 
 Verify from the diff:
 
 ```text
-- no token/credential values in UI/models/logs/fixtures
-- Review matching uses stable account ID
-- team membership is never inferred
-- remote PR html_url / Check details_url is not trusted for navigation
-- capability unavailable performs zero source call
-- max per-refresh source calls remain 8 + 4 + 4
-- successful hidden Workflow evidence contributes Check candidates
-- only visible same-SHA Workflow evidence suppresses github-actions Check rows
-- repository selection/reset clears all source caches/evidence
-- capability-only blocks keep healthy connection connected
+no credentials in UI/models/logs/fixtures
+Review matching uses stable account ID
+team membership is never inferred
+remote PR html_url / Check details_url is not trusted
+capability unavailable performs zero source call
+source-list budget remains 8 + 4 + 4
+successful hidden Workflow evidence contributes Check candidates
+only visible same-SHA Workflow suppresses github-actions Check rows
+repository selection/reset clears every source cache/evidence
+capability-only blocks keep a healthy connection connected
+non-workflow rows never show local Workflow-job inspect UI
 ```
 
-- [ ] **Step 4: Commit documentation**
+- [ ] **Step 4: Commit docs**
 
 ```bash
 git add docs/DEVELOPMENT_PLAN.md
 git commit -m "docs: update developer activity progress"
 ```
 
-- [ ] **Step 5: Open a draft PR and verify CI + Visual on the exact head**
+- [ ] **Step 5: Open a draft PR and verify exact-head CI + Visual**
 
-PR summary must explicitly call out Review stable-ID matching, Check candidate request bounds, hidden-success Workflow evidence, source-result accounting, and connection-health separation.
+PR body explicitly documents stable-ID Review matching, request bounds, hidden-success Workflow evidence, source-result accounting, and connection-health separation. Keep draft until CI and Visual Regression both succeed on the exact current head SHA.
 
-Keep the PR draft while CI and Visual Regression run. Confirm both runs reference the exact current feature-head SHA and both conclude `success`.
+- [ ] **Step 6: Mark Ready and verify draft-gated CodeQL on the same head**
 
-- [ ] **Step 6: Mark Ready and run draft-gated CodeQL on the same head**
-
-Do not push another commit after CI/Visual green unless all three gates are rerun. Mark Ready only after CI + Visual succeed on the exact head; then wait for CodeQL on that same SHA.
-
-Expected final gate:
+Do not push after CI/Visual green unless every gate reruns. Final exact-head gate is:
 
 ```text
 CI                success
@@ -1204,9 +1024,9 @@ Visual Regression success
 CodeQL            success
 ```
 
-- [ ] **Step 7: Final review and merge**
+- [ ] **Step 7: Final review and squash merge**
 
-Before merge, confirm:
+Confirm:
 
 ```text
 PR mergeable == true
@@ -1215,4 +1035,4 @@ head SHA == SHA verified by CI/Visual/CodeQL
 no unresolved review threads
 ```
 
-Squash merge with an expected-head SHA guard. After merge, verify `main` points to the merge commit and its tree contains the verified feature contents.
+Squash merge with expected-head SHA guard, then verify `main` points to the merge commit and contains the verified tree.
