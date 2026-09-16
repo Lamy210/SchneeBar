@@ -33,11 +33,35 @@ private enum GitHubRecoveryHarnessScenario: String, CaseIterable, Hashable {
     }
 }
 
+private enum GitHubManagementHarnessScenario: String, CaseIterable, Hashable {
+    case repositoryMatrix
+    case mixedCapabilities
+
+    var model: GitHubConnectionManagementModel {
+        switch self {
+        case .repositoryMatrix:
+            GitHubConnectionManagementFixture.model
+        case .mixedCapabilities:
+            GitHubConnectionManagementFixture.mixedCapabilityModel
+        }
+    }
+
+    var selectedRepositoryIDs: Set<Int64> {
+        switch self {
+        case .repositoryMatrix:
+            GitHubConnectionManagementFixture.selectedRepositoryIDs
+        case .mixedCapabilities:
+            GitHubConnectionManagementFixture.mixedCapabilitySelectedRepositoryIDs
+        }
+    }
+}
+
 private struct VisualHarnessView: View {
     @State private var activityScenario: ActivityFixtureScenario = .mainFailure
     @State private var widgetScenario: WidgetFixtureScenario = .critical
     @State private var githubScenario: GitHubConnectionsFixture = .multiConnection
     @State private var recoveryScenario: GitHubRecoveryHarnessScenario = .deviceCode
+    @State private var managementScenario: GitHubManagementHarnessScenario = .repositoryMatrix
     @State private var managementMode: GitHubRepositorySelectionPresentationMode = .selected
     @State private var managementSelectedIDs = GitHubConnectionManagementFixture.selectedRepositoryIDs
     @State private var appearance: ColorScheme = .dark
@@ -67,6 +91,15 @@ private struct VisualHarnessView: View {
                     ForEach(GitHubRecoveryHarnessScenario.allCases, id: \.rawValue) { scenario in
                         Text(scenario.rawValue).tag(scenario)
                     }
+                }
+
+                Picker("Capabilities", selection: $managementScenario) {
+                    ForEach(GitHubManagementHarnessScenario.allCases, id: \.rawValue) { scenario in
+                        Text(scenario.rawValue).tag(scenario)
+                    }
+                }
+                .onChange(of: managementScenario) { _, newValue in
+                    managementSelectedIDs = newValue.selectedRepositoryIDs
                 }
 
                 Picker("Repository scope", selection: $managementMode) {
@@ -115,7 +148,7 @@ private struct VisualHarnessView: View {
                     .frame(width: 580)
 
                     GitHubConnectionManagementView(
-                        model: GitHubConnectionManagementFixture.model,
+                        model: managementScenario.model,
                         selectionMode: $managementMode,
                         selectedRepositoryIDs: $managementSelectedIDs,
                         onRefresh: {},
