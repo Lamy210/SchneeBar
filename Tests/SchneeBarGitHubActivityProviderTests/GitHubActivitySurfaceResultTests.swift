@@ -3,7 +3,7 @@ import SchneeBarGitHubActivityProvider
 import Testing
 
 @Test
-func surfaceResultsPreserveSourceIdentityForSameRepository() {
+func surfaceResultsPreserveSourceIdentityAndCounts() {
     let workflow = GitHubActivitySurfaceResult(
         surface: .workflows,
         items: [activityItem(id: "workflow")],
@@ -43,58 +43,34 @@ func surfaceResultsPreserveSourceIdentityForSameRepository() {
         blockedTargetCount: 1
     )
 
-    let result = GitHubActivityLoadResult(
-        items: workflow.items,
-        surfaces: [
-            .workflows: workflow,
-            .reviewRequests: review,
-            .checks: checks,
-        ]
-    )
-
-    #expect(result.surface(.workflows) == workflow)
-    #expect(result.surface(.reviewRequests) == review)
-    #expect(result.surface(.checks) == checks)
-    #expect(result.successfulTargetCount == 1)
-    #expect(result.attemptedTargetCount == 2)
-    #expect(result.blockedTargetCount == 1)
-    #expect(result.consideredTargetCount == 3)
-    #expect(result.failures.map(\.surface) == [.reviewRequests, .checks])
+    #expect(workflow.surface == .workflows)
+    #expect(workflow.successfulTargetCount == 1)
+    #expect(workflow.attemptedTargetCount == 1)
+    #expect(workflow.blockedTargetCount == 0)
+    #expect(review.failures.first?.surface == .reviewRequests)
+    #expect(checks.failures.first?.surface == .checks)
+    #expect(checks.blockedTargetCount == 1)
 }
 
 @Test
-func aggregateFailuresHaveDeterministicSurfaceAndRepositoryOrder() {
+func surfaceResultSortsFailuresDeterministicallyInsideSource() {
     let checks = GitHubActivitySurfaceResult(
         surface: .checks,
         items: [],
         failures: [
             GitHubActivityTargetFailure(surface: .checks, repositoryID: 2, repositoryFullName: "snow/beta", reason: .notFound),
             GitHubActivityTargetFailure(surface: .checks, repositoryID: 1, repositoryFullName: "snow/alpha", reason: .forbidden),
+            GitHubActivityTargetFailure(surface: .checks, repositoryID: 1, repositoryFullName: "snow/alpha", reason: .authenticationRequired),
         ],
         successfulTargetCount: 0,
-        attemptedTargetCount: 2,
-        blockedTargetCount: 0
-    )
-    let workflow = GitHubActivitySurfaceResult(
-        surface: .workflows,
-        items: [],
-        failures: [
-            GitHubActivityTargetFailure(surface: .workflows, repositoryID: 9, repositoryFullName: "snow/zeta", reason: .unavailable),
-        ],
-        successfulTargetCount: 0,
-        attemptedTargetCount: 1,
+        attemptedTargetCount: 3,
         blockedTargetCount: 0
     )
 
-    let result = GitHubActivityLoadResult(
-        items: [],
-        surfaces: [.checks: checks, .workflows: workflow]
-    )
-
-    #expect(result.failures.map { ($0.surface, $0.repositoryID) } == [
-        (.workflows, 9),
-        (.checks, 1),
-        (.checks, 2),
+    #expect(checks.failures.map { ($0.repositoryID, $0.reason) } == [
+        (1, .authenticationRequired),
+        (1, .forbidden),
+        (2, .notFound),
     ])
 }
 
