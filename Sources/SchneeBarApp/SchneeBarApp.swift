@@ -41,11 +41,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let workflowRunService = GitHubWorkflowRunService(
             sessionCoordinator: sessionCoordinator
         )
+        let reviewRequestService = GitHubReviewRequestService(
+            sessionCoordinator: sessionCoordinator
+        )
+        let checkRunService = GitHubCheckRunService(
+            sessionCoordinator: sessionCoordinator
+        )
         workflowJobService = GitHubWorkflowJobService(
             sessionCoordinator: sessionCoordinator
         )
         let activityProvider = GitHubActivityProvider(
-            workflowRunLoader: workflowRunService
+            workflowRunLoader: workflowRunService,
+            reviewRequestLoader: reviewRequestService,
+            checkRunLoader: checkRunService
         )
         githubRuntimeModel = GitHubConnectionsRuntimeModel(
             profileStore: profileStore,
