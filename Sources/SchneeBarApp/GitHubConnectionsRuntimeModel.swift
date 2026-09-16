@@ -232,9 +232,9 @@ final class GitHubConnectionsRuntimeModel {
 
     func loadActivityItems() async throws -> [ActivityItem] {
         var items: [ActivityItem] = []
-        var allFailures: [GitHubRepositoryActivityFailure] = []
-        var consideredRepositoryCount = 0
-        var successfulRepositoryCount = 0
+        var allFailures: [GitHubActivityTargetFailure] = []
+        var attemptedTargetCount = 0
+        var successfulTargetCount = 0
 
         let enabledProfiles = profiles.filter(\.isEnabled)
         for profile in enabledProfiles {
@@ -256,11 +256,11 @@ final class GitHubConnectionsRuntimeModel {
                 continue
             }
 
-            consideredRepositoryCount += result.consideredRepositoryCount
-            successfulRepositoryCount += result.successfulRepositoryCount
-            allFailures.append(contentsOf: result.failures)
+            attemptedTargetCount += result.attemptedTargetCount
+            successfulTargetCount += result.successfulTargetCount
+            allFailures.append(contentsOf: result.targetFailures)
 
-            if result.failures.contains(where: { $0.reason == .authenticationRequired }) {
+            if result.targetFailures.contains(where: { $0.reason == .authenticationRequired }) {
                 await activityProvider.reset(connectionID: profile.id)
                 statusByConnectionID[profile.id] = .authenticationRequired
                 continue
@@ -274,23 +274,26 @@ final class GitHubConnectionsRuntimeModel {
             )
         }
 
-        if consideredRepositoryCount > 0,
-           successfulRepositoryCount == 0,
-           !allFailures.isEmpty
+        if attemptedTargetCount > 0,
+           successfulTargetCount == 0
         {
             if allFailures.contains(where: { $0.reason == .authenticationRequired }) {
                 throw RuntimeError.activityAuthenticationRequired
             }
 
-            let isTransientOutage = allFailures.allSatisfy {
-                $0.reason == .networkUnavailable || $0.reason == .unavailable
+            let operationalFailures = allFailures.filter {
+                $0.reason != .capabilityUnavailable
             }
+            let isTransientOutage = !operationalFailures.isEmpty
+                && operationalFailures.allSatisfy {
+                    $0.reason == .networkUnavailable || $0.reason == .unavailable
+                }
             if isTransientOutage {
                 throw RuntimeError.activityUnavailable
             }
         }
 
-        return items.sorted(by: activityItemSort)
+        return items.sorted(by: ActivityInboxOrdering().areInIncreasingOrder)
     }
 
     func beginOnboarding(defaultClientID: String? = nil) {
@@ -756,51 +759,28 @@ final class GitHubConnectionsRuntimeModel {
         profileID: UUID,
         inventory: GitHubAccessInventory
     ) {
-        guard result.consideredRepositoryCount > 0 else { return }
-
-        if result.successfulRepositoryCount > 0 {
+        if result.attemptedTargetCount == 0 {
             statusByConnectionID[profileID] = presentationStatus(for: inventory)
             return
         }
 
-        guard !result.failures.isEmpty else { return }
+        if result.successfulTargetCount > 0 {
+            statusByConnectionID[profileID] = presentationStatus(for: inventory)
+            return
+        }
 
-        if result.failures.allSatisfy({ $0.reason == .networkUnavailable }) {
+        let operationalFailures = result.targetFailures.filter {
+            $0.reason != .capabilityUnavailable
+        }
+        guard !operationalFailures.isEmpty else {
+            statusByConnectionID[profileID] = presentationStatus(for: inventory)
+            return
+        }
+
+        if operationalFailures.allSatisfy({ $0.reason == .networkUnavailable }) {
             statusByConnectionID[profileID] = .networkUnavailable
-        } else if result.failures.allSatisfy({
-            $0.reason == .networkUnavailable || $0.reason == .unavailable
-        }) {
+        } else {
             statusByConnectionID[profileID] = .unavailable
-        } else if result.failures.allSatisfy({
-            $0.reason == .forbidden
-                || $0.reason == .notFound
-                || $0.reason == .capabilityUnavailable
-        }) {
-            statusByConnectionID[profileID] = .unavailable
-        }
-    }
-
-    private func activityItemSort(lhs: ActivityItem, rhs: ActivityItem) -> Bool {
-        let lhsPriority = activityPriority(lhs.state)
-        let rhsPriority = activityPriority(rhs.state)
-        if lhsPriority != rhsPriority {
-            return lhsPriority < rhsPriority
-        }
-        if lhs.repository != rhs.repository {
-            return lhs.repository < rhs.repository
-        }
-        if lhs.context != rhs.context {
-            return lhs.context < rhs.context
-        }
-        return lhs.id < rhs.id
-    }
-
-    private func activityPriority(_ state: ActivityState) -> Int {
-        switch state {
-        case .failed: 0
-        case .running: 1
-        case .waiting: 2
-        case .success: 3
         }
     }
 
