@@ -8,6 +8,8 @@ public enum ActivityFixtureScenario: String, CaseIterable, Identifiable, Sendabl
     case waiting
     case enterprise
     case overflow
+    case mixedInbox
+    case reviewOnly
 
     public var id: String { rawValue }
 
@@ -19,6 +21,8 @@ public enum ActivityFixtureScenario: String, CaseIterable, Identifiable, Sendabl
         case .waiting: "Waiting"
         case .enterprise: "Enterprise"
         case .overflow: "Overflow"
+        case .mixedInbox: "GitHub Mixed Inbox"
+        case .reviewOnly: "GitHub Review Only"
         }
     }
 
@@ -97,6 +101,71 @@ public enum ActivityFixtureScenario: String, CaseIterable, Identifiable, Sendabl
                     state: index == 3 ? .failed : index.isMultiple(of: 3) ? .running : .success
                 )
             }
+        case .mixedInbox:
+            [
+                ActivityItem(
+                    id: "review-1",
+                    repository: "snow-labs/frost",
+                    context: "PR #142",
+                    detail: "Review requested · Harden wake recovery",
+                    state: .waiting,
+                    destinationURL: URL(string: "https://github.com/snow-labs/frost/pull/142"),
+                    kind: .reviewRequest,
+                    attention: .actionRequired,
+                    updatedAt: fixtureDate(300)
+                ),
+                ActivityItem(
+                    id: "check-1",
+                    repository: "snow-labs/frost",
+                    context: "Codecov",
+                    detail: "Failed · patch coverage",
+                    state: .failed,
+                    destinationURL: URL(string: "https://github.com/snow-labs/frost/commit/aaaaaaaa/checks"),
+                    kind: .checkRun,
+                    attention: .needsAttention,
+                    updatedAt: fixtureDate(200)
+                ),
+                ActivityItem(
+                    id: "workflow-1",
+                    repository: "snow-labs/crystal",
+                    context: "main · CI",
+                    detail: "Running · Build",
+                    state: .running,
+                    destinationURL: URL(string: "https://github.com/snow-labs/crystal/actions/runs/123"),
+                    kind: .workflowRun,
+                    attention: .active,
+                    updatedAt: fixtureDate(100)
+                ),
+            ]
+        case .reviewOnly:
+            [
+                ActivityItem(
+                    id: "review-only-1",
+                    repository: "snow-labs/frost",
+                    context: "PR #142",
+                    detail: "Review requested · Harden wake recovery",
+                    state: .waiting,
+                    destinationURL: URL(string: "https://github.com/snow-labs/frost/pull/142"),
+                    kind: .reviewRequest,
+                    attention: .actionRequired,
+                    updatedAt: fixtureDate(300)
+                ),
+                ActivityItem(
+                    id: "review-only-2",
+                    repository: "snow-labs/crystal",
+                    context: "PR #87",
+                    detail: "Review requested · Reduce launch latency",
+                    state: .waiting,
+                    destinationURL: URL(string: "https://github.com/snow-labs/crystal/pull/87"),
+                    kind: .reviewRequest,
+                    attention: .actionRequired,
+                    updatedAt: fixtureDate(200)
+                ),
+            ]
         }
+    }
+
+    private func fixtureDate(_ offset: TimeInterval) -> Date {
+        Date(timeIntervalSince1970: 1_800_000_000 + offset)
     }
 }
