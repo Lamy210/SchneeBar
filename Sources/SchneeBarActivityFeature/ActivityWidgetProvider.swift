@@ -24,9 +24,12 @@ public struct ActivityWidgetProvider: WidgetProvider {
 
         let severity: WidgetSeverity
         let priority: WidgetPriority
-        if summary.failed > 0 {
+        if summary.needsAttention > 0 || summary.failed > 0 {
             severity = .critical
             priority = .critical
+        } else if summary.actionRequired > 0 {
+            severity = .attention
+            priority = .attention
         } else if summary.running > 0 {
             severity = .active
             priority = .attention
@@ -40,8 +43,10 @@ public struct ActivityWidgetProvider: WidgetProvider {
 
         let normalText = summary.menuBarLabel
         let compactText: String
-        if summary.failed > 0 {
-            compactText = "✕\(summary.failed)"
+        if summary.actionRequired > 0 {
+            compactText = "!\(summary.actionRequired)"
+        } else if summary.needsAttention > 0 {
+            compactText = "✕\(summary.needsAttention)"
         } else if summary.running > 0 {
             compactText = "●\(summary.running)"
         } else if summary.waiting > 0 {
