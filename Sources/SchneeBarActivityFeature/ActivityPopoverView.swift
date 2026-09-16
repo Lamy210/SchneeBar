@@ -2,6 +2,10 @@ import SchneeBarCore
 import SchneeBarDesignSystem
 import SwiftUI
 
+func supportsLocalDetail(kind: ActivityKind) -> Bool {
+    kind == .workflowRun
+}
+
 public struct ActivityPopoverView: View {
     private let title: String
     private let items: [ActivityItem]
@@ -40,9 +44,11 @@ public struct ActivityPopoverView: View {
                         ForEach(items) { item in
                             ActivityRow(
                                 item: item,
-                                onInspect: onInspect.map { callback in
-                                    { callback(item) }
-                                }
+                                onInspect: supportsLocalDetail(kind: item.kind)
+                                    ? onInspect.map { callback in
+                                        { callback(item) }
+                                    }
+                                    : nil
                             )
                         }
                     }
@@ -117,8 +123,8 @@ private struct ActivityRow: View {
                 rowContent
             }
             .buttonStyle(.plain)
-            .help("Open workflow run")
-            .accessibilityHint("Opens the workflow run in your browser")
+            .help(browserActionLabel)
+            .accessibilityHint(browserAccessibilityHint)
         } else {
             rowContent
         }
@@ -165,6 +171,28 @@ private struct ActivityRow: View {
         .padding(.vertical, 7)
         .padding(.horizontal, 8)
         .contentShape(Rectangle())
+    }
+
+    private var browserActionLabel: String {
+        switch item.kind {
+        case .workflowRun:
+            return "Open workflow run"
+        case .reviewRequest:
+            return "Open pull request"
+        case .checkRun:
+            return "Open check run"
+        }
+    }
+
+    private var browserAccessibilityHint: String {
+        switch item.kind {
+        case .workflowRun:
+            return "Opens the workflow run in your browser"
+        case .reviewRequest:
+            return "Opens the pull request in your browser"
+        case .checkRun:
+            return "Opens the check run in your browser"
+        }
     }
 
     private var iconName: String {
