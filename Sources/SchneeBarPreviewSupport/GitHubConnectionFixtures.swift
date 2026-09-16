@@ -112,7 +112,25 @@ public enum GitHubConnectionManagementFixture {
         ]
     )
 
+    public static let mixedCapabilityModel = GitHubConnectionManagementModel(
+        id: UUID(uuidString: "21000000-0000-0000-0000-000000000002")!,
+        displayName: "Frost GitHub",
+        host: "github.com",
+        accountLogin: "snow-user",
+        repositories: [
+            repository(
+                201,
+                "snow-labs/frost",
+                isPrivate: true,
+                actions: .available,
+                reviews: .unverified,
+                checks: .unavailable
+            ),
+        ]
+    )
+
     public static let selectedRepositoryIDs: Set<Int64> = [101, 102, 105, 107, 108]
+    public static let mixedCapabilitySelectedRepositoryIDs: Set<Int64> = [201]
 
     private static func repository(
         _ id: Int64,
