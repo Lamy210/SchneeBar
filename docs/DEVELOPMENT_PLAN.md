@@ -61,7 +61,7 @@ Implemented foundation:
 - fresh capability recomputation from access inventory on session establish/restore, with App-local normalized assessment caching
 - Actions polling preflight that blocks only definitive capability unavailability while keeping unknown/missing evidence requestable
 - separate attempted/blocked Activity accounting so capability blocks do not consume the network polling budget
-- Actions access availability surfaced in repository management with per-repository badges and monitoring-scope summaries
+- Actions / Reviews / Checks availability surfaced independently in repository management
 - same-endpoint/same-account reconnect reconciliation that preserves connection identity, repository selection, monitoring state, and original creation time
 - same-endpoint/different-account coexistence with connection-scoped credential isolation
 - deterministic connection ordering for stable multi-account UI and polling behavior
@@ -73,11 +73,11 @@ Implemented foundation:
 Remaining:
 
 - broader enterprise connection validation before Phase 5
-- extend capability presentation to review requests, Checks, and deployments as those product surfaces land
+- extend capability presentation to deployments as that product surface lands
 
 ## Phase 3 — Developer Activity 🚧
 
-Implemented foundation:
+Implemented:
 
 - GitHub Actions workflow runs
 - workflow jobs and normalized job summaries
@@ -86,15 +86,22 @@ Implemented foundation:
 - provider destinations for opening GitHub activity
 - Pull Request metadata loading
 - Developer Activity integration into the widget engine
+- direct GitHub review-request activity using stable connected-account IDs
+- bounded Check Run activity for review/workflow-derived SHAs
+- hidden successful Workflow evidence for Check candidate discovery
+- provider-neutral priority Inbox semantics across Reviews, Checks, and Workflows
+- fixed source-list request budgets across Workflow / Review / Check polling
+- Actions / Reviews / Checks capability presentation
+- source-level activity failure/accounting with capability-only connection-health separation
+- repository-selection and reset isolation across all activity source caches
+- kind-aware popover behavior where only Workflow rows expose local job detail
+- deterministic mixed Inbox, review-only, and mixed capability Visual Regression fixtures
 
 Next:
 
-- review-request activity
-- Checks / check-suite activity
-- priority-based Inbox semantics
 - matrix-job aggregation
 - superseded-run handling in the user-facing model
-- deterministic fixtures for the new activity states before UI expansion
+- additional real-world validation of bounded polling and enterprise capability edge cases
 
 ## Phase 4 — Delivery Timeline 🚧
 
@@ -140,7 +147,7 @@ Still required:
 
 ## Current implementation priority
 
-1. Add Phase 3 review requests and Checks, extending capability presentation with those product surfaces.
+1. Harden Phase 3 with matrix-job aggregation and superseded-run handling.
 2. Integrate existing correlation primitives into the Phase 4 delivery timeline.
 3. Add deployments/environments and recovery states.
 4. Broaden enterprise validation toward Phase 5 requirements.
