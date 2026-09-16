@@ -67,10 +67,11 @@ func surfaceResultSortsFailuresDeterministicallyInsideSource() {
         blockedTargetCount: 0
     )
 
-    #expect(checks.failures.map { ($0.repositoryID, $0.reason) } == [
-        (1, .authenticationRequired),
-        (1, .forbidden),
-        (2, .notFound),
+    #expect(checks.failures.map(\.repositoryID) == [1, 1, 2])
+    #expect(checks.failures.map(\.reason) == [
+        .authenticationRequired,
+        .forbidden,
+        .notFound,
     ])
 }
 
