@@ -125,23 +125,28 @@ final class GitHubConnectionsRuntimeModel {
         let repositories = inventoryByConnectionID[profileID]
             .map(accessibleRepositories)
             ?? []
-        let actionsAccess = GitHubActionsAccessSummary.evaluate(
-            repositoryIDs: Set(repositories.map(\.id)),
-            assessment: capabilitiesByConnectionID[profileID]
-        )
+        let assessment = capabilitiesByConnectionID[profileID]
 
         return GitHubConnectionManagementModel(
             id: profile.id,
             displayName: profile.connection.displayName,
             host: displayHost(for: profile.connection),
             accountLogin: profile.account.login,
-            repositories: repositories.map {
+            repositories: repositories.map { repository in
                 GitHubRepositoryOptionModel(
-                    id: $0.id,
-                    fullName: $0.fullName,
-                    isPrivate: $0.isPrivate,
-                    actionsAccess: actionsAccessPresentation(
-                        actionsAccess.accessByRepositoryID[$0.id]
+                    id: repository.id,
+                    fullName: repository.fullName,
+                    isPrivate: repository.isPrivate,
+                    activityAccess: GitHubRepositoryActivityAccessModel(
+                        actions: activityAccessPresentation(
+                            assessment?.state(for: .actions, repositoryID: repository.id)
+                        ),
+                        reviewRequests: activityAccessPresentation(
+                            assessment?.state(for: .pullRequests, repositoryID: repository.id)
+                        ),
+                        checks: activityAccessPresentation(
+                            assessment?.state(for: .checks, repositoryID: repository.id)
+                        )
                     )
                 )
             }
@@ -741,15 +746,15 @@ final class GitHubConnectionsRuntimeModel {
             }
     }
 
-    private func actionsAccessPresentation(
-        _ access: GitHubActionsAccess?
+    private func activityAccessPresentation(
+        _ state: GitHubCapabilityState?
     ) -> GitHubRepositoryActivityAccessPresentation {
-        switch access {
+        switch state {
         case .available:
             return .available
         case .unavailable:
             return .unavailable
-        case .unverified, nil:
+        case .unknown, nil:
             return .unverified
         }
     }
