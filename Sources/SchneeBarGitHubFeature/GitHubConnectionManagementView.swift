@@ -19,14 +19,14 @@ public enum GitHubRepositoryActivityAccessPresentation: Equatable, Sendable {
     case unverified
     case unavailable
 
-    fileprivate var badgeLabel: String? {
+    fileprivate var statusLabel: String? {
         switch self {
         case .available:
             return nil
         case .unverified:
-            return "Actions access unverified"
+            return "Unverified"
         case .unavailable:
-            return "Actions unavailable"
+            return "Unavailable"
         }
     }
 
@@ -53,22 +53,38 @@ public enum GitHubRepositoryActivityAccessPresentation: Equatable, Sendable {
     }
 }
 
+public struct GitHubRepositoryActivityAccessModel: Equatable, Sendable {
+    public let actions: GitHubRepositoryActivityAccessPresentation
+    public let reviewRequests: GitHubRepositoryActivityAccessPresentation
+    public let checks: GitHubRepositoryActivityAccessPresentation
+
+    public init(
+        actions: GitHubRepositoryActivityAccessPresentation,
+        reviewRequests: GitHubRepositoryActivityAccessPresentation,
+        checks: GitHubRepositoryActivityAccessPresentation
+    ) {
+        self.actions = actions
+        self.reviewRequests = reviewRequests
+        self.checks = checks
+    }
+}
+
 public struct GitHubRepositoryOptionModel: Identifiable, Equatable, Sendable {
     public let id: Int64
     public let fullName: String
     public let isPrivate: Bool
-    public let actionsAccess: GitHubRepositoryActivityAccessPresentation
+    public let activityAccess: GitHubRepositoryActivityAccessModel
 
     public init(
         id: Int64,
         fullName: String,
         isPrivate: Bool,
-        actionsAccess: GitHubRepositoryActivityAccessPresentation
+        activityAccess: GitHubRepositoryActivityAccessModel
     ) {
         self.id = id
         self.fullName = fullName
         self.isPrivate = isPrivate
-        self.actionsAccess = actionsAccess
+        self.activityAccess = activityAccess
     }
 }
 
@@ -145,8 +161,8 @@ public struct GitHubConnectionManagementView: View {
         }
         .frame(
             minWidth: 620,
-            idealWidth: 680,
-            maxWidth: 760,
+            idealWidth: 720,
+            maxWidth: 820,
             minHeight: 560,
             idealHeight: 660,
             maxHeight: 760
@@ -242,7 +258,7 @@ public struct GitHubConnectionManagementView: View {
                     }
                 }
 
-                actionsAccessSummary
+                activityAccessSummary
 
                 if model.repositories.isEmpty {
                     ContentUnavailableView(
@@ -287,24 +303,28 @@ public struct GitHubConnectionManagementView: View {
     }
 
     @ViewBuilder
-    private var actionsAccessSummary: some View {
-        if unavailableActionsRepositoryCount > 0 || unverifiedActionsRepositoryCount > 0 {
-            VStack(alignment: .leading, spacing: 5) {
-                if unavailableActionsRepositoryCount > 0 {
+    private var activityAccessSummary: some View {
+        if unavailableActivitySourceCount > 0 || unverifiedActivitySourceCount > 0 {
+            HStack(spacing: 12) {
+                if unavailableActivitySourceCount > 0 {
                     Label(
-                        unavailableActionsSummaryLabel,
+                        "\(unavailableActivitySourceCount) unavailable",
                         systemImage: "xmark.circle.fill"
                     )
                     .foregroundStyle(.red)
                 }
 
-                if unverifiedActionsRepositoryCount > 0 {
+                if unverifiedActivitySourceCount > 0 {
                     Label(
-                        unverifiedActionsSummaryLabel,
+                        "\(unverifiedActivitySourceCount) unverified",
                         systemImage: "questionmark.circle.fill"
                     )
                     .foregroundStyle(.orange)
                 }
+
+                Spacer(minLength: 0)
+                Text("Activity source access")
+                    .foregroundStyle(.secondary)
             }
             .font(.caption)
             .padding(.vertical, 2)
@@ -349,18 +369,10 @@ public struct GitHubConnectionManagementView: View {
 
             Spacer(minLength: 12)
 
-            if let badgeLabel = repository.actionsAccess.badgeLabel {
-                Label(badgeLabel, systemImage: repository.actionsAccess.badgeSystemImage)
-                    .font(.caption2)
-                    .foregroundStyle(repository.actionsAccess.tint)
-                    .lineLimit(1)
-                    .fixedSize(horizontal: true, vertical: false)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 3)
-                    .background(
-                        repository.actionsAccess.tint.opacity(0.10),
-                        in: Capsule()
-                    )
+            HStack(spacing: 5) {
+                accessBadge("Actions", access: repository.activityAccess.actions)
+                accessBadge("Reviews", access: repository.activityAccess.reviewRequests)
+                accessBadge("Checks", access: repository.activityAccess.checks)
             }
 
             if repository.isPrivate {
@@ -373,6 +385,25 @@ public struct GitHubConnectionManagementView: View {
         .padding(.vertical, 9)
         .contentShape(Rectangle())
         .opacity(isSelected ? 1 : 0.58)
+    }
+
+    @ViewBuilder
+    private func accessBadge(
+        _ surfaceName: String,
+        access: GitHubRepositoryActivityAccessPresentation
+    ) -> some View {
+        if let statusLabel = access.statusLabel {
+            Label(surfaceName, systemImage: access.badgeSystemImage)
+                .font(.caption2)
+                .foregroundStyle(access.tint)
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
+                .padding(.horizontal, 6)
+                .padding(.vertical, 3)
+                .background(access.tint.opacity(0.10), in: Capsule())
+                .help("\(surfaceName) access: \(statusLabel.lowercased())")
+                .accessibilityLabel("\(surfaceName) access \(statusLabel)")
+        }
     }
 
     private var dangerSection: some View {
@@ -431,34 +462,30 @@ public struct GitHubConnectionManagementView: View {
         }
     }
 
-    private var unavailableActionsRepositoryCount: Int {
-        monitoredRepositories.count { $0.actionsAccess == .unavailable }
-    }
-
-    private var unverifiedActionsRepositoryCount: Int {
-        monitoredRepositories.count { $0.actionsAccess == .unverified }
-    }
-
-    private var unavailableActionsSummaryLabel: String {
-        if unavailableActionsRepositoryCount == 1 {
-            return "1 repository cannot provide Actions activity"
+    private var monitoredActivityAccess: [GitHubRepositoryActivityAccessPresentation] {
+        monitoredRepositories.flatMap { repository in
+            [
+                repository.activityAccess.actions,
+                repository.activityAccess.reviewRequests,
+                repository.activityAccess.checks,
+            ]
         }
-        return "\(unavailableActionsRepositoryCount) repositories cannot provide Actions activity"
     }
 
-    private var unverifiedActionsSummaryLabel: String {
-        if unverifiedActionsRepositoryCount == 1 {
-            return "1 repository has unverified Actions access"
-        }
-        return "\(unverifiedActionsRepositoryCount) repositories have unverified Actions access"
+    private var unavailableActivitySourceCount: Int {
+        monitoredActivityAccess.count { $0 == .unavailable }
+    }
+
+    private var unverifiedActivitySourceCount: Int {
+        monitoredActivityAccess.count { $0 == .unverified }
     }
 
     private var monitoringExplanation: String {
         switch selectionMode {
         case .allAccessible:
-            return "SchneeBar discovers all repositories granted to the GitHub App, while its activity poller still applies a bounded request budget."
+            return "SchneeBar discovers all repositories granted to the GitHub App, while activity polling keeps bounded budgets for Workflows, Review Requests, and Checks."
         case .selected:
-            return "Only selected repositories are eligible for CI activity polling. Repository access on GitHub is unchanged."
+            return "Only selected repositories are eligible for developer activity polling. Repository access on GitHub is unchanged."
         }
     }
 
