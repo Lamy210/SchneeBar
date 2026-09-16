@@ -1,7 +1,7 @@
 # GitHub Review Requests + Checks Activity Design
 
 **Date:** 2026-09-16  
-**Status:** Approved design, awaiting written-spec review  
+**Status:** Approved design, amended after written-spec review  
 **Scope:** Phase 3 Developer Activity
 
 ## Goal
@@ -9,7 +9,7 @@
 Extend SchneeBar's Developer Activity from GitHub Actions-only activity into a small prioritized inbox that also surfaces:
 
 - direct Pull Request review requests for the connected GitHub account;
-- relevant Check Runs for commits already represented by visible review/workflow context;
+- relevant Check Runs for commits justified by direct review requests or recently polled Workflow evidence;
 - repository capability evidence for Actions, Review Requests, and Checks;
 - deterministic priority semantics across the three activity sources.
 
@@ -131,15 +131,16 @@ Global ordering is deterministic:
 3. `.active`
 4. `.informational`
 
-Within the same attention class:
+Within the same attention class, preserve meaningful state ordering before recency:
 
-1. newer non-`nil` `updatedAt` first;
-2. dated items before undated items;
-3. repository name;
-4. activity kind raw value;
-5. stable activity ID.
+1. state rank: `.failed`, `.running`, `.waiting`, `.success`;
+2. newer non-`nil` `updatedAt` first;
+3. dated items before undated items;
+4. repository name;
+5. activity kind raw value;
+6. stable activity ID.
 
-This gives direct review requests priority over CI failures while still preserving deterministic ordering.
+The attention rank still gives direct review requests priority over CI failures, while the state rank preserves the existing running-before-waiting behavior for `.active` items.
 
 ### Source mapping
 
@@ -156,7 +157,7 @@ Direct Review Requests:
 
 Check Runs:
 
-- `action_required`, `failure`, `timed_out`, `startup_failure` -> `.failed` + `.needsAttention`;
+- `action_required`, `failure`, `timed_out` -> `.failed` + `.needsAttention`;
 - queued/waiting/pending/requested -> `.waiting` + `.active`;
 - in-progress -> `.running` + `.active`;
 - success/neutral/skipped/cancelled/stale -> informational or ignored according to mapper policy; successful/ignored checks are not top-level inbox items by default.
@@ -251,6 +252,28 @@ The client loads Check Runs for an explicit commit ref/SHA. It does **not** scan
 Normalize at least:
 
 ```swift
+public enum GitHubCheckRunStatus: Equatable, Sendable {
+    case queued
+    case inProgress
+    case completed
+    case waiting
+    case requested
+    case pending
+    case unknown(String)
+}
+
+public enum GitHubCheckRunConclusion: Equatable, Sendable {
+    case actionRequired
+    case cancelled
+    case failure
+    case neutral
+    case success
+    case skipped
+    case stale
+    case timedOut
+    case unknown(String)
+}
+
 public struct GitHubCheckRun: Equatable, Sendable {
     let id: Int64
     let name: String
@@ -263,22 +286,44 @@ public struct GitHubCheckRun: Equatable, Sendable {
 }
 ```
 
+The Check Run enums intentionally remain separate from `GitHubWorkflowRunStatus` / `GitHubWorkflowRunConclusion`. In particular, `startup_failure` is a Workflow Run conclusion and is not modeled as a Check Run conclusion.
+
 Each periodic Check request is intentionally bounded to **one page of 100 Check Runs for the candidate ref**. The client does not follow pagination links in this phase.
 
 ### Trusted navigation
 
 Top-level check activity links to the trusted repository commit checks page reconstructed from the connection endpoint and `headSHA`. Do not navigate to arbitrary third-party `details_url` values from API payloads.
 
+### Workflow evidence required for Check discovery
+
+The existing `GitHubWorkflowRun` already contains `headSHA`, but the current `GitHubWorkflowActivity` does not. Check discovery must not depend only on top-level visible Workflow rows because successful Workflow Runs are normally filtered out of the inbox.
+
+Retain normalized, provider-internal Workflow evidence for recently polled runs, conceptually:
+
+```swift
+struct GitHubWorkflowEvidence: Equatable, Sendable {
+    let repositoryID: Int64
+    let headSHA: String
+    let classification: GitHubWorkflowActivityClassification
+    let updatedAt: Date
+    let isVisible: Bool
+}
+```
+
+This evidence is GitHub-provider state, not a new Core/UI model. It may be represented by extending the existing normalized workflow activity type instead of introducing this exact type, but the implementation must preserve `headSHA` and whether an equivalent top-level Workflow row is visible.
+
 ### Candidate refs
 
-Check requests are allowed only for refs already justified by user-visible activity context.
+Check requests are allowed only for refs already justified by recently observed activity evidence.
 
 Per repository candidate priority:
 
 1. direct review-request head SHAs, newest review first;
-2. visible workflow-run head SHAs, ordered by workflow activity priority and recency.
+2. recently polled Workflow Run head SHAs, ordered by Workflow classification priority and recency, **whether or not that Workflow Run is visible as a top-level Activity item**.
 
 Deduplicate SHAs before requesting Checks.
+
+This explicitly covers the case where GitHub Actions succeeds and is hidden from the inbox while an external Check on the same commit fails.
 
 Do not make an additional branch/default-branch discovery request solely to find Check Runs in this phase.
 
@@ -288,11 +333,12 @@ GitHub Actions also creates Check Runs. Showing both a workflow failure and its 
 
 Policy:
 
-- suppress a GitHub Actions-owned Check Run (`appSlug == "github-actions"`) only when the provider has current or cached visible Workflow activity for the **same repository and head SHA**;
-- if no same-SHA Workflow activity evidence exists, the Check Run remains eligible, including when Actions is unavailable or its poll failed;
+- suppress a GitHub Actions-owned Check Run (`appSlug == "github-actions"`) only when the provider has current or cached **visible Workflow activity** for the same repository and head SHA;
+- Workflow evidence that exists only for Check discovery, but does not produce a visible Workflow row, does **not** suppress a Check row;
+- if no same-SHA visible Workflow activity exists, the Check Run remains eligible, including when Actions is unavailable, its poll failed, or the Workflow itself succeeded and was hidden;
 - external/non-GitHub-Actions checks remain eligible.
 
-This prevents duplicate workflow/check rows without hiding Checks as a fallback signal when the Actions surface cannot provide equivalent evidence.
+This prevents duplicate workflow/check rows without hiding Checks as a fallback signal when the Actions surface cannot provide an equivalent visible row.
 
 ## Capability Gating
 
@@ -310,6 +356,16 @@ For each source:
 
 A definitive capability block is reported separately from attempted network work.
 
+### Connection health is separate from source capability
+
+Repository capability state does not define whether the GitHub connection itself is healthy.
+
+If Actions, Reviews, and Checks are all definitively unavailable because permissions are missing, but the authenticated session and repository inventory are valid, the connection remains `.connected`. The management UI exposes the unavailable surfaces instead of marking the whole connection unavailable.
+
+Connection-level `.unavailable` remains reserved for session/inventory/endpoint conditions that prevent the connection from operating, or for attempted source failures whose aggregate runtime policy genuinely represents an operational outage. A capability block by itself never transitions a healthy connection to `.unavailable`.
+
+Authentication failure remains connection-wide and transitions to `.authenticationRequired`.
+
 ## Polling and Request Budget
 
 SchneeBar is a menu-bar utility and must remain mostly asleep. Adding two sources must not multiply requests without a hard bound.
@@ -322,11 +378,13 @@ Default **per-connection, per-refresh** source budgets:
 
 The periodic top-level source budget is therefore a hard maximum of **16 HTTP list requests per connection per refresh**: 8 Workflow + 4 Review + 4 Check. No Review or Check pagination occurs inside that periodic refresh.
 
+This budget applies to activity source list requests. Session-layer token refresh or other connection-management traffic is outside this source-list budget.
+
 The provider maintains separate source poll state so one hot Actions repository does not permanently starve review scanning.
 
 Review polling reserves at least one cold repository slot when eligible repositories exceed its budget.
 
-Check polling is demand-driven from current/cached review/workflow context and has no independent cold-repository scan.
+Check polling is demand-driven from current/cached review/workflow evidence and has no independent cold-repository scan.
 
 ## Provider State
 
@@ -335,32 +393,52 @@ Retain one connection-level generation counter for stale async-work rejection.
 Add source-specific caches/poll state under the connection:
 
 ```text
-Workflow cache       key: connection + repository
-Review cache         key: connection + repository
-Check cache          key: connection + repository + head SHA
+Workflow cache/evidence key: connection + repository
+Review cache            key: connection + repository
+Check cache             key: connection + repository + head SHA
 ```
 
-`reset(connectionID:)` invalidates the generation and clears all three source caches and poll state.
+`reset(connectionID:)` invalidates the generation and clears all three source caches, Workflow evidence, and poll state.
 
-A repository leaving monitoring scope removes all source caches for that repository.
+A repository leaving monitoring scope removes all source caches/evidence for that repository.
+
+### Formal source result model
+
+Make source-level accounting an explicit provider contract rather than a conceptual implementation detail:
+
+```swift
+public enum GitHubActivitySurface: String, CaseIterable, Hashable, Sendable {
+    case workflows
+    case reviewRequests
+    case checks
+}
+
+public struct GitHubActivityTargetFailure: Equatable, Sendable {
+    public let surface: GitHubActivitySurface
+    public let repositoryID: Int64
+    public let repositoryFullName: String
+    public let reason: GitHubRepositoryActivityFailureReason
+}
+
+public struct GitHubActivitySurfaceResult: Equatable, Sendable {
+    public let surface: GitHubActivitySurface
+    public let items: [ActivityItem]
+    public let failures: [GitHubActivityTargetFailure]
+    public let successfulTargetCount: Int
+    public let attemptedTargetCount: Int
+    public let blockedTargetCount: Int
+}
+```
+
+A Check target is a repository/ref pair, so multiple Check targets may share the same `repositoryID`; tests and internal scheduling may retain the ref separately where needed. The public failure model does not expose commit SHAs unless a concrete UI/debug requirement appears.
+
+The aggregate `GitHubActivityLoadResult` contains source results, or an equivalent keyed representation, and may expose compatibility aggregate counts if existing runtime call sites need a migration path. It must preserve source identity; failures cannot be flattened into repository-only evidence.
 
 ### Partial failures
 
 One source failing must not erase successful items from another source.
 
-Track source-level accounting, conceptually:
-
-```swift
-GitHubActivitySurfaceResult
-- surface
-- items
-- failures
-- successfulTargetCount
-- attemptedTargetCount
-- blockedTargetCount
-```
-
-The public aggregate load result may remain one type, but it must preserve enough surface information for runtime status and tests to distinguish:
+The runtime must be able to distinguish:
 
 - no request because capability is unavailable;
 - attempted request failed;
@@ -369,6 +447,8 @@ The public aggregate load result may remain one type, but it must preserve enoug
 Authentication failure from any attempted source escalates the connection to `.authenticationRequired`, resets provider state for that connection, and follows the existing recovery path.
 
 Transient network failure preserves existing last-known-good cache behavior. A later successful source poll replaces its own cache with current server evidence, including an empty result when an activity has been resolved.
+
+A capability-only block does not make the connection unavailable. For non-auth attempted failures, runtime connection status is derived from attempted operational outcomes, not from `blockedTargetCount` alone.
 
 ## Repository Management Capability UI
 
@@ -446,6 +526,7 @@ Cover:
 
 - backward-compatible `ActivityItem` decoding;
 - attention ordering;
+- state ordering within an attention class (`running` before `waiting`);
 - timestamp and stable-ID tie breakers;
 - new `ActivitySummary` semantics.
 
@@ -468,15 +549,19 @@ Cover:
 
 Cover:
 
-- queued/in-progress/failure/action-required/success normalization;
+- exact Check Run status/conclusion normalization, including unknown-value preservation;
+- `startup_failure` is not modeled as a known Check Run conclusion;
+- queued/in-progress/failure/action-required/success activity mapping;
 - periodic request uses one page / maximum 100 Check Runs;
 - trusted commit-check URL reconstruction;
 - candidate SHA de-duplication;
 - review SHA precedence over workflow SHA;
+- successful hidden Workflow evidence still contributes a candidate SHA;
+- external Check failure is discovered when the same-SHA Workflow succeeded and is hidden;
 - maximum two refs per repository;
 - maximum four check requests per refresh;
 - same-SHA GitHub Actions Check suppression when visible Workflow evidence exists;
-- GitHub Actions Check fallback when same-SHA Workflow evidence does not exist;
+- GitHub Actions Check fallback when same-SHA visible Workflow evidence does not exist;
 - successful/neutral/skipped checks omitted from top-level inbox by default.
 
 ### Provider tests
@@ -486,7 +571,10 @@ Cover:
 - `.pullRequests` unavailable -> no review network call;
 - `.checks` unavailable -> no check network call;
 - unknown capability remains requestable;
+- formal surface result preserves source identity;
 - partial surface success/failure accounting;
+- all three surfaces capability-blocked while session/inventory is healthy -> connection remains connected;
+- capability block alone never produces connection-level `.unavailable`;
 - 401 from any attempted source -> authentication-required failure;
 - multi-account and multi-connection cache isolation;
 - monitoring-selection pruning;
@@ -499,7 +587,9 @@ Cover:
 Cover:
 
 - aggregate ordering across review/check/workflow items;
-- connection status remains connected on partial non-auth failures;
+- running Workflow activity sorts before waiting Workflow activity within `.active`;
+- connection status remains connected on partial non-auth failures when another attempted source succeeds;
+- capability-only blocks do not downgrade a healthy connection;
 - authentication failure triggers existing reauthentication state;
 - repository-management presentation maps all three capability surfaces.
 
@@ -509,7 +599,7 @@ Add deterministic fictional scenes for:
 
 1. mixed inbox: direct review request + failed external check + running workflow;
 2. review-request-only inbox;
-3. Checks unavailable / Reviews unverified capability management;
+3. Checks unavailable / Reviews unverified capability management while the connection remains connected;
 4. multiple repositories with deterministic priority ordering.
 
 Fixtures must contain no real repository, account, enterprise URL, token, or private data.
@@ -526,6 +616,7 @@ Sources/SchneeBarGitHub/GitHubReviewRequestService.swift
 Sources/SchneeBarGitHub/GitHubCheckRunClient.swift
 Sources/SchneeBarGitHub/GitHubCheckRunService.swift
 Sources/SchneeBarGitHubActivityProvider/GitHubActivityProvider.swift
+Sources/SchneeBarGitHubActivityProvider/GitHubActivitySurfaceResult.swift
 Sources/SchneeBarGitHubActivityProvider/GitHubReviewRequestActivityMapper.swift
 Sources/SchneeBarGitHubActivityProvider/GitHubCheckRunActivityMapper.swift
 Sources/SchneeBarGitHubFeature/GitHubConnectionManagementView.swift
@@ -542,15 +633,15 @@ Tests/SchneeBarAppTests/*
 docs/DEVELOPMENT_PLAN.md
 ```
 
-Exact file splits may be refined in the implementation plan, but module ownership must remain as specified here.
+Exact file splits may be refined in the implementation plan, but module ownership must remain as specified here. Workflow evidence may live in the provider file or a focused internal file; it must not leak into Core solely to support GitHub Check discovery.
 
 ## Delivery Sequence
 
 1. Core activity kind/attention/summary semantics.
 2. Review Request client/service/mapper.
-3. Check Run client/service/mapper and candidate/dedup policy.
-4. Multi-source provider scheduling, caching, capability gating, and failure accounting.
-5. Runtime/composition wiring.
+3. Check Run client/service/mapper and Workflow-evidence candidate/dedup policy.
+4. Formal multi-source result model plus provider scheduling, caching, capability gating, and failure accounting.
+5. Runtime/composition wiring, including separation of connection health from capability-only blocks.
 6. Repository capability presentation.
 7. Activity interaction/UI updates.
 8. deterministic fixtures + visual regression.
@@ -564,13 +655,16 @@ The feature is complete when all of the following are true:
 - a PR directly requesting the connected account appears above CI activity when it is inside the bounded recent-PR polling window;
 - team-only review requests are not guessed or shown;
 - relevant external Check Runs appear only for bounded, activity-derived commit refs;
+- a successful hidden Workflow Run can still seed Check discovery for its head SHA;
+- an external Check failure is visible even when the same-SHA GitHub Actions Workflow succeeded and was hidden;
 - GitHub Actions checks do not duplicate same-SHA visible Workflow activity;
-- GitHub Actions checks remain usable as fallback when no equivalent Workflow evidence exists;
+- GitHub Actions checks remain usable as fallback when no equivalent visible Workflow evidence exists;
 - Review and Check capability blocks perform zero source requests;
+- capability-only blocks do not mark an otherwise healthy GitHub connection unavailable;
 - a failure in one source does not erase successful activity from another source;
 - a 401 from any attempted source enters the existing authentication-required recovery state;
 - repository monitoring scope applies consistently to Actions, Reviews, and Checks;
-- one periodic refresh performs at most 16 top-level source list requests per connection;
+- one periodic refresh performs at most 16 top-level activity source list requests per connection;
 - multi-account/connection caches remain isolated;
 - non-workflow activity never shows the workflow-job inspect affordance;
 - capability management visibly distinguishes unavailable/unverified Actions, Reviews, and Checks;
