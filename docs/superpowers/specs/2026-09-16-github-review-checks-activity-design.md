@@ -182,7 +182,7 @@ Priority for the compact label:
 4. waiting;
 5. clear state.
 
-Exact strings are presentation details, but deterministic fixtures must cover the new highest-priority review-request state.
+Exact strings remain a presentation choice, but deterministic fixtures must cover the new highest-priority review-request state and the no-activity state.
 
 ## Review Request Source
 
@@ -198,7 +198,7 @@ GitHubReviewRequestService
 GitHubReviewRequestActivityMapper
 ```
 
-The client lists open Pull Requests for one repository with bounded pagination and normalizes only fields SchneeBar needs:
+The client lists the most recently updated open Pull Requests for one repository and normalizes only fields SchneeBar needs:
 
 ```swift
 public struct GitHubReviewRequest: Equatable, Sendable {
@@ -211,6 +211,8 @@ public struct GitHubReviewRequest: Equatable, Sendable {
     let webURL: URL
 }
 ```
+
+Periodic activity polling is intentionally bounded to **one page of 100 open PRs per selected repository poll**, ordered by most recently updated. It does not follow pagination links in this phase. This means a direct review request outside the 100 most recently updated open PRs of a repository is outside the Phase 3 polling window; a search-based/global GitHub inbox is explicitly out of scope.
 
 Do not expose raw REST payloads outside the GitHub adapter.
 
@@ -261,6 +263,8 @@ public struct GitHubCheckRun: Equatable, Sendable {
 }
 ```
 
+Each periodic Check request is intentionally bounded to **one page of 100 Check Runs for the candidate ref**. The client does not follow pagination links in this phase.
+
 ### Trusted navigation
 
 Top-level check activity links to the trusted repository commit checks page reconstructed from the connection endpoint and `headSHA`. Do not navigate to arbitrary third-party `details_url` values from API payloads.
@@ -284,11 +288,11 @@ GitHub Actions also creates Check Runs. Showing both a workflow failure and its 
 
 Policy:
 
-- when Actions is requestable for the repository, suppress top-level Check Runs whose normalized `appSlug` is `github-actions`;
-- when Actions is definitively unavailable but Checks is requestable, GitHub Actions-owned Check Runs may be shown as a fallback signal;
+- suppress a GitHub Actions-owned Check Run (`appSlug == "github-actions"`) only when the provider has current or cached visible Workflow activity for the **same repository and head SHA**;
+- if no same-SHA Workflow activity evidence exists, the Check Run remains eligible, including when Actions is unavailable or its poll failed;
 - external/non-GitHub-Actions checks remain eligible.
 
-This policy is source-level and must be unit tested.
+This prevents duplicate workflow/check rows without hiding Checks as a fallback signal when the Actions surface cannot provide equivalent evidence.
 
 ## Capability Gating
 
@@ -313,10 +317,10 @@ SchneeBar is a menu-bar utility and must remain mostly asleep. Adding two source
 Default **per-connection, per-refresh** source budgets:
 
 - Workflow repository polls: existing maximum of 8;
-- Review repository polls: maximum of 4;
-- Check ref polls: maximum of 4 total, maximum of 2 refs per repository.
+- Review repository polls: maximum of 4, one HTTP page/request each;
+- Check ref polls: maximum of 4 total, maximum of 2 refs per repository, one HTTP page/request each.
 
-Worst-case source request count is therefore bounded to 16 primary list requests per connection per refresh before pagination. Pagination itself remains bounded by each client and must have an explicit maximum page limit.
+The periodic top-level source budget is therefore a hard maximum of **16 HTTP list requests per connection per refresh**: 8 Workflow + 4 Review + 4 Check. No Review or Check pagination occurs inside that periodic refresh.
 
 The provider maintains separate source poll state so one hot Actions repository does not permanently starve review scanning.
 
@@ -453,7 +457,7 @@ Cover:
 - another reviewer only -> no activity;
 - multiple requested reviewers including current account;
 - renamed login does not break stable-ID match;
-- pagination and page bound;
+- periodic request uses one page / maximum 100 PRs;
 - private repository permission errors;
 - 401 / 403 / 404 / network mapping;
 - trusted PR URL reconstruction;
@@ -465,13 +469,14 @@ Cover:
 Cover:
 
 - queued/in-progress/failure/action-required/success normalization;
+- periodic request uses one page / maximum 100 Check Runs;
 - trusted commit-check URL reconstruction;
 - candidate SHA de-duplication;
 - review SHA precedence over workflow SHA;
 - maximum two refs per repository;
 - maximum four check requests per refresh;
-- GitHub Actions-owned check suppression when Actions is requestable;
-- GitHub Actions-owned check fallback when Actions is definitively unavailable;
+- same-SHA GitHub Actions Check suppression when visible Workflow evidence exists;
+- GitHub Actions Check fallback when same-SHA Workflow evidence does not exist;
 - successful/neutral/skipped checks omitted from top-level inbox by default.
 
 ### Provider tests
@@ -486,7 +491,7 @@ Cover:
 - multi-account and multi-connection cache isolation;
 - monitoring-selection pruning;
 - generation/reset rejection of stale cross-source completions;
-- bounded combined request count;
+- hard maximum of 16 periodic source list requests per connection/refresh;
 - cold review repositories are not starved by hot Actions repositories.
 
 ### App/runtime tests
@@ -556,15 +561,16 @@ Exact file splits may be refined in the implementation plan, but module ownershi
 
 The feature is complete when all of the following are true:
 
-- a PR directly requesting the connected account appears above CI activity;
+- a PR directly requesting the connected account appears above CI activity when it is inside the bounded recent-PR polling window;
 - team-only review requests are not guessed or shown;
 - relevant external Check Runs appear only for bounded, activity-derived commit refs;
-- GitHub Actions checks do not duplicate normal Actions activity when Actions is requestable;
+- GitHub Actions checks do not duplicate same-SHA visible Workflow activity;
+- GitHub Actions checks remain usable as fallback when no equivalent Workflow evidence exists;
 - Review and Check capability blocks perform zero source requests;
 - a failure in one source does not erase successful activity from another source;
 - a 401 from any attempted source enters the existing authentication-required recovery state;
 - repository monitoring scope applies consistently to Actions, Reviews, and Checks;
-- one refresh has a hard bounded request budget;
+- one periodic refresh performs at most 16 top-level source list requests per connection;
 - multi-account/connection caches remain isolated;
 - non-workflow activity never shows the workflow-job inspect affordance;
 - capability management visibly distinguishes unavailable/unverified Actions, Reviews, and Checks;
