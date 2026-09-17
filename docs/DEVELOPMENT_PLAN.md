@@ -100,11 +100,16 @@ Implemented:
 - provider-neutral nested activity detail rows with one-level disclosure presentation
 - raw workflow-job summary preservation while grouped presentation rows retain original job URLs and failure details
 - deterministic matrix success/failure Visual Regression fixtures
+- PR-scoped conservative superseded-run handling that removes older different-SHA runs from both Workflow Inbox activity and Workflow-derived Check evidence
 
 Next:
 
-- superseded-run handling in the user-facing model
 - additional real-world validation of bounded polling and enterprise capability edge cases
+
+Deferred intentionally:
+
+- branch/push supersession when a single Pull Request identity is unavailable
+- re-run-attempt-specific history or replacement UX
 
 ## Phase 4 — Delivery Timeline 🚧
 
@@ -150,11 +155,10 @@ Still required:
 
 ## Current implementation priority
 
-1. Harden Phase 3 with superseded-run handling.
-2. Integrate existing correlation primitives into the Phase 4 delivery timeline.
-3. Add deployments/environments and recovery states.
-4. Broaden enterprise validation toward Phase 5 requirements.
-5. Only then broaden system widgets or external provider/plugin scope.
+1. Integrate existing correlation primitives into the Phase 4 delivery timeline.
+2. Add deployments/environments and recovery states.
+3. Broaden enterprise validation toward Phase 5 requirements.
+4. Only then broaden system widgets or external provider/plugin scope.
 
 ## Engineering constraints
 
