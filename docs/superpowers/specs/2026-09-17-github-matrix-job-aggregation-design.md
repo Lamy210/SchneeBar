@@ -1,7 +1,7 @@
 # GitHub Matrix Job Aggregation Design
 
 **Date:** 2026-09-17  
-**Status:** Ready for written-spec review  
+**Status:** Approved after self-review  
 **Scope:** Phase 3 Developer Activity hardening
 
 ## Goal
@@ -236,6 +236,7 @@ public struct GitHubWorkflowJobVariant: Equatable, Sendable {
 }
 
 public struct GitHubWorkflowJobVariantGroup: Equatable, Sendable {
+    public let runID: Int64
     public let baseName: String
     public let variants: [GitHubWorkflowJobVariant]
 }
