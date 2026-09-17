@@ -18,6 +18,46 @@ func activityDetailRowInteraction(_ row: ActivityDetailRow) -> ActivityDetailRow
     return .none
 }
 
+func deliveryTimelineConfidenceLabel(
+    _ confidence: DeliveryTimelineConfidence
+) -> String {
+    switch confidence {
+    case .exact: "Exact correlation"
+    case .high: "High-confidence correlation"
+    case .medium: "Medium-confidence correlation"
+    case .unknown: "Correlation unavailable"
+    }
+}
+
+func deliveryTimelineUnavailableMessage(
+    for status: DeliveryTimelineStatus
+) -> String? {
+    switch status {
+    case .correlated:
+        nil
+    case .evidenceUnavailable:
+        "Correlation evidence unavailable"
+    case .temporarilyUnavailable:
+        "Delivery timeline temporarily unavailable"
+    }
+}
+
+func deliveryTimelineEventIconName(
+    _ event: DeliveryTimelineEvent
+) -> String {
+    activityDetailIconName(for: event.state)
+}
+
+func activityDetailIconName(for state: ActivityDetailState) -> String {
+    switch state {
+    case .success: "checkmark.circle.fill"
+    case .running: "circle.dotted.circle"
+    case .failed: "xmark.octagon.fill"
+    case .waiting: "clock.fill"
+    case .neutral: "minus.circle.fill"
+    }
+}
+
 public struct ActivityDetailView: View {
     private let item: ActivityItem
     private let detail: ActivityDetailSnapshot?
@@ -131,6 +171,14 @@ public struct ActivityDetailView: View {
 
     private func detailContent(_ detail: ActivityDetailSnapshot) -> some View {
         VStack(alignment: .leading, spacing: 10) {
+            if let timeline = detail.deliveryTimeline {
+                deliverySection(timeline)
+                Divider()
+                Text("Jobs")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+            }
+
             Text(detail.summary)
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -154,6 +202,94 @@ public struct ActivityDetailView: View {
                 .frame(maxHeight: 360)
             }
         }
+    }
+
+    private func deliverySection(
+        _ timeline: DeliveryTimelineSnapshot
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text("Delivery")
+                    .font(.subheadline.weight(.semibold))
+
+                Spacer(minLength: 8)
+
+                Text(deliveryTimelineConfidenceLabel(timeline.confidence))
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+
+            if let unavailableMessage = deliveryTimelineUnavailableMessage(for: timeline.status) {
+                Label(
+                    unavailableMessage,
+                    systemImage: timeline.status == .temporarilyUnavailable
+                        ? "exclamationmark.triangle"
+                        : "questionmark.circle"
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .padding(.vertical, 4)
+            } else {
+                VStack(spacing: 2) {
+                    ForEach(timeline.events) { event in
+                        deliveryEventRow(event)
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func deliveryEventRow(
+        _ event: DeliveryTimelineEvent
+    ) -> some View {
+        if let destinationURL = event.destinationURL {
+            Link(destination: destinationURL) {
+                deliveryEventContent(event, showsExternalLink: true)
+            }
+            .buttonStyle(.plain)
+            .help("Open delivery event")
+        } else {
+            deliveryEventContent(event, showsExternalLink: false)
+        }
+    }
+
+    private func deliveryEventContent(
+        _ event: DeliveryTimelineEvent,
+        showsExternalLink: Bool
+    ) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: deliveryTimelineEventIconName(event))
+                .foregroundStyle(iconColor(for: event.state))
+                .frame(width: 18)
+                .padding(.top, 2)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(event.title)
+                    .font(.subheadline.weight(.medium))
+                    .lineLimit(2)
+                    .truncationMode(.middle)
+
+                if let detail = event.detail {
+                    Text(detail)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                }
+            }
+
+            Spacer(minLength: 4)
+
+            if showsExternalLink {
+                Image(systemName: "arrow.up.right")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                    .padding(.top, 3)
+            }
+        }
+        .padding(.vertical, 5)
+        .padding(.horizontal, 8)
+        .contentShape(Rectangle())
     }
 
     @ViewBuilder
@@ -199,7 +335,7 @@ public struct ActivityDetailView: View {
         showsExternalLink: Bool
     ) -> some View {
         HStack(alignment: .top, spacing: 10) {
-            Image(systemName: iconName(for: row.state))
+            Image(systemName: activityDetailIconName(for: row.state))
                 .foregroundStyle(iconColor(for: row.state))
                 .frame(width: 18)
                 .padding(.top, 2)
@@ -230,16 +366,6 @@ public struct ActivityDetailView: View {
         .padding(.vertical, 7)
         .padding(.horizontal, 8)
         .contentShape(Rectangle())
-    }
-
-    private func iconName(for state: ActivityDetailState) -> String {
-        switch state {
-        case .success: "checkmark.circle.fill"
-        case .running: "circle.dotted.circle"
-        case .failed: "xmark.octagon.fill"
-        case .waiting: "clock.fill"
-        case .neutral: "minus.circle.fill"
-        }
     }
 
     private func iconColor(for state: ActivityDetailState) -> Color {
