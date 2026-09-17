@@ -1,7 +1,7 @@
 # GitHub Superseded Run Handling Design
 
 **Date:** 2026-09-18  
-**Status:** Approved in chat; pending written-spec review  
+**Status:** Approved after self-review  
 **Scope:** Phase 3 Developer Activity hardening
 
 ## Goal
@@ -346,6 +346,10 @@ No Core, SwiftUI, GitHub REST client, job-detail, or Visual Harness production c
 9. Existing correlation, re-run, matrix-detail, polling-budget, and generation-reset behavior remains intact.
 10. Resolver output and tests are deterministic.
 11. CI, Visual Regression, and CodeQL pass on the exact implementation head before merge.
+
+## Review Result
+
+Self-review found no blocking issue. The lane key, duplicate-maximum behavior, same-SHA preservation, Review-derived Check independence, deterministic ordering, and failure/cache semantics are explicit and internally consistent. Approved for implementation.
 
 ## Deferred Follow-up
 
