@@ -1,7 +1,7 @@
 # GitHub Matrix Job Aggregation Design
 
 **Date:** 2026-09-17  
-**Status:** Draft for written-spec review  
+**Status:** Ready for written-spec review  
 **Scope:** Phase 3 Developer Activity hardening
 
 ## Goal
@@ -153,29 +153,38 @@ Parsing rules:
 
 1. trim leading/trailing whitespace from the full job name;
 2. require the final character to be `)`;
-3. locate the matching terminal ` (` delimiter used for the suffix;
-4. trim the base and suffix contents independently;
-5. require both the base and variant label to be non-empty;
-6. preserve the variant label as opaque human-readable text;
-7. do not split the variant label on commas, equals signs, slashes, spaces, or other punctuation;
-8. do not synthesize matrix key names.
+3. walk backward from that final `)` while balancing nested parentheses until the matching opening `(` for the terminal suffix is found;
+4. require that opening `(` to be immediately preceded by one space, which separates the base name from the suffix;
+5. trim the base and suffix contents independently;
+6. require both the base and variant label to be non-empty;
+7. preserve the variant label as opaque human-readable text;
+8. do not split the variant label on commas, equals signs, slashes, spaces, or other punctuation;
+9. do not synthesize matrix key names.
 
-Nested or unusual text inside the suffix remains opaque when the terminal form is valid.
+This means `Test (macos (arm64))` parses as base `Test` with opaque variant label `macos (arm64)`, while `Test (macos) retry` is not a candidate.
+
+Unbalanced parentheses fail parsing and leave the job ungrouped.
 
 ## Group Formation
 
+The grouping key is explicitly:
+
+```text
+(runID, baseName)
+```
+
 A variant group is formed only when all of the following are true:
 
-1. at least two jobs from the same workflow run parse to the exact same `baseName`;
-2. all candidate jobs in that base-name bucket have distinct non-empty `variantLabel` values;
+1. at least two jobs share the same `runID` and exact parsed `baseName`;
+2. all candidate jobs in that `(runID, baseName)` bucket have distinct non-empty `variantLabel` values;
 3. each grouped job retains its own unique GitHub job ID;
-4. no unparseable job with exactly the same full name is folded into the group.
+4. no unparseable job is folded into the group.
 
 The comparison of `baseName` and `variantLabel` is case-sensitive because GitHub job names are user-controlled display text and SchneeBar should not merge names the author intentionally distinguished by case.
 
 The minimum group size is 2.
 
-If duplicate variant labels appear under the same base name, the entire candidate bucket remains ungrouped. This avoids hiding retries, generated duplicates, or custom jobs behind an ambiguous parent.
+If duplicate variant labels appear inside one `(runID, baseName)` bucket, the entire candidate bucket remains ungrouped. This avoids hiding retries, generated duplicates, or custom jobs behind an ambiguous parent.
 
 Examples:
 
@@ -184,7 +193,7 @@ Test (macos)
 Test (linux)
 ```
 
-becomes one `Test` group with two children.
+becomes one `Test` group with two children when both jobs belong to the same run.
 
 ```text
 Test (macos)
@@ -200,6 +209,8 @@ Package
 ```
 
 becomes one `Build` group plus one `Package` row.
+
+Jobs from different workflow runs never group even when their names are identical.
 
 ## Why No Step-Signature Requirement
 
@@ -472,7 +483,7 @@ Adding `children` with a default empty array keeps existing source call sites co
 
 Workflows with no eligible groups must render identically in behavior and ordering to the existing implementation.
 
-Single parenthesized names such as `Build (release)` remain single jobs because a group requires at least two distinct variants sharing the same base.
+Single parenthesized names such as `Build (release)` remain single jobs because a group requires at least two distinct variants sharing the same `(runID, baseName)` key.
 
 ## Deterministic IDs
 
@@ -516,7 +527,8 @@ Cover at least:
 - same-looking candidates from different `runID` values do not group;
 - terminal suffix only (`Test (macos) retry` does not parse);
 - empty base/suffix rejection;
-- nested/punctuated suffix retained opaquely;
+- balanced nested suffix such as `Test (macos (arm64))` remains one opaque variant label;
+- unbalanced suffix stays ungrouped;
 - deterministic output ordering.
 
 ### Mapper tests
@@ -580,7 +592,7 @@ The feature is complete when all of the following hold:
 
 1. eligible repeated terminal-parenthesized job variants collapse under one provider-neutral detail parent;
 2. no matrix key/value semantics are invented;
-3. groups require at least two distinct variants from the same run and base name;
+3. groups require at least two distinct variants with the same `(runID, baseName)` key;
 4. ambiguous duplicate-variant buckets remain ungrouped;
 5. parent state accurately reflects failed/running/waiting/success/neutral child precedence;
 6. every child preserves its original GitHub job destination and detail semantics;
