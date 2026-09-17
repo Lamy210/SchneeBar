@@ -127,7 +127,7 @@ public struct GitHubDeliveryTimelineService: GitHubDeliveryTimelineLoading, Send
                     break
                 }
 
-                associatedNumbers = try await commitPullRequestClient.pullRequestNumbers(
+                associatedNumbers = try await commitPullRequestClient.firstPagePullRequestNumbers(
                     for: candidate.headSHA,
                     repository: repository,
                     connection: connection,
