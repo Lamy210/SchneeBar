@@ -138,6 +138,7 @@ public struct GitHubWorkflowRunQuery: Equatable, Sendable {
 public enum GitHubActionsClientError: Error, Equatable, Sendable {
     case invalidCredential
     case invalidRepository
+    case invalidRunID
     case invalidResponse
     case httpStatus(Int)
     case paginationLimitExceeded
@@ -151,6 +152,48 @@ public struct GitHubActionsClient: Sendable {
 
     public init(transport: any GitHubHTTPTransport = URLSessionGitHubHTTPTransport()) {
         self.transport = transport
+    }
+
+    public func workflowRun(
+        id: Int64,
+        repository: GitHubRepositoryAccess,
+        connection: GitHubConnection,
+        credential: GitHubCredential
+    ) async throws -> GitHubWorkflowRun {
+        guard id > 0 else {
+            throw GitHubActionsClientError.invalidRunID
+        }
+
+        let token = credential.accessToken.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !token.isEmpty else {
+            throw GitHubActionsClientError.invalidCredential
+        }
+        guard !repository.ownerLogin.isEmpty, !repository.name.isEmpty else {
+            throw GitHubActionsClientError.invalidRepository
+        }
+
+        let endpoints = try GitHubEndpointResolver.resolve(
+            deploymentKind: connection.deploymentKind,
+            webBaseURL: connection.webBaseURL
+        )
+        let url = endpoints.restBaseURL
+            .appendingPathComponent("repos", isDirectory: true)
+            .appendingPathComponent(repository.ownerLogin, isDirectory: true)
+            .appendingPathComponent(repository.name, isDirectory: true)
+            .appendingPathComponent("actions", isDirectory: true)
+            .appendingPathComponent("runs", isDirectory: true)
+            .appendingPathComponent(String(id), isDirectory: false)
+
+        let payload: WorkflowRunPayload = try await get(
+            url: url,
+            connection: connection,
+            token: token
+        )
+        return try mapRun(
+            payload,
+            repository: repository,
+            webBaseURL: endpoints.webBaseURL
+        )
     }
 
     public func workflowRuns(
