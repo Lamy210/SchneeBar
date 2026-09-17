@@ -2,6 +2,22 @@ import SchneeBarCore
 import SchneeBarDesignSystem
 import SwiftUI
 
+enum ActivityDetailRowInteraction: Equatable {
+    case disclosure
+    case link(URL)
+    case none
+}
+
+func activityDetailRowInteraction(_ row: ActivityDetailRow) -> ActivityDetailRowInteraction {
+    if !row.children.isEmpty {
+        return .disclosure
+    }
+    if let destinationURL = row.destinationURL {
+        return .link(destinationURL)
+    }
+    return .none
+}
+
 public struct ActivityDetailView: View {
     private let item: ActivityItem
     private let detail: ActivityDetailSnapshot?
@@ -142,7 +158,34 @@ public struct ActivityDetailView: View {
 
     @ViewBuilder
     private func detailRow(_ row: ActivityDetailRow) -> some View {
-        let content = HStack(alignment: .top, spacing: 10) {
+        switch activityDetailRowInteraction(row) {
+        case .disclosure:
+            DisclosureGroup {
+                VStack(spacing: 2) {
+                    ForEach(row.children) { child in
+                        detailRow(child)
+                            .padding(.leading, 20)
+                    }
+                }
+            } label: {
+                detailRowContent(row, showsExternalLink: false)
+            }
+        case let .link(destinationURL):
+            Link(destination: destinationURL) {
+                detailRowContent(row, showsExternalLink: true)
+            }
+            .buttonStyle(.plain)
+            .help("Open job")
+        case .none:
+            detailRowContent(row, showsExternalLink: false)
+        }
+    }
+
+    private func detailRowContent(
+        _ row: ActivityDetailRow,
+        showsExternalLink: Bool
+    ) -> some View {
+        HStack(alignment: .top, spacing: 10) {
             Image(systemName: iconName(for: row.state))
                 .foregroundStyle(iconColor(for: row.state))
                 .frame(width: 18)
@@ -164,7 +207,7 @@ public struct ActivityDetailView: View {
 
             Spacer(minLength: 4)
 
-            if row.destinationURL != nil {
+            if showsExternalLink {
                 Image(systemName: "arrow.up.right")
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
@@ -174,16 +217,6 @@ public struct ActivityDetailView: View {
         .padding(.vertical, 7)
         .padding(.horizontal, 8)
         .contentShape(Rectangle())
-
-        if let destinationURL = row.destinationURL {
-            Link(destination: destinationURL) {
-                content
-            }
-            .buttonStyle(.plain)
-            .help("Open job")
-        } else {
-            content
-        }
     }
 
     private func iconName(for state: ActivityDetailState) -> String {
