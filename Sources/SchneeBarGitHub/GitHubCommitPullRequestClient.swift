@@ -30,6 +30,70 @@ public struct GitHubCommitPullRequestClient: Sendable {
         connection: GitHubConnection,
         credential: GitHubCredential
     ) async throws -> [Int] {
+        let context = try requestContext(
+            commitSHA: commitSHA,
+            repository: repository,
+            connection: connection,
+            credential: credential
+        )
+
+        var page = 1
+        var seenNumbers = Set<Int>()
+
+        while page <= Self.maximumPages {
+            let payload = try await associatedPullRequests(
+                baseURL: context.baseURL,
+                page: page,
+                connection: connection,
+                token: context.token
+            )
+
+            let previousCount = seenNumbers.count
+            seenNumbers.formUnion(payload.map(\.number))
+
+            if payload.count < Self.pageSize || seenNumbers.count == previousCount {
+                return seenNumbers.sorted()
+            }
+
+            page += 1
+        }
+
+        throw GitHubCommitPullRequestClientError.paginationLimitExceeded
+    }
+
+    /// Loads only the first REST page of commit -> pull-request associations.
+    ///
+    /// Demand-driven Delivery Timeline correlation uses this bounded variant so
+    /// one logical association lookup is exactly one HTTP request. Truncation is
+    /// conservative: missing evidence yields no correlation rather than spending
+    /// unbounded pagination budget.
+    public func firstPagePullRequestNumbers(
+        for commitSHA: String,
+        repository: GitHubRepositoryAccess,
+        connection: GitHubConnection,
+        credential: GitHubCredential
+    ) async throws -> [Int] {
+        let context = try requestContext(
+            commitSHA: commitSHA,
+            repository: repository,
+            connection: connection,
+            credential: credential
+        )
+        let payload = try await associatedPullRequests(
+            baseURL: context.baseURL,
+            page: 1,
+            connection: connection,
+            token: context.token
+        )
+        return Array(Set(payload.map(\.number))).sorted()
+    }
+
+    private func requestContext(
+        commitSHA: String,
+        repository: GitHubRepositoryAccess,
+        connection: GitHubConnection,
+        credential: GitHubCredential
+    ) throws -> (baseURL: URL, token: String) {
         let normalizedCommitSHA = commitSHA.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !normalizedCommitSHA.isEmpty else {
             throw GitHubCommitPullRequestClientError.invalidCommitSHA
@@ -55,32 +119,26 @@ public struct GitHubCommitPullRequestClient: Sendable {
             .appendingPathComponent(normalizedCommitSHA, isDirectory: true)
             .appendingPathComponent("pulls", isDirectory: false)
 
-        var page = 1
-        var seenNumbers = Set<Int>()
+        return (baseURL, token)
+    }
 
-        while page <= Self.maximumPages {
-            let url = try requestURL(baseURL: baseURL, page: page)
-            let payload: [AssociatedPullRequestPayload] = try await get(
-                url: url,
-                connection: connection,
-                token: token
-            )
+    private func associatedPullRequests(
+        baseURL: URL,
+        page: Int,
+        connection: GitHubConnection,
+        token: String
+    ) async throws -> [AssociatedPullRequestPayload] {
+        let url = try requestURL(baseURL: baseURL, page: page)
+        let payload: [AssociatedPullRequestPayload] = try await get(
+            url: url,
+            connection: connection,
+            token: token
+        )
 
-            guard payload.allSatisfy({ $0.number > 0 }) else {
-                throw GitHubCommitPullRequestClientError.invalidResponse
-            }
-
-            let previousCount = seenNumbers.count
-            seenNumbers.formUnion(payload.map(\.number))
-
-            if payload.count < Self.pageSize || seenNumbers.count == previousCount {
-                return seenNumbers.sorted()
-            }
-
-            page += 1
+        guard payload.allSatisfy({ $0.number > 0 }) else {
+            throw GitHubCommitPullRequestClientError.invalidResponse
         }
-
-        throw GitHubCommitPullRequestClientError.paginationLimitExceeded
+        return payload
     }
 
     private func get<Response: Decodable>(
