@@ -66,6 +66,41 @@ private actor DetailQueueTransport: GitHubHTTPTransport {
     }
 }
 
+private struct DetailWorkflowLoader: GitHubWorkflowRunLoading {
+    func workflowRuns(
+        connection: GitHubConnection,
+        identity: GitHubAccountIdentity,
+        clientID: String?,
+        repository: GitHubRepositoryAccess,
+        query: GitHubWorkflowRunQuery
+    ) async throws -> [GitHubWorkflowRun] {
+        []
+    }
+}
+
+private struct DetailReviewLoader: GitHubReviewRequestLoading {
+    func reviewRequests(
+        connection: GitHubConnection,
+        identity: GitHubAccountIdentity,
+        clientID: String?,
+        repository: GitHubRepositoryAccess
+    ) async throws -> [GitHubReviewRequest] {
+        []
+    }
+}
+
+private struct DetailCheckLoader: GitHubCheckRunLoading {
+    func checkRuns(
+        connection: GitHubConnection,
+        identity: GitHubAccountIdentity,
+        clientID: String?,
+        repository: GitHubRepositoryAccess,
+        headSHA: String
+    ) async throws -> [GitHubCheckRun] {
+        []
+    }
+}
+
 private enum DetailTimelineOutcome: Sendable {
     case evidence(GitHubDeliveryTimelineEvidence)
     case failure
@@ -209,7 +244,11 @@ private func detailFixture(jobStatusCode: Int) async throws -> DetailFixture {
     let model = GitHubConnectionsRuntimeModel(
         profileStore: profileStore,
         sessionCoordinator: coordinator,
-        activityProvider: GitHubActivityProvider()
+        activityProvider: GitHubActivityProvider(
+            workflowRunLoader: DetailWorkflowLoader(),
+            reviewRequestLoader: DetailReviewLoader(),
+            checkRunLoader: DetailCheckLoader()
+        )
     )
     model.profiles = [profile]
     await model.refresh(profileID: profile.id)
