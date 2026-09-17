@@ -301,6 +301,46 @@ func timelineEvidenceCapsAssociationRequestsAtFour() async throws {
 }
 
 @Test
+func timelineEvidenceRequestCapIncludesAssociationPagination() async throws {
+    let runs = (1 ... 4).map { index in
+        workflowRunJSON(
+            id: Int64(800 + index),
+            workflowID: 88,
+            headSHA: "full-page-sha-\(index)",
+            updatedAt: "2026-09-18T0\(6 - index):00:00Z"
+        )
+    }
+    let fullAssociationPage = "["
+        + (100 ... 199).map { "{\"number\":\($0)}" }.joined(separator: ",")
+        + "]"
+    let associations = Dictionary(uniqueKeysWithValues: (1 ... 4).map { index in
+        ("full-page-sha-\(index)", fullAssociationPage)
+    })
+    let transport = TimelineRoutingTransport(
+        selectedRunJSON: workflowRunJSON(id: 700, pullRequestNumbers: [47]),
+        pullRequestJSON: pullRequestJSON(),
+        baseRunsJSON: workflowRunsJSON(runs),
+        associationsBySHA: associations
+    )
+    let fixture = try await timelineFixture(transport: transport)
+
+    _ = try await fixture.service.timelineEvidence(
+        connection: fixture.connection,
+        identity: fixture.identity,
+        clientID: nil,
+        repository: fixture.repository,
+        runID: 700
+    )
+
+    let requests = await transport.recordedRequests()
+    let associationRequests = requests.filter { $0.url?.path.contains("/commits/") == true }
+
+    #expect(associationRequests.count == 4)
+    #expect(requests.count == 7)
+    #expect(associationRequests.allSatisfy { queryValue("page", in: $0) == "1" })
+}
+
+@Test
 func timelineEvidenceCancellationStopsLaterAssociationRequests() async throws {
     let transport = TimelineRoutingTransport(
         selectedRunJSON: workflowRunJSON(id: 700, pullRequestNumbers: [47]),
