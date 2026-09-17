@@ -194,13 +194,16 @@ private func activityRoot(
 }
 
 @MainActor
-private func activityDetailRoot(appearance: SnapshotAppearance) -> some View {
+private func activityDetailRoot(
+    scenario: ActivityDetailFixtureScenario,
+    appearance: SnapshotAppearance
+) -> some View {
     ZStack {
         appearance.background
 
         ActivityDetailView(
-            item: ActivityDetailFixture.item,
-            detail: ActivityDetailFixture.detail,
+            item: scenario.item,
+            detail: scenario.detail,
             isLoading: false,
             errorMessage: nil,
             onBack: {},
@@ -391,9 +394,25 @@ private func run() throws {
 
     for appearance in SnapshotAppearance.allCases {
         try render(
-            rootView: activityDetailRoot(appearance: appearance),
+            rootView: activityDetailRoot(scenario: .failed, appearance: appearance),
             appearance: appearance,
             filename: "activity-detail-failed-\(appearance.rawValue).png",
+            outputDirectory: outputDirectory
+        )
+    }
+
+    try render(
+        rootView: activityDetailRoot(scenario: .matrixSuccess, appearance: .light),
+        appearance: .light,
+        filename: "matrix-success-light.png",
+        outputDirectory: outputDirectory
+    )
+
+    for appearance in SnapshotAppearance.allCases {
+        try render(
+            rootView: activityDetailRoot(scenario: .matrixFailure, appearance: appearance),
+            appearance: appearance,
+            filename: "matrix-failure-\(appearance.rawValue).png",
             outputDirectory: outputDirectory
         )
     }

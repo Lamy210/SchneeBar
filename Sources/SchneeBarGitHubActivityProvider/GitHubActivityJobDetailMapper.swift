@@ -3,13 +3,24 @@ import SchneeBarCore
 import SchneeBarGitHub
 
 public struct GitHubActivityJobDetailMapper: Sendable {
-    public init() {}
+    private let grouper: GitHubWorkflowJobGrouper
+
+    public init(
+        grouper: GitHubWorkflowJobGrouper = GitHubWorkflowJobGrouper()
+    ) {
+        self.grouper = grouper
+    }
 
     public func map(
         item: ActivityItem,
         jobs: [GitHubWorkflowJob]
     ) -> ActivityDetailSnapshot {
         let summary = GitHubWorkflowJobSummary(jobs: jobs)
+        let rows = grouper
+            .entries(jobs: jobs)
+            .map(makeDetailRow)
+            .sorted(by: detailRowSort)
+
         return ActivityDetailSnapshot(
             id: item.id,
             repository: item.repository,
@@ -17,20 +28,85 @@ public struct GitHubActivityJobDetailMapper: Sendable {
             summary: summaryText(summary),
             state: item.state,
             destinationURL: item.destinationURL,
-            rows: jobs
-                .sorted(by: jobSort)
-                .map(makeDetailRow)
+            rows: rows
         )
     }
 
-    private func makeDetailRow(_ job: GitHubWorkflowJob) -> ActivityDetailRow {
+    private func makeDetailRow(
+        _ entry: GitHubWorkflowJobPresentationEntry
+    ) -> ActivityDetailRow {
+        switch entry {
+        case let .job(job):
+            return makeDetailRow(job)
+        case let .variantGroup(group):
+            return makeGroupDetailRow(group)
+        }
+    }
+
+    private func makeDetailRow(
+        _ job: GitHubWorkflowJob,
+        title: String? = nil
+    ) -> ActivityDetailRow {
         ActivityDetailRow(
             id: String(job.id),
-            title: job.name,
+            title: title ?? job.name,
             detail: jobDetail(job),
             state: jobState(job),
             destinationURL: job.webURL
         )
+    }
+
+    private func makeGroupDetailRow(
+        _ group: GitHubWorkflowJobVariantGroup
+    ) -> ActivityDetailRow {
+        let variants = group.variants.sorted(by: variantPresentationSort)
+        let children = variants.map { variant in
+            makeDetailRow(variant.job, title: variant.label)
+        }
+
+        return ActivityDetailRow(
+            id: "github-job-group:\(group.runID):\(group.baseName)",
+            title: group.baseName,
+            detail: groupDetail(variants),
+            state: groupState(children),
+            destinationURL: nil,
+            children: children
+        )
+    }
+
+    private func groupState(
+        _ children: [ActivityDetailRow]
+    ) -> ActivityDetailState {
+        children
+            .map(\.state)
+            .min(by: { detailStatePriority($0) < detailStatePriority($1) })
+            ?? .neutral
+    }
+
+    private func groupDetail(
+        _ variants: [GitHubWorkflowJobVariant]
+    ) -> String {
+        let jobs = variants.map(\.job)
+        let states = jobs.map(jobState)
+        let failedCount = states.filter { $0 == .failed }.count
+        let runningCount = states.filter { $0 == .running }.count
+        let waitingCount = states.filter { $0 == .waiting }.count
+        let cancelledCount = jobs.filter { $0.conclusion == .cancelled }.count
+
+        var parts = ["\(variants.count) variants"]
+        if failedCount > 0 {
+            parts.append("\(failedCount) failed")
+        }
+        if runningCount > 0 {
+            parts.append("\(runningCount) running")
+        }
+        if waitingCount > 0 {
+            parts.append("\(waitingCount) waiting")
+        }
+        if cancelledCount > 0 {
+            parts.append("\(cancelledCount) cancelled")
+        }
+        return parts.joined(separator: " · ")
     }
 
     private func jobState(_ job: GitHubWorkflowJob) -> ActivityDetailState {
@@ -126,20 +202,38 @@ public struct GitHubActivityJobDetailMapper: Sendable {
         return parts.joined(separator: " · ")
     }
 
-    private func jobSort(lhs: GitHubWorkflowJob, rhs: GitHubWorkflowJob) -> Bool {
-        let lhsPriority = jobPriority(lhs)
-        let rhsPriority = jobPriority(rhs)
+    private func detailRowSort(
+        lhs: ActivityDetailRow,
+        rhs: ActivityDetailRow
+    ) -> Bool {
+        let lhsPriority = detailStatePriority(lhs.state)
+        let rhsPriority = detailStatePriority(rhs.state)
         if lhsPriority != rhsPriority {
             return lhsPriority < rhsPriority
         }
-        if lhs.name != rhs.name {
-            return lhs.name < rhs.name
+        if lhs.title != rhs.title {
+            return lhs.title < rhs.title
         }
         return lhs.id < rhs.id
     }
 
-    private func jobPriority(_ job: GitHubWorkflowJob) -> Int {
-        switch jobState(job) {
+    private func variantPresentationSort(
+        lhs: GitHubWorkflowJobVariant,
+        rhs: GitHubWorkflowJobVariant
+    ) -> Bool {
+        let lhsPriority = detailStatePriority(jobState(lhs.job))
+        let rhsPriority = detailStatePriority(jobState(rhs.job))
+        if lhsPriority != rhsPriority {
+            return lhsPriority < rhsPriority
+        }
+        if lhs.label != rhs.label {
+            return lhs.label < rhs.label
+        }
+        return lhs.job.id < rhs.job.id
+    }
+
+    private func detailStatePriority(_ state: ActivityDetailState) -> Int {
+        switch state {
         case .failed: return 0
         case .running: return 1
         case .waiting: return 2

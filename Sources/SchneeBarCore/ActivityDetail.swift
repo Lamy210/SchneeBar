@@ -14,19 +14,22 @@ public struct ActivityDetailRow: Identifiable, Equatable, Sendable {
     public let detail: String?
     public let state: ActivityDetailState
     public let destinationURL: URL?
+    public let children: [ActivityDetailRow]
 
     public init(
         id: String,
         title: String,
         detail: String? = nil,
         state: ActivityDetailState,
-        destinationURL: URL? = nil
+        destinationURL: URL? = nil,
+        children: [ActivityDetailRow] = []
     ) {
         self.id = id
         self.title = title
         self.detail = detail
         self.state = state
         self.destinationURL = destinationURL
+        self.children = children
     }
 }
 
