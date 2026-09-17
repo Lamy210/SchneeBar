@@ -38,11 +38,21 @@ private actor CacheReviewLoader: GitHubReviewRequestLoading {
     }
 }
 
+private enum CacheWorkflowStep: Sendable {
+    case success([GitHubWorkflowRun])
+    case httpStatus(Int)
+}
+
 private actor CacheWorkflowLoader: GitHubWorkflowRunLoading {
-    private let runs: [GitHubWorkflowRun]
+    private let steps: [CacheWorkflowStep]
+    private var index = 0
 
     init(runs: [GitHubWorkflowRun] = []) {
-        self.runs = runs
+        steps = [.success(runs)]
+    }
+
+    init(steps: [CacheWorkflowStep]) {
+        self.steps = steps
     }
 
     func workflowRuns(
@@ -52,7 +62,14 @@ private actor CacheWorkflowLoader: GitHubWorkflowRunLoading {
         repository: GitHubRepositoryAccess,
         query: GitHubWorkflowRunQuery
     ) async throws -> [GitHubWorkflowRun] {
-        runs
+        let step = steps[min(index, steps.count - 1)]
+        index += 1
+        switch step {
+        case let .success(runs):
+            return runs
+        case let .httpStatus(status):
+            throw GitHubActionsClientError.httpStatus(status)
+        }
     }
 }
 
@@ -141,6 +158,79 @@ func successfulEmptyCheckResponseClearsCachedCheckItemsForSameSHA() async throws
 
     #expect(first.surface(.checks).items.map(\.id) == ["github-check:1:900"])
     #expect(second.surface(.checks).items.isEmpty)
+}
+
+@Test
+func successfulWorkflowRefreshDropsPreviouslyCachedSupersededFailure() async throws {
+    let repository = try cacheRepository()
+    let old = try cacheWorkflowRun(
+        repository: repository,
+        headSHA: "aaa",
+        id: 80,
+        event: "pull_request",
+        runNumber: 80,
+        pullRequestNumbers: [120],
+        status: .completed,
+        conclusion: .failure,
+        updatedAt: 100
+    )
+    let current = try cacheWorkflowRun(
+        repository: repository,
+        headSHA: "bbb",
+        id: 81,
+        event: "pull_request",
+        runNumber: 81,
+        pullRequestNumbers: [120],
+        status: .inProgress,
+        conclusion: nil,
+        updatedAt: 200
+    )
+    let provider = GitHubActivityProvider(
+        workflowRunLoader: CacheWorkflowLoader(steps: [.success([old]), .success([old, current])]),
+        reviewRequestLoader: CacheReviewLoader(steps: [.success([])]),
+        checkRunLoader: CacheCheckLoader(),
+        maximumConcurrentRepositories: 1
+    )
+    let profile = try cacheProfile()
+    let inventory = try cacheInventory(repository: repository)
+    let capabilities = cacheCapabilities(repositoryID: repository.id)
+
+    let first = await provider.load(profile: profile, inventory: inventory, capabilities: capabilities)
+    let second = await provider.load(profile: profile, inventory: inventory, capabilities: capabilities)
+
+    #expect(first.surface(.workflows).items.map(\.id) == ["github-actions:1:80"])
+    #expect(second.surface(.workflows).items.map(\.id) == ["github-actions:1:81"])
+}
+
+@Test
+func workflowFailurePreservesLastKnownGoodSupersessionResult() async throws {
+    let repository = try cacheRepository()
+    let current = try cacheWorkflowRun(
+        repository: repository,
+        headSHA: "bbb",
+        id: 81,
+        event: "pull_request",
+        runNumber: 81,
+        pullRequestNumbers: [120],
+        status: .inProgress,
+        conclusion: nil,
+        updatedAt: 200
+    )
+    let provider = GitHubActivityProvider(
+        workflowRunLoader: CacheWorkflowLoader(steps: [.success([current]), .httpStatus(503)]),
+        reviewRequestLoader: CacheReviewLoader(steps: [.success([])]),
+        checkRunLoader: CacheCheckLoader(),
+        maximumConcurrentRepositories: 1
+    )
+    let profile = try cacheProfile()
+    let inventory = try cacheInventory(repository: repository)
+    let capabilities = cacheCapabilities(repositoryID: repository.id)
+
+    _ = await provider.load(profile: profile, inventory: inventory, capabilities: capabilities)
+    let failed = await provider.load(profile: profile, inventory: inventory, capabilities: capabilities)
+
+    #expect(failed.surface(.workflows).items.map(\.id) == ["github-actions:1:81"])
+    #expect(failed.surface(.workflows).failures.map(\.reason) == [.unavailable])
 }
 
 @Test
@@ -264,23 +354,30 @@ private func cacheReviewRequest(repository: GitHubRepositoryAccess) throws -> Gi
 
 private func cacheWorkflowRun(
     repository: GitHubRepositoryAccess,
-    headSHA: String
+    headSHA: String,
+    id: Int64 = 11,
+    event: String = "push",
+    runNumber: Int = 1,
+    pullRequestNumbers: [Int] = [],
+    status: GitHubWorkflowRunStatus = .completed,
+    conclusion: GitHubWorkflowRunConclusion? = .success,
+    updatedAt: TimeInterval = 100
 ) throws -> GitHubWorkflowRun {
     GitHubWorkflowRun(
-        id: 11,
+        id: id,
         workflowID: 1,
         name: "CI",
         displayTitle: "Build",
-        event: "push",
-        status: .completed,
-        conclusion: .success,
-        runNumber: 1,
+        event: event,
+        status: status,
+        conclusion: conclusion,
+        runNumber: runNumber,
         headBranch: "main",
         headSHA: headSHA,
-        webURL: try #require(URL(string: "\(repository.webURL.absoluteString)/actions/runs/11")),
-        pullRequestNumbers: [],
-        createdAt: Date(timeIntervalSince1970: 90),
-        updatedAt: Date(timeIntervalSince1970: 100)
+        webURL: try #require(URL(string: "\(repository.webURL.absoluteString)/actions/runs/\(id)")),
+        pullRequestNumbers: pullRequestNumbers,
+        createdAt: Date(timeIntervalSince1970: updatedAt - 10),
+        updatedAt: Date(timeIntervalSince1970: updatedAt)
     )
 }
 

@@ -12,6 +12,7 @@ public actor GitHubActivityProvider {
     private let reviewRequestMapper: GitHubReviewRequestActivityMapper
     private let checkRunMapper: GitHubCheckRunActivityMapper
     private let checkCandidatePlanner: GitHubCheckCandidatePlanner
+    private let workflowRunSupersessionResolver: GitHubWorkflowRunSupersessionResolver
     private let maximumConcurrentRepositories: Int
     private let perRepositoryRunLimit: Int
     private let maximumRepositoriesPerRefresh: Int
@@ -39,6 +40,7 @@ public actor GitHubActivityProvider {
         activityMapper: GitHubWorkflowActivityMapper = GitHubWorkflowActivityMapper(),
         reviewRequestMapper: GitHubReviewRequestActivityMapper = GitHubReviewRequestActivityMapper(),
         checkRunMapper: GitHubCheckRunActivityMapper = GitHubCheckRunActivityMapper(),
+        workflowRunSupersessionResolver: GitHubWorkflowRunSupersessionResolver = GitHubWorkflowRunSupersessionResolver(),
         maximumConcurrentRepositories: Int = 4,
         perRepositoryRunLimit: Int = 20,
         maximumRepositoriesPerRefresh: Int = 8,
@@ -55,6 +57,7 @@ public actor GitHubActivityProvider {
         self.activityMapper = activityMapper
         self.reviewRequestMapper = reviewRequestMapper
         self.checkRunMapper = checkRunMapper
+        self.workflowRunSupersessionResolver = workflowRunSupersessionResolver
         checkCandidatePlanner = GitHubCheckCandidatePlanner()
         self.maximumConcurrentRepositories = max(1, maximumConcurrentRepositories)
         self.perRepositoryRunLimit = min(max(1, perRepositoryRunLimit), 100)
@@ -539,6 +542,7 @@ public actor GitHubActivityProvider {
     ) async -> [WorkflowLoadOutcome] {
         let loader = workflowRunLoader
         let mapper = activityMapper
+        let supersessionResolver = workflowRunSupersessionResolver
         let runLimit = perRepositoryRunLimit
         let maximumConcurrentRepositories = maximumConcurrentRepositories
 
@@ -551,9 +555,10 @@ public actor GitHubActivityProvider {
                     repository: repository,
                     query: GitHubWorkflowRunQuery(limit: runLimit)
                 )
-                let activities = mapper.visibleActivities(runs: runs, repository: repository)
+                let currentRuns = supersessionResolver.resolve(runs: runs).currentRuns
+                let activities = mapper.visibleActivities(runs: currentRuns, repository: repository)
                 let visibleRunIDs = Set(activities.map(\.workflowRunID))
-                let evidence = runs.compactMap { run -> GitHubWorkflowEvidence? in
+                let evidence = currentRuns.compactMap { run -> GitHubWorkflowEvidence? in
                     let headSHA = run.headSHA
                         .trimmingCharacters(in: .whitespacesAndNewlines)
                         .lowercased()

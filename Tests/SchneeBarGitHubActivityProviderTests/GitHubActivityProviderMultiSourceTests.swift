@@ -51,7 +51,7 @@ private actor MultiSourceReviewLoader: GitHubReviewRequestLoading {
     }
 }
 
-private struct MultiSourceCheckRequest: Equatable, Sendable {
+private struct MultiSourceCheckRequest: Equatable, Hashable, Sendable {
     let repositoryID: Int64
     let headSHA: String
 }
@@ -158,6 +158,121 @@ func hiddenSuccessfulWorkflowStillDiscoversExternalFailedCheck() async throws {
     #expect(await checkLoader.requestedChecks() == [MultiSourceCheckRequest(repositoryID: 1, headSHA: sha)])
 }
 
+@Test
+func supersededWorkflowSHADoesNotBecomeCheckCandidate() async throws {
+    let repository = try multiSourceRepository(id: 1, fullName: "snow/app")
+    let oldSHA = String(repeating: "a", count: 40)
+    let currentSHA = String(repeating: "b", count: 40)
+    let workflowLoader = MultiSourceWorkflowLoader(responses: [
+        1: [
+            try multiSourceWorkflowRun(
+                id: 80,
+                repository: repository,
+                headSHA: oldSHA,
+                status: .completed,
+                conclusion: .failure,
+                event: "pull_request",
+                runNumber: 80,
+                pullRequestNumbers: [120],
+                updatedAt: 100
+            ),
+            try multiSourceWorkflowRun(
+                id: 81,
+                repository: repository,
+                headSHA: currentSHA,
+                status: .completed,
+                conclusion: .success,
+                event: "pull_request",
+                runNumber: 81,
+                pullRequestNumbers: [120],
+                updatedAt: 200
+            ),
+        ],
+    ])
+    let checkLoader = MultiSourceCheckLoader()
+    let provider = GitHubActivityProvider(
+        workflowRunLoader: workflowLoader,
+        reviewRequestLoader: MultiSourceReviewLoader(),
+        checkRunLoader: checkLoader,
+        maximumConcurrentRepositories: 1
+    )
+
+    _ = await provider.load(
+        profile: try multiSourceProfile(),
+        inventory: try multiSourceInventory(repositories: [repository]),
+        capabilities: multiSourceCapabilities(repositoryID: 1)
+    )
+
+    #expect(
+        await checkLoader.requestedChecks() == [
+            MultiSourceCheckRequest(repositoryID: 1, headSHA: currentSHA),
+        ]
+    )
+}
+
+@Test
+func reviewCandidateRemainsWhenWorkflowSHAIsSuperseded() async throws {
+    let repository = try multiSourceRepository(id: 1, fullName: "snow/app")
+    let oldSHA = String(repeating: "a", count: 40)
+    let currentSHA = String(repeating: "b", count: 40)
+    let workflowLoader = MultiSourceWorkflowLoader(responses: [
+        1: [
+            try multiSourceWorkflowRun(
+                id: 80,
+                repository: repository,
+                headSHA: oldSHA,
+                status: .completed,
+                conclusion: .failure,
+                event: "pull_request",
+                runNumber: 80,
+                pullRequestNumbers: [120],
+                updatedAt: 100
+            ),
+            try multiSourceWorkflowRun(
+                id: 81,
+                repository: repository,
+                headSHA: currentSHA,
+                status: .completed,
+                conclusion: .success,
+                event: "pull_request",
+                runNumber: 81,
+                pullRequestNumbers: [120],
+                updatedAt: 200
+            ),
+        ],
+    ])
+    let review = GitHubReviewRequest(
+        number: 120,
+        title: "Review old head",
+        headSHA: oldSHA,
+        isDraft: false,
+        updatedAt: Date(timeIntervalSince1970: 210),
+        requestedReviewerIDs: ["42"],
+        webURL: try #require(URL(string: "https://github.com/snow/app/pull/120"))
+    )
+    let checkLoader = MultiSourceCheckLoader()
+    let provider = GitHubActivityProvider(
+        workflowRunLoader: workflowLoader,
+        reviewRequestLoader: MultiSourceReviewLoader(responses: [1: [review]]),
+        checkRunLoader: checkLoader,
+        maximumConcurrentRepositories: 1,
+        maximumCheckTargetsPerRepository: 2
+    )
+
+    _ = await provider.load(
+        profile: try multiSourceProfile(),
+        inventory: try multiSourceInventory(repositories: [repository]),
+        capabilities: multiSourceCapabilities(repositoryID: 1)
+    )
+
+    #expect(
+        Set(await checkLoader.requestedChecks()) == Set([
+            MultiSourceCheckRequest(repositoryID: 1, headSHA: oldSHA),
+            MultiSourceCheckRequest(repositoryID: 1, headSHA: currentSHA),
+        ])
+    )
+}
+
 private func multiSourceCapabilities(repositoryID: Int64) -> GitHubConnectionCapabilityAssessment {
     GitHubConnectionCapabilityAssessment(
         repositories: [
@@ -231,23 +346,28 @@ private func multiSourceWorkflowRun(
     repository: GitHubRepositoryAccess,
     headSHA: String,
     status: GitHubWorkflowRunStatus,
-    conclusion: GitHubWorkflowRunConclusion?
+    conclusion: GitHubWorkflowRunConclusion?,
+    workflowID: Int64 = 100,
+    event: String = "push",
+    runNumber: Int = 1,
+    pullRequestNumbers: [Int] = [],
+    updatedAt: TimeInterval = 100
 ) throws -> GitHubWorkflowRun {
     GitHubWorkflowRun(
         id: id,
-        workflowID: 100,
+        workflowID: workflowID,
         name: "CI",
         displayTitle: "Build",
-        event: "push",
+        event: event,
         status: status,
         conclusion: conclusion,
-        runNumber: 1,
+        runNumber: runNumber,
         headBranch: "main",
         headSHA: headSHA,
         webURL: try #require(URL(string: "\(repository.webURL.absoluteString)/actions/runs/\(id)")),
-        pullRequestNumbers: [],
-        createdAt: Date(timeIntervalSince1970: 90),
-        updatedAt: Date(timeIntervalSince1970: 100)
+        pullRequestNumbers: pullRequestNumbers,
+        createdAt: Date(timeIntervalSince1970: updatedAt - 10),
+        updatedAt: Date(timeIntervalSince1970: updatedAt)
     )
 }
 
