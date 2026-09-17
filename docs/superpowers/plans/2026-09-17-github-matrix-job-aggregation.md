@@ -65,14 +65,7 @@ tuist test SchneeBarCoreTests -- -skipMacroValidation CODE_SIGNING_ALLOWED=NO
 
 Expected RED: `ActivityDetailRow` has no `children` member/argument.
 
-- [ ] Implement:
-
-```swift
-public let children: [ActivityDetailRow]
-```
-
-and add `children: [ActivityDetailRow] = []` to the initializer, assigning `self.children = children`.
-
+- [ ] Implement `public let children: [ActivityDetailRow]` and add `children: [ActivityDetailRow] = []` to the initializer, assigning `self.children = children`.
 - [ ] Re-run the same test command and require GREEN.
 - [ ] Commit: `feat: add nested activity detail rows`.
 
@@ -111,7 +104,7 @@ public struct GitHubWorkflowJobGrouper: Sendable {
 
 - [ ] Write RED tests for: 2/3 same-base variants, one candidate only, duplicate labels, different bases, different run IDs, non-terminal suffix, empty base/suffix, balanced nested suffix, unbalanced suffix, deterministic ordering.
 
-Primary grouped expectation for jobs `Test (macos)` id 1 and `Test (linux)` id 2, both run 501:
+Primary expectation for `Test (macos)` id 1 and `Test (linux)` id 2, run 501:
 
 ```swift
 #expect(group.runID == 501)
@@ -120,34 +113,9 @@ Primary grouped expectation for jobs `Test (macos)` id 1 and `Test (linux)` id 2
 #expect(group.variants.map(\.job.id) == [2, 1])
 ```
 
-- [ ] Run:
-
-```bash
-tuist test SchneeBarGitHubActivityProviderTests -- -skipMacroValidation CODE_SIGNING_ALLOWED=NO
-```
-
-Expected RED: grouper/presentation-entry types are undefined.
-
-- [ ] Implement private suffix parsing:
-  1. trim full name;
-  2. require final `)`;
-  3. scan backward balancing nested parentheses to matching `(`;
-  4. require exactly one ASCII space immediately before that `(`;
-  5. trim base and suffix;
-  6. reject empty/unbalanced input;
-  7. keep suffix opaque.
-
-- [ ] Group with private key:
-
-```swift
-private struct GroupKey: Hashable {
-    let runID: Int64
-    let baseName: String
-}
-```
-
-Group only if count >= 2 and all labels are distinct. Otherwise emit original `.job` entries. Sort variants by label then job ID. Preserve every noncandidate job.
-
+- [ ] Run `tuist test SchneeBarGitHubActivityProviderTests -- -skipMacroValidation CODE_SIGNING_ALLOWED=NO`; expected RED because grouper types are undefined.
+- [ ] Implement terminal suffix parser: trim; require final `)`; scan backward balancing parentheses; require one ASCII space before matching `(`; trim/reject empty parts; keep suffix opaque.
+- [ ] Group using private `GroupKey(runID: Int64, baseName: String)`. Group only count >= 2 with distinct labels; otherwise emit original jobs. Sort variants by label then job ID.
 - [ ] Re-run provider tests and require GREEN.
 - [ ] Commit: `feat: group GitHub workflow job variants`.
 
@@ -159,11 +127,9 @@ Group only if count >= 2 and all labels are distinct. Otherwise emit original `.
 - Modify: `Sources/SchneeBarGitHubActivityProvider/GitHubActivityJobDetailMapper.swift`
 - Modify: `Tests/SchneeBarGitHubActivityProviderTests/GitHubActivityJobDetailMapperTests.swift`
 
-**Consumes:** `GitHubWorkflowJobGrouper.entries(jobs:)`.
+- [ ] Add RED tests for failed, running, waiting, all-success, cancelled-only, success+cancelled, raw-summary preservation, child URL/failure detail, and child sorting.
 
-- [ ] Add RED mapper tests for failed, running, waiting, all-success, cancelled-only, success+cancelled, raw-summary preservation, child URL/failure detail, and child sorting.
-
-Use a failed `macos` child, running `linux` child, and successful `windows` child and require:
+For failed `macos`, running `linux`, successful `windows`, require:
 
 ```swift
 #expect(snapshot.summary == "2/3 jobs · 1 failed · 1 running")
@@ -179,46 +145,11 @@ let group = try #require(snapshot.rows.first)
 ```
 
 - [ ] Run provider tests; expected RED because mapper still emits one row/job.
-
-- [ ] Inject:
-
-```swift
-private let grouper: GitHubWorkflowJobGrouper
-
-public init(grouper: GitHubWorkflowJobGrouper = GitHubWorkflowJobGrouper()) {
-    self.grouper = grouper
-}
-```
-
-Keep `GitHubWorkflowJobSummary(jobs:)` based on raw jobs.
-
-- [ ] Extract/reuse:
-
-```swift
-private func makeJobDetailRow(_ job: GitHubWorkflowJob, title: String? = nil) -> ActivityDetailRow
-private func jobState(_ job: GitHubWorkflowJob) -> ActivityDetailState
-private func detailPriority(_ state: ActivityDetailState) -> Int
-```
-
-- [ ] Map group parent:
-
-```swift
-ActivityDetailRow(
-    id: "github-job-group:\(group.runID):\(group.baseName)",
-    title: group.baseName,
-    detail: groupDetail,
-    state: aggregateState,
-    destinationURL: nil,
-    children: children
-)
-```
-
-Children use variant label as title and retain each original `GitHubWorkflowJob.webURL`. Sort children by `failed > running > waiting > success > neutral`, then label, then job ID.
-
-Parent detail is `N variants`, then non-zero `failed`, `running`, `waiting`, `cancelled` counts in that order. Count cancelled from raw conclusion `.cancelled`; do not count all neutral rows as cancelled.
-
-Top-level rows sort by the same state priority, then title, then ID.
-
+- [ ] Inject `GitHubWorkflowJobGrouper` via defaulted initializer and keep `GitHubWorkflowJobSummary(jobs:)` on raw jobs.
+- [ ] Reuse helpers `makeJobDetailRow(_:title:)`, `jobState(_:)`, `detailPriority(_:)`.
+- [ ] Map group parent ID as `github-job-group:<runID>:<baseName>`, nil destination, child rows titled by opaque label. Sort children `failed > running > waiting > success > neutral`, then label, then job ID.
+- [ ] Build parent detail `N variants` plus nonzero failed/running/waiting/cancelled counts in that order; cancelled comes only from raw `.cancelled` conclusions.
+- [ ] Sort top-level rows by state priority, title, ID.
 - [ ] Re-run provider tests and require GREEN.
 - [ ] Commit: `feat: aggregate workflow job variants in detail`.
 
@@ -233,7 +164,7 @@ Top-level rows sort by the same state priority, then title, then ID.
 - Modify: `Sources/SchneeBarVisualSnapshotCLI/main.swift`
 - Modify: `Sources/SchneeBarVisualHarness/SchneeBarVisualHarnessApp.swift`
 
-**Produces:** exact internal interaction classifier:
+**Produces:**
 
 ```swift
 enum ActivityDetailRowInteraction: Equatable {
@@ -249,47 +180,14 @@ func activityDetailRowInteraction(_ row: ActivityDetailRow) -> ActivityDetailRow
 }
 ```
 
-`ActivityDetailView` must use this classifier, so the unit test and rendered behavior exercise the same decision.
+`ActivityDetailView` uses this classifier.
 
-- [ ] Write RED feature tests:
-
-```swift
-@Test func groupRowUsesDisclosureInteraction()
-@Test func childlessDestinationRowUsesLinkInteraction()
-@Test func childlessDestinationlessRowUsesNoInteraction()
-```
-
-Require a group with children and a nil parent URL to classify as `.disclosure`; require each linked child to classify as `.link(childURL)`.
-
-- [ ] Run:
-
-```bash
-tuist test SchneeBarActivityFeatureTests -- -skipMacroValidation CODE_SIGNING_ALLOWED=NO
-```
-
-Expected RED: `ActivityDetailRowInteraction` / classifier undefined.
-
-- [ ] Implement the classifier and use it in `ActivityDetailView`.
-  - `.disclosure`: render parent state icon/title/detail inside `DisclosureGroup`, collapsed by default, no external-link affordance on parent.
-  - `.link(url)`: preserve existing `Link` row behavior.
-  - `.none`: preserve existing plain row behavior.
-  - Render child rows indented through the same classifier; design data is one level deep.
-  - Keep expansion state view-local/nonpersistent and the 360pt scroll cap.
-
-- [ ] Extend `ActivityDetailFixtures.swift` with `matrixSuccess` and `matrixFailure`. `matrixFailure` has a failed parent with 3 children and one failed child URL. `matrixSuccess` has one success group plus one ordinary single row.
-
-- [ ] Add snapshot outputs named exactly:
-
-```text
-matrix-success-light
-matrix-failure-light
-matrix-failure-dark
-```
-
-Do not add a production-only expanded-state hook; collapsed group layout is the visual contract.
-
+- [ ] Write RED tests `groupRowUsesDisclosureInteraction`, `childlessDestinationRowUsesLinkInteraction`, and `childlessDestinationlessRowUsesNoInteraction`; verify grouped children with URLs classify as links.
+- [ ] Run `tuist test SchneeBarActivityFeatureTests -- -skipMacroValidation CODE_SIGNING_ALLOWED=NO`; expected RED because classifier is undefined.
+- [ ] Implement classifier and UI: disclosure parent with state/title/detail, collapsed by default, no parent link; child rows indented and rendered through same classifier; expansion view-local/nonpersistent; keep 360pt scroll cap.
+- [ ] Add deterministic `matrixSuccess` and `matrixFailure` detail fixtures. Failure fixture has 3 children and one failed child URL.
+- [ ] Add snapshots exactly `matrix-success-light`, `matrix-failure-light`, `matrix-failure-dark`; no production-only expansion hook.
 - [ ] Add matching manual Visual Harness entries.
-
 - [ ] Run:
 
 ```bash
@@ -299,8 +197,7 @@ mkdir -p _visual/candidate
 tuist run SchneeBarVisualSnapshotCLI -- --output "$PWD/_visual/candidate"
 ```
 
-Require tests to pass and the three new PNGs to exist in `_visual/candidate`.
-
+Require all tests pass and the three new PNGs exist.
 - [ ] Commit: `feat: show expandable workflow job variant groups`.
 
 ---
@@ -311,24 +208,16 @@ Require tests to pass and the three new PNGs to exist in `_visual/candidate`.
 - Modify: `docs/DEVELOPMENT_PLAN.md`
 - Update implementation PR description/checklist.
 
-- [ ] Under Phase 3 Implemented add:
-
-```text
-- conservative matrix-like Workflow job variant aggregation with expandable child jobs
-```
-
-Remove matrix aggregation from `Next`; superseded-run handling becomes the first remaining hardening item.
-
-- [ ] Run final CI-equivalent commands on the final implementation head:
-
-```bash
-tuist generate
-tuist build -- -skipMacroValidation CODE_SIGNING_ALLOWED=NO
-tuist test -- -skipMacroValidation CODE_SIGNING_ALLOWED=NO
-```
-
-- [ ] Confirm GitHub `Visual Regression` succeeds on that same SHA and produces the matrix scenes.
-- [ ] Mark PR Ready and confirm CodeQL on the same SHA has successful `Generate Xcode project`, `Initialize CodeQL`, `Build for analysis`, and `Analyze` steps.
-- [ ] Review final diff: no REST client/service changes, no workflow-YAML fetch, no synthesized matrix keys, children keep normalized job URLs, no unresolved review threads, PR mergeable.
+- [ ] Add Phase 3 Implemented item `conservative matrix-like Workflow job variant aggregation with expandable child jobs`; remove matrix aggregation from Next and put superseded-run handling first.
+- [ ] Run final `tuist generate`, `tuist build -- -skipMacroValidation CODE_SIGNING_ALLOWED=NO`, and `tuist test -- -skipMacroValidation CODE_SIGNING_ALLOWED=NO` on final head.
+- [ ] Confirm Visual Regression succeeds on the same SHA and includes new matrix scenes.
+- [ ] Mark PR Ready and confirm CodeQL on same SHA has successful Generate, Initialize, Build for analysis, Analyze.
+- [ ] Final diff review: no REST client/service changes, no workflow-YAML fetch, no synthesized matrix keys, child URLs unchanged, no unresolved review threads, PR mergeable.
 - [ ] Commit docs as `docs: mark matrix job aggregation implemented`.
-- [ ] Squash merge only after CI, Visual Regression, and CodeQL are all green on the exact PR head.
+- [ ] Squash merge only after CI, Visual Regression, and CodeQL are all green on exact PR head.
+
+## Self-Review Result
+
+- Spec coverage: all acceptance criteria map to Tasks 1-5.
+- Placeholder scan: no `TODO`, `TBD`, "similar to", or open-ended implementation step remains.
+- Type consistency: grouper, group model, `children`, interaction classifier, mapper signatures, scene names, and gate commands are consistent across tasks.
