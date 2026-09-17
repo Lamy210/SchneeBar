@@ -163,7 +163,7 @@ public struct ActivityDetailView: View {
             DisclosureGroup {
                 VStack(spacing: 2) {
                     ForEach(row.children) { child in
-                        detailRow(child)
+                        detailChildRow(child)
                             .padding(.leading, 20)
                     }
                 }
@@ -177,6 +177,19 @@ public struct ActivityDetailView: View {
             .buttonStyle(.plain)
             .help("Open job")
         case .none:
+            detailRowContent(row, showsExternalLink: false)
+        }
+    }
+
+    @ViewBuilder
+    private func detailChildRow(_ row: ActivityDetailRow) -> some View {
+        if let destinationURL = row.destinationURL {
+            Link(destination: destinationURL) {
+                detailRowContent(row, showsExternalLink: true)
+            }
+            .buttonStyle(.plain)
+            .help("Open job")
+        } else {
             detailRowContent(row, showsExternalLink: false)
         }
     }
