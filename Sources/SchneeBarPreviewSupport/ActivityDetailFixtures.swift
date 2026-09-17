@@ -1,6 +1,34 @@
 import Foundation
 import SchneeBarCore
 
+public enum ActivityDetailFixtureScenario: String, CaseIterable, Identifiable {
+    case failed
+    case matrixSuccess = "matrix-success"
+    case matrixFailure = "matrix-failure"
+
+    public var id: String { rawValue }
+
+    public var title: String {
+        switch self {
+        case .failed: "Failed jobs"
+        case .matrixSuccess: "Matrix success"
+        case .matrixFailure: "Matrix failure"
+        }
+    }
+
+    public var item: ActivityItem {
+        ActivityDetailFixture.item
+    }
+
+    public var detail: ActivityDetailSnapshot {
+        switch self {
+        case .failed: ActivityDetailFixture.detail
+        case .matrixSuccess: ActivityDetailFixture.matrixSuccess
+        case .matrixFailure: ActivityDetailFixture.matrixFailure
+        }
+    }
+}
+
 public enum ActivityDetailFixture {
     public static let item = ActivityItem(
         id: "github-actions:42:501",
