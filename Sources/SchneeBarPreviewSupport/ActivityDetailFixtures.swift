@@ -63,4 +63,98 @@ public enum ActivityDetailFixture {
             ),
         ]
     )
+
+    public static let matrixSuccess = ActivityDetailSnapshot(
+        id: "github-actions:42:501:matrix-success",
+        repository: item.repository,
+        title: item.context,
+        summary: "4/4 jobs",
+        state: .success,
+        destinationURL: item.destinationURL,
+        rows: [
+            ActivityDetailRow(
+                id: "github-job-group:501:Test",
+                title: "Test",
+                detail: "3 variants",
+                state: .success,
+                children: [
+                    ActivityDetailRow(
+                        id: "7101",
+                        title: "macos",
+                        detail: "Succeeded · 42s",
+                        state: .success,
+                        destinationURL: URL(string: "https://github.com/Lamy210/SchneeBar/actions/runs/501/job/7101")
+                    ),
+                    ActivityDetailRow(
+                        id: "7102",
+                        title: "linux",
+                        detail: "Succeeded · 31s",
+                        state: .success,
+                        destinationURL: URL(string: "https://github.com/Lamy210/SchneeBar/actions/runs/501/job/7102")
+                    ),
+                    ActivityDetailRow(
+                        id: "7103",
+                        title: "windows",
+                        detail: "Succeeded · 58s",
+                        state: .success,
+                        destinationURL: URL(string: "https://github.com/Lamy210/SchneeBar/actions/runs/501/job/7103")
+                    ),
+                ]
+            ),
+            ActivityDetailRow(
+                id: "7190",
+                title: "Docs",
+                detail: "Succeeded · 9s",
+                state: .success,
+                destinationURL: URL(string: "https://github.com/Lamy210/SchneeBar/actions/runs/501/job/7190")
+            ),
+        ]
+    )
+
+    public static let matrixFailure = ActivityDetailSnapshot(
+        id: "github-actions:42:501:matrix-failure",
+        repository: item.repository,
+        title: item.context,
+        summary: "2/4 jobs · 1 failed · 1 running · 1 waiting",
+        state: .failed,
+        destinationURL: item.destinationURL,
+        rows: [
+            ActivityDetailRow(
+                id: "github-job-group:501:Test",
+                title: "Test",
+                detail: "3 variants · 1 failed · 1 running · 1 waiting",
+                state: .failed,
+                children: [
+                    ActivityDetailRow(
+                        id: "7201",
+                        title: "macos",
+                        detail: "Failed at Unit tests",
+                        state: .failed,
+                        destinationURL: URL(string: "https://github.com/Lamy210/SchneeBar/actions/runs/501/job/7201")
+                    ),
+                    ActivityDetailRow(
+                        id: "7202",
+                        title: "linux",
+                        detail: "Running",
+                        state: .running,
+                        destinationURL: URL(string: "https://github.com/Lamy210/SchneeBar/actions/runs/501/job/7202")
+                    ),
+                    ActivityDetailRow(
+                        id: "7203",
+                        title: "windows",
+                        detail: "Waiting",
+                        state: .waiting,
+                        destinationURL: URL(string: "https://github.com/Lamy210/SchneeBar/actions/runs/501/job/7203")
+                    ),
+                ]
+            ),
+            ActivityDetailRow(
+                id: "7290",
+                title: "Docs",
+                detail: "Succeeded · 9s",
+                state: .success,
+                destinationURL: URL(string: "https://github.com/Lamy210/SchneeBar/actions/runs/501/job/7290")
+            ),
+        ]
+    )
 }
