@@ -94,9 +94,7 @@ Add these tests:
 func supersedesOlderDifferentSHAInSamePullRequestLane() throws {
     let old = try supersessionRun(id: 80, runNumber: 80, headSHA: "AAA", updatedAt: 100)
     let current = try supersessionRun(id: 81, runNumber: 81, headSHA: "bbb", updatedAt: 200)
-
     let result = GitHubWorkflowRunSupersessionResolver().resolve(runs: [old, current])
-
     #expect(result.supersededRunIDs == Set([80]))
     #expect(result.currentRuns.map(\.id) == [81])
 }
@@ -105,9 +103,7 @@ func supersedesOlderDifferentSHAInSamePullRequestLane() throws {
 func newestCancelledRunStillSupersedesOlderDifferentSHA() throws {
     let old = try supersessionRun(id: 80, runNumber: 80, headSHA: "aaa", updatedAt: 100, status: .completed, conclusion: .failure)
     let current = try supersessionRun(id: 81, runNumber: 81, headSHA: "bbb", updatedAt: 200, status: .completed, conclusion: .cancelled)
-
     let result = GitHubWorkflowRunSupersessionResolver().resolve(runs: [old, current])
-
     #expect(result.supersededRunIDs == Set([80]))
     #expect(result.currentRuns.map(\.id) == [81])
 }
@@ -116,9 +112,7 @@ func newestCancelledRunStillSupersedesOlderDifferentSHA() throws {
 func sameSHAKeepsBothRuns() throws {
     let old = try supersessionRun(id: 80, runNumber: 80, headSHA: "aaa", updatedAt: 100)
     let current = try supersessionRun(id: 81, runNumber: 81, headSHA: " AAA ", updatedAt: 200)
-
     let result = GitHubWorkflowRunSupersessionResolver().resolve(runs: [old, current])
-
     #expect(result.supersededRunIDs.isEmpty)
     #expect(result.currentRuns.map(\.id) == [81, 80])
 }
@@ -127,9 +121,7 @@ func sameSHAKeepsBothRuns() throws {
 func differentWorkflowIDsKeepBothRuns() throws {
     let first = try supersessionRun(id: 80, workflowID: 41, runNumber: 80, headSHA: "aaa", updatedAt: 100)
     let second = try supersessionRun(id: 81, workflowID: 42, runNumber: 81, headSHA: "bbb", updatedAt: 200)
-
     let result = GitHubWorkflowRunSupersessionResolver().resolve(runs: [first, second])
-
     #expect(result.supersededRunIDs.isEmpty)
     #expect(result.currentRuns.map(\.id) == [81, 80])
 }
@@ -138,9 +130,7 @@ func differentWorkflowIDsKeepBothRuns() throws {
 func differentEventsKeepBothRuns() throws {
     let first = try supersessionRun(id: 80, event: "pull_request", runNumber: 80, headSHA: "aaa", updatedAt: 100)
     let second = try supersessionRun(id: 81, event: "pull_request_target", runNumber: 81, headSHA: "bbb", updatedAt: 200)
-
     let result = GitHubWorkflowRunSupersessionResolver().resolve(runs: [first, second])
-
     #expect(result.supersededRunIDs.isEmpty)
     #expect(result.currentRuns.map(\.id) == [81, 80])
 }
@@ -149,9 +139,7 @@ func differentEventsKeepBothRuns() throws {
 func differentPullRequestsKeepBothRuns() throws {
     let first = try supersessionRun(id: 80, runNumber: 80, headSHA: "aaa", pullRequests: [120], updatedAt: 100)
     let second = try supersessionRun(id: 81, runNumber: 81, headSHA: "bbb", pullRequests: [121], updatedAt: 200)
-
     let result = GitHubWorkflowRunSupersessionResolver().resolve(runs: [first, second])
-
     #expect(result.supersededRunIDs.isEmpty)
     #expect(result.currentRuns.map(\.id) == [81, 80])
 }
@@ -160,9 +148,7 @@ func differentPullRequestsKeepBothRuns() throws {
 func branchOnlyRunsKeepBothRuns() throws {
     let first = try supersessionRun(id: 80, event: "push", runNumber: 80, headSHA: "aaa", pullRequests: [], updatedAt: 100)
     let second = try supersessionRun(id: 81, event: "push", runNumber: 81, headSHA: "bbb", pullRequests: [], updatedAt: 200)
-
     let result = GitHubWorkflowRunSupersessionResolver().resolve(runs: [first, second])
-
     #expect(result.supersededRunIDs.isEmpty)
     #expect(result.currentRuns.map(\.id) == [81, 80])
 }
@@ -171,9 +157,7 @@ func branchOnlyRunsKeepBothRuns() throws {
 func multiplePullRequestsKeepRuns() throws {
     let first = try supersessionRun(id: 80, runNumber: 80, headSHA: "aaa", pullRequests: [120, 121], updatedAt: 100)
     let second = try supersessionRun(id: 81, runNumber: 81, headSHA: "bbb", pullRequests: [120, 121], updatedAt: 200)
-
     let result = GitHubWorkflowRunSupersessionResolver().resolve(runs: [first, second])
-
     #expect(result.supersededRunIDs.isEmpty)
     #expect(result.currentRuns.map(\.id) == [81, 80])
 }
@@ -183,9 +167,7 @@ func duplicateMaximumRunNumberKeepsEntireLane() throws {
     let old = try supersessionRun(id: 80, runNumber: 80, headSHA: "aaa", updatedAt: 100)
     let firstMax = try supersessionRun(id: 81, runNumber: 81, headSHA: "bbb", updatedAt: 190)
     let secondMax = try supersessionRun(id: 82, runNumber: 81, headSHA: "ccc", updatedAt: 200)
-
     let result = GitHubWorkflowRunSupersessionResolver().resolve(runs: [old, firstMax, secondMax])
-
     #expect(result.supersededRunIDs.isEmpty)
     #expect(result.currentRuns.map(\.id) == [82, 81, 80])
 }
@@ -194,9 +176,7 @@ func duplicateMaximumRunNumberKeepsEntireLane() throws {
 func emptyNormalizedNewestSHAKeepsLane() throws {
     let old = try supersessionRun(id: 80, runNumber: 80, headSHA: "aaa", updatedAt: 100)
     let current = try supersessionRun(id: 81, runNumber: 81, headSHA: "   ", updatedAt: 200)
-
     let result = GitHubWorkflowRunSupersessionResolver().resolve(runs: [old, current])
-
     #expect(result.supersededRunIDs.isEmpty)
     #expect(result.currentRuns.map(\.id) == [81, 80])
 }
@@ -205,9 +185,7 @@ func emptyNormalizedNewestSHAKeepsLane() throws {
 func emptyNormalizedOlderSHAIsNotSuppressed() throws {
     let old = try supersessionRun(id: 80, runNumber: 80, headSHA: "   ", updatedAt: 100)
     let current = try supersessionRun(id: 81, runNumber: 81, headSHA: "bbb", updatedAt: 200)
-
     let result = GitHubWorkflowRunSupersessionResolver().resolve(runs: [old, current])
-
     #expect(result.supersededRunIDs.isEmpty)
     #expect(result.currentRuns.map(\.id) == [81, 80])
 }
@@ -217,9 +195,7 @@ func threeGenerationsKeepCurrentSHAFamily() throws {
     let oldest = try supersessionRun(id: 80, runNumber: 80, headSHA: "aaa", updatedAt: 100)
     let sameCurrentSHA = try supersessionRun(id: 81, runNumber: 81, headSHA: "bbb", updatedAt: 180)
     let current = try supersessionRun(id: 82, runNumber: 82, headSHA: "BBB", updatedAt: 200)
-
     let result = GitHubWorkflowRunSupersessionResolver().resolve(runs: [sameCurrentSHA, oldest, current])
-
     #expect(result.supersededRunIDs == Set([80]))
     #expect(result.currentRuns.map(\.id) == [82, 81])
 }
@@ -230,26 +206,24 @@ func shuffledInputProducesSameResolution() throws {
     let current = try supersessionRun(id: 81, runNumber: 81, headSHA: "bbb", updatedAt: 200)
     let unrelated = try supersessionRun(id: 90, workflowID: 99, runNumber: 3, headSHA: "zzz", pullRequests: [200], updatedAt: 150)
     let resolver = GitHubWorkflowRunSupersessionResolver()
-
     let first = resolver.resolve(runs: [old, current, unrelated])
     let second = resolver.resolve(runs: [unrelated, current, old])
-
     #expect(first == second)
     #expect(first.currentRuns.map(\.id) == [81, 90])
 }
 ```
 
-- [ ] **Step 2: Run the provider test target and verify RED**
+- [ ] **Step 2: Run the full test suite and verify RED**
 
 ```bash
-tuist test SchneeBarGitHubActivityProviderTests -- -skipMacroValidation CODE_SIGNING_ALLOWED=NO
+tuist test -- -skipMacroValidation CODE_SIGNING_ALLOWED=NO
 ```
 
 Expected: compile failure because the resolver types do not exist.
 
 - [ ] **Step 3: Implement the resolver**
 
-Create `GitHubWorkflowRunSupersessionResolver.swift`:
+Create:
 
 ```swift
 import Foundation
@@ -274,33 +248,25 @@ public struct GitHubWorkflowRunSupersessionResolver: Sendable {
 
         for run in runs {
             guard let pullRequestNumber = singlePullRequestNumber(run) else { continue }
-            runsByLane[
-                LaneKey(workflowID: run.workflowID, event: run.event, pullRequestNumber: pullRequestNumber),
-                default: []
-            ].append(run)
+            runsByLane[LaneKey(workflowID: run.workflowID, event: run.event, pullRequestNumber: pullRequestNumber), default: []].append(run)
         }
 
         for laneRuns in runsByLane.values {
             guard let maximumRunNumber = laneRuns.map(\.runNumber).max() else { continue }
             let newestRuns = laneRuns.filter { $0.runNumber == maximumRunNumber }
             guard newestRuns.count == 1, let newest = newestRuns.first else { continue }
-
             let newestSHA = normalizedSHA(newest.headSHA)
             guard !newestSHA.isEmpty else { continue }
 
             for run in laneRuns where run.runNumber < maximumRunNumber {
                 let headSHA = normalizedSHA(run.headSHA)
                 guard !headSHA.isEmpty else { continue }
-                if headSHA != newestSHA {
-                    supersededRunIDs.insert(run.id)
-                }
+                if headSHA != newestSHA { supersededRunIDs.insert(run.id) }
             }
         }
 
         return GitHubWorkflowRunSupersessionResolution(
-            currentRuns: runs
-                .filter { !supersededRunIDs.contains($0.id) }
-                .sorted(by: runPrecedes),
+            currentRuns: runs.filter { !supersededRunIDs.contains($0.id) }.sorted(by: runPrecedes),
             supersededRunIDs: supersededRunIDs
         )
     }
@@ -329,13 +295,11 @@ private struct LaneKey: Hashable {
 }
 ```
 
-- [ ] **Step 4: Run the provider test target and verify GREEN**
+- [ ] **Step 4: Run the full test suite and verify GREEN**
 
 ```bash
-tuist test SchneeBarGitHubActivityProviderTests -- -skipMacroValidation CODE_SIGNING_ALLOWED=NO
+tuist test -- -skipMacroValidation CODE_SIGNING_ALLOWED=NO
 ```
-
-Expected: all resolver tests and existing provider tests pass.
 
 - [ ] **Step 5: Commit Task 1**
 
@@ -354,22 +318,67 @@ git commit -m "feat: resolve superseded GitHub workflow runs"
 
 **Interfaces:**
 - Consumes: `GitHubWorkflowRunSupersessionResolver.resolve(runs:)` from Task 1.
-- Produces: Workflow activities and Workflow evidence derived only from `resolution.currentRuns`.
+- Produces: Workflow activities and Workflow evidence derived only from `currentRuns`.
 
 - [ ] **Step 1: Generalize the provider-test Workflow helper**
 
-Change `workflowRun(...)` to add defaulted `workflowID`, `event`, `runNumber`, `headBranch`, `headSHA`, and `pullRequestNumbers` parameters while preserving all current defaults.
+Use this exact signature while preserving the current body:
 
-- [ ] **Step 2: Add RED stale-activity tests**
+```swift
+private func workflowRun(
+    id: Int64,
+    repository: GitHubRepositoryAccess,
+    status: GitHubWorkflowRunStatus,
+    conclusion: GitHubWorkflowRunConclusion?,
+    updatedAt: TimeInterval,
+    workflowID: Int64 = 10,
+    event: String = "push",
+    runNumber: Int = 1,
+    headBranch: String? = "main",
+    headSHA: String = "abcdef",
+    pullRequestNumbers: [Int] = []
+) throws -> GitHubWorkflowRun
+```
 
-Add `suppressesSupersededPullRequestWorkflowActivity` with old run #80 / SHA `aaa` / failure and current run #81 / SHA `bbb` / running in the same `pull_request` PR #120 lane. Assert only `github-actions:1:81` remains and its state is `.running`.
+Map those parameters directly into the `GitHubWorkflowRun` initializer.
 
-Add `successfulReplacementCanLeaveWorkflowInboxEmpty` with old failure #80 / `aaa` and current success #81 / `bbb`; assert `result.surface(.workflows).items.isEmpty`.
+- [ ] **Step 2: Add RED provider tests**
 
-- [ ] **Step 3: Run provider tests and verify RED**
+```swift
+@Test
+func suppressesSupersededPullRequestWorkflowActivity() async throws {
+    let repo = try repository(id: 1, fullName: "acme/api")
+    let loader = ActivityLoaderStub(responses: [
+        1: .success([
+            try workflowRun(id: 80, repository: repo, status: .completed, conclusion: .failure, updatedAt: 100, event: "pull_request", runNumber: 80, headSHA: "aaa", pullRequestNumbers: [120]),
+            try workflowRun(id: 81, repository: repo, status: .inProgress, conclusion: nil, updatedAt: 200, event: "pull_request", runNumber: 81, headSHA: "bbb", pullRequestNumbers: [120]),
+        ]),
+    ])
+    let provider = GitHubActivityProvider(workflowRunLoader: loader)
+    let result = await provider.load(profile: try githubProfile(selection: .allAccessible), inventory: try githubInventory(repositories: [repo]))
+    #expect(result.items.map(\.id) == ["github-actions:1:81"])
+    #expect(result.items.map(\.state) == [.running])
+}
+
+@Test
+func successfulReplacementCanLeaveWorkflowInboxEmpty() async throws {
+    let repo = try repository(id: 1, fullName: "acme/api")
+    let loader = ActivityLoaderStub(responses: [
+        1: .success([
+            try workflowRun(id: 80, repository: repo, status: .completed, conclusion: .failure, updatedAt: 100, event: "pull_request", runNumber: 80, headSHA: "aaa", pullRequestNumbers: [120]),
+            try workflowRun(id: 81, repository: repo, status: .completed, conclusion: .success, updatedAt: 200, event: "pull_request", runNumber: 81, headSHA: "bbb", pullRequestNumbers: [120]),
+        ]),
+    ])
+    let provider = GitHubActivityProvider(workflowRunLoader: loader)
+    let result = await provider.load(profile: try githubProfile(selection: .allAccessible), inventory: try githubInventory(repositories: [repo]))
+    #expect(result.surface(.workflows).items.isEmpty)
+}
+```
+
+- [ ] **Step 3: Run the full test suite and verify RED**
 
 ```bash
-tuist test SchneeBarGitHubActivityProviderTests -- -skipMacroValidation CODE_SIGNING_ALLOWED=NO
+tuist test -- -skipMacroValidation CODE_SIGNING_ALLOWED=NO
 ```
 
 Expected: the two new tests fail because raw runs still feed mapping/evidence.
@@ -382,13 +391,13 @@ Add:
 private let workflowRunSupersessionResolver: GitHubWorkflowRunSupersessionResolver
 ```
 
-and initializer parameter:
+Add initializer parameter:
 
 ```swift
 workflowRunSupersessionResolver: GitHubWorkflowRunSupersessionResolver = GitHubWorkflowRunSupersessionResolver(),
 ```
 
-Inside `loadWorkflowRepositories`, capture `let resolver = workflowRunSupersessionResolver`, then immediately after `workflowRuns(...)` returns:
+Inside `loadWorkflowRepositories`, capture `let resolver = workflowRunSupersessionResolver`, then replace raw-run mapping with:
 
 ```swift
 let currentRuns = resolver.resolve(runs: runs).currentRuns
@@ -407,12 +416,12 @@ let evidence = currentRuns.compactMap { run -> GitHubWorkflowEvidence? in
 }
 ```
 
-Do not store `supersededRunIDs` in actor state.
+Do not persist `supersededRunIDs`.
 
-- [ ] **Step 5: Run provider tests and verify GREEN**
+- [ ] **Step 5: Run the full test suite and verify GREEN**
 
 ```bash
-tuist test SchneeBarGitHubActivityProviderTests -- -skipMacroValidation CODE_SIGNING_ALLOWED=NO
+tuist test -- -skipMacroValidation CODE_SIGNING_ALLOWED=NO
 ```
 
 - [ ] **Step 6: Commit Task 2**
@@ -436,9 +445,9 @@ git commit -m "feat: suppress superseded workflow activity"
 - Consumes: Task 2 provider normalization.
 - Produces: regression proof that Workflow supersession removes only Workflow evidence while preserving Review evidence, last-known-good cache behavior, and request budgets.
 
-- [ ] **Step 1: Generalize `multiSourceWorkflowRun` and make `MultiSourceCheckRequest` Hashable**
+- [ ] **Step 1: Generalize multi-source helpers**
 
-Add defaulted `workflowID`, `event`, `runNumber`, `pullRequestNumbers`, and `updatedAt` parameters to `multiSourceWorkflowRun`. Change:
+Change:
 
 ```swift
 private struct MultiSourceCheckRequest: Equatable, Hashable, Sendable {
@@ -447,28 +456,78 @@ private struct MultiSourceCheckRequest: Equatable, Hashable, Sendable {
 }
 ```
 
-- [ ] **Step 2: Add Workflow-derived Check evidence regression**
-
-Using `MultiSourceWorkflowLoader`, `MultiSourceReviewLoader`, and `MultiSourceCheckLoader`, load old failure #80 / SHA `aaa` and current success #81 / SHA `bbb` in the same PR lane. With no review requests, assert:
+Change `multiSourceWorkflowRun` to:
 
 ```swift
-#expect(await checkLoader.requestedChecks() == [
-    MultiSourceCheckRequest(repositoryID: 1, headSHA: currentSHA),
-])
+private func multiSourceWorkflowRun(
+    id: Int64,
+    repository: GitHubRepositoryAccess,
+    headSHA: String,
+    status: GitHubWorkflowRunStatus,
+    conclusion: GitHubWorkflowRunConclusion?,
+    workflowID: Int64 = 100,
+    event: String = "push",
+    runNumber: Int = 1,
+    pullRequestNumbers: [Int] = [],
+    updatedAt: TimeInterval = 100
+) throws -> GitHubWorkflowRun
 ```
 
-- [ ] **Step 3: Add Review-derived candidate independence regression**
+Use the parameters directly in the existing initializer and set `createdAt` to `updatedAt - 10`.
 
-Return a direct `GitHubReviewRequest` for PR #120 with `headSHA: oldSHA`, while Workflow supersession selects `currentSHA`. Set `maximumCheckTargetsPerRepository: 2` and assert:
+- [ ] **Step 2: Add Check-candidate RED regressions**
 
 ```swift
-#expect(Set(await checkLoader.requestedChecks()) == Set([
-    MultiSourceCheckRequest(repositoryID: 1, headSHA: oldSHA),
-    MultiSourceCheckRequest(repositoryID: 1, headSHA: currentSHA),
-]))
+@Test
+func supersededWorkflowSHADoesNotBecomeCheckCandidate() async throws {
+    let repository = try multiSourceRepository(id: 1, fullName: "snow/app")
+    let oldSHA = String(repeating: "a", count: 40)
+    let currentSHA = String(repeating: "b", count: 40)
+    let workflowLoader = MultiSourceWorkflowLoader(responses: [1: [
+        try multiSourceWorkflowRun(id: 80, repository: repository, headSHA: oldSHA, status: .completed, conclusion: .failure, event: "pull_request", runNumber: 80, pullRequestNumbers: [120], updatedAt: 100),
+        try multiSourceWorkflowRun(id: 81, repository: repository, headSHA: currentSHA, status: .completed, conclusion: .success, event: "pull_request", runNumber: 81, pullRequestNumbers: [120], updatedAt: 200),
+    ]])
+    let checkLoader = MultiSourceCheckLoader()
+    let provider = GitHubActivityProvider(workflowRunLoader: workflowLoader, reviewRequestLoader: MultiSourceReviewLoader(), checkRunLoader: checkLoader, maximumConcurrentRepositories: 1)
+    _ = await provider.load(profile: try multiSourceProfile(), inventory: try multiSourceInventory(repositories: [repository]), capabilities: multiSourceCapabilities(repositoryID: 1))
+    #expect(await checkLoader.requestedChecks() == [MultiSourceCheckRequest(repositoryID: 1, headSHA: currentSHA)])
+}
+
+@Test
+func reviewCandidateRemainsWhenWorkflowSHAIsSuperseded() async throws {
+    let repository = try multiSourceRepository(id: 1, fullName: "snow/app")
+    let oldSHA = String(repeating: "a", count: 40)
+    let currentSHA = String(repeating: "b", count: 40)
+    let workflowLoader = MultiSourceWorkflowLoader(responses: [1: [
+        try multiSourceWorkflowRun(id: 80, repository: repository, headSHA: oldSHA, status: .completed, conclusion: .failure, event: "pull_request", runNumber: 80, pullRequestNumbers: [120], updatedAt: 100),
+        try multiSourceWorkflowRun(id: 81, repository: repository, headSHA: currentSHA, status: .completed, conclusion: .success, event: "pull_request", runNumber: 81, pullRequestNumbers: [120], updatedAt: 200),
+    ]])
+    let review = GitHubReviewRequest(
+        number: 120,
+        title: "Review old head",
+        headSHA: oldSHA,
+        isDraft: false,
+        updatedAt: Date(timeIntervalSince1970: 210),
+        requestedReviewerIDs: ["42"],
+        webURL: try #require(URL(string: "https://github.com/snow/app/pull/120"))
+    )
+    let checkLoader = MultiSourceCheckLoader()
+    let provider = GitHubActivityProvider(
+        workflowRunLoader: workflowLoader,
+        reviewRequestLoader: MultiSourceReviewLoader(responses: [1: [review]]),
+        checkRunLoader: checkLoader,
+        maximumConcurrentRepositories: 1,
+        maximumCheckTargetsPerRepository: 2
+    )
+    _ = await provider.load(profile: try multiSourceProfile(), inventory: try multiSourceInventory(repositories: [repository]), capabilities: multiSourceCapabilities(repositoryID: 1))
+    #expect(Set(await checkLoader.requestedChecks()) == Set([
+        MultiSourceCheckRequest(repositoryID: 1, headSHA: oldSHA),
+        MultiSourceCheckRequest(repositoryID: 1, headSHA: currentSHA),
+    ]))
+}
 ```
 
-- [ ] **Step 4: Make the cache Workflow loader sequence-capable**
+- [ ] **Step 3: Make cache Workflow responses sequential**
 
 Add:
 
@@ -479,25 +538,71 @@ private enum CacheWorkflowStep: Sendable {
 }
 ```
 
-Change `CacheWorkflowLoader` to store `[CacheWorkflowStep]`, retain `init(runs:)` as `steps = [.success(runs)]`, add `init(steps:)`, advance an index per request, and throw `GitHubActionsClientError.httpStatus(status)` for `.httpStatus`.
+Replace `CacheWorkflowLoader` with an actor storing `steps` and `index`, retaining `init(runs:)` as `steps = [.success(runs)]`, adding `init(steps:)`, and implementing:
 
-- [ ] **Step 5: Add successful-refresh cache replacement regression**
-
-Generalize `cacheWorkflowRun` with defaulted `id`, `event`, `runNumber`, `pullRequestNumbers`, `status`, `conclusion`, and `updatedAt`. Configure Workflow steps as `.success([old])` then `.success([old, current])`. Assert first Workflow items contain run 80 and second Workflow items contain only run 81.
-
-- [ ] **Step 6: Add failed-refresh last-known-good regression**
-
-Configure `.success([current])` then `.httpStatus(503)`. Assert the failed refresh still contains run 81 and reports the repository's existing Workflow failure classification. Before writing the assertion, read `GitHubActivityProvider.failureReason(for:)` and assert its existing mapping for HTTP 503; do not change that mapping in this feature.
-
-- [ ] **Step 7: Run provider tests including existing budget tests**
-
-```bash
-tuist test SchneeBarGitHubActivityProviderTests -- -skipMacroValidation CODE_SIGNING_ALLOWED=NO
+```swift
+let step = steps[min(index, steps.count - 1)]
+index += 1
+switch step {
+case let .success(runs): return runs
+case let .httpStatus(status): throw GitHubActionsClientError.httpStatus(status)
+}
 ```
 
-Expected: supersession, multi-source, cache, bounded-concurrency, polling-budget, polling-rotation, and reset/generation tests all pass.
+Generalize `cacheWorkflowRun` so it accepts `id`, `event`, `runNumber`, `pullRequestNumbers`, `status`, `conclusion`, and `updatedAt` with defaults matching the existing helper.
 
-- [ ] **Step 8: Run full CI-equivalent build/test before docs completion**
+- [ ] **Step 4: Add cache regressions**
+
+```swift
+@Test
+func successfulWorkflowRefreshDropsPreviouslyCachedSupersededFailure() async throws {
+    let repository = try cacheRepository()
+    let old = try cacheWorkflowRun(repository: repository, headSHA: "aaa", id: 80, event: "pull_request", runNumber: 80, pullRequestNumbers: [120], status: .completed, conclusion: .failure, updatedAt: 100)
+    let current = try cacheWorkflowRun(repository: repository, headSHA: "bbb", id: 81, event: "pull_request", runNumber: 81, pullRequestNumbers: [120], status: .inProgress, conclusion: nil, updatedAt: 200)
+    let provider = GitHubActivityProvider(
+        workflowRunLoader: CacheWorkflowLoader(steps: [.success([old]), .success([old, current])]),
+        reviewRequestLoader: CacheReviewLoader(steps: [.success([])]),
+        checkRunLoader: CacheCheckLoader(),
+        maximumConcurrentRepositories: 1
+    )
+    let profile = try cacheProfile()
+    let inventory = try cacheInventory(repository: repository)
+    let capabilities = cacheCapabilities(repositoryID: repository.id)
+    let first = await provider.load(profile: profile, inventory: inventory, capabilities: capabilities)
+    let second = await provider.load(profile: profile, inventory: inventory, capabilities: capabilities)
+    #expect(first.surface(.workflows).items.map(\.id) == ["github-actions:1:80"])
+    #expect(second.surface(.workflows).items.map(\.id) == ["github-actions:1:81"])
+}
+
+@Test
+func workflowFailurePreservesLastKnownGoodSupersessionResult() async throws {
+    let repository = try cacheRepository()
+    let current = try cacheWorkflowRun(repository: repository, headSHA: "bbb", id: 81, event: "pull_request", runNumber: 81, pullRequestNumbers: [120], status: .inProgress, conclusion: nil, updatedAt: 200)
+    let provider = GitHubActivityProvider(
+        workflowRunLoader: CacheWorkflowLoader(steps: [.success([current]), .httpStatus(503)]),
+        reviewRequestLoader: CacheReviewLoader(steps: [.success([])]),
+        checkRunLoader: CacheCheckLoader(),
+        maximumConcurrentRepositories: 1
+    )
+    let profile = try cacheProfile()
+    let inventory = try cacheInventory(repository: repository)
+    let capabilities = cacheCapabilities(repositoryID: repository.id)
+    _ = await provider.load(profile: profile, inventory: inventory, capabilities: capabilities)
+    let failed = await provider.load(profile: profile, inventory: inventory, capabilities: capabilities)
+    #expect(failed.surface(.workflows).items.map(\.id) == ["github-actions:1:81"])
+    #expect(failed.surface(.workflows).failures.map(\.reason) == [.unavailable])
+}
+```
+
+- [ ] **Step 5: Run the full test suite**
+
+```bash
+tuist test -- -skipMacroValidation CODE_SIGNING_ALLOWED=NO
+```
+
+Expected: supersession, multi-source, cache, budget, polling, and reset/generation tests all pass.
+
+- [ ] **Step 6: Run full CI-equivalent generate/build/test**
 
 ```bash
 tuist generate
@@ -505,11 +610,11 @@ tuist build -- -skipMacroValidation CODE_SIGNING_ALLOWED=NO
 tuist test -- -skipMacroValidation CODE_SIGNING_ALLOWED=NO
 ```
 
-- [ ] **Step 9: Update the roadmap**
+- [ ] **Step 7: Update `docs/DEVELOPMENT_PLAN.md`**
 
-In `docs/DEVELOPMENT_PLAN.md`, move PR-scoped conservative superseded-run handling into the implemented Phase 3 foundation, remove it from the next-work list, and retain branch/push supersession plus re-run-attempt UX as deferred work.
+Move PR-scoped conservative superseded-run handling into the implemented Phase 3 foundation, remove it from the next-work list, and retain branch/push supersession plus re-run-attempt UX as deferred work.
 
-- [ ] **Step 10: Commit Task 3**
+- [ ] **Step 8: Commit Task 3**
 
 ```bash
 git add Tests/SchneeBarGitHubActivityProviderTests/GitHubActivityProviderMultiSourceTests.swift Tests/SchneeBarGitHubActivityProviderTests/GitHubActivityProviderCacheTests.swift docs/DEVELOPMENT_PLAN.md
@@ -530,11 +635,7 @@ git commit -m "test: harden superseded workflow handling"
 
 - [ ] **Step 1: Open a Draft PR from the feature branch to `main` before implementation if one does not already exist**
 
-Title:
-
-```text
-feat: suppress superseded GitHub workflow runs
-```
+Title: `feat: suppress superseded GitHub workflow runs`
 
 Summary:
 
@@ -563,7 +664,7 @@ Verify:
 
 - [ ] **Step 3: Verify exact-head CI and Visual Regression**
 
-On the final implementation SHA require:
+Require on the exact final SHA:
 
 ```text
 CI                 -> success
