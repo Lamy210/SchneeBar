@@ -96,10 +96,13 @@ Implemented:
 - repository-selection and reset isolation across all activity source caches
 - kind-aware popover behavior where only Workflow rows expose local job detail
 - deterministic mixed Inbox, review-only, and mixed capability Visual Regression fixtures
+- conservative matrix-like workflow job aggregation using high-confidence name grouping without inferring matrix keys
+- provider-neutral nested activity detail rows with one-level disclosure presentation
+- raw workflow-job summary preservation while grouped presentation rows retain original job URLs and failure details
+- deterministic matrix success/failure Visual Regression fixtures
 
 Next:
 
-- matrix-job aggregation
 - superseded-run handling in the user-facing model
 - additional real-world validation of bounded polling and enterprise capability edge cases
 
@@ -147,7 +150,7 @@ Still required:
 
 ## Current implementation priority
 
-1. Harden Phase 3 with matrix-job aggregation and superseded-run handling.
+1. Harden Phase 3 with superseded-run handling.
 2. Integrate existing correlation primitives into the Phase 4 delivery timeline.
 3. Add deployments/environments and recovery states.
 4. Broaden enterprise validation toward Phase 5 requirements.
