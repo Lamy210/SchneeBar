@@ -130,7 +130,7 @@ public struct GitHubWorkflowJobGrouper: Sendable {
         let variant = String(name[variantStart..<variantEnd])
             .trimmingCharacters(in: .whitespacesAndNewlines)
 
-        guard !base.isEmpty, !variant.isEmpty else {
+        guard !base.isEmpty, !variant.isEmpty, hasBalancedParentheses(base) else {
             return nil
         }
 
@@ -138,6 +138,21 @@ public struct GitHubWorkflowJobGrouper: Sendable {
             baseName: base,
             variantLabel: variant
         )
+    }
+
+    private func hasBalancedParentheses(_ text: String) -> Bool {
+        var depth = 0
+        for character in text {
+            if character == "(" {
+                depth += 1
+            } else if character == ")" {
+                depth -= 1
+                if depth < 0 {
+                    return false
+                }
+            }
+        }
+        return depth == 0
     }
 
     private func variantPrecedes(
