@@ -9,6 +9,8 @@ extension GitHubConnectionsRuntimeModel {
     func loadActivityDetail(
         for item: ActivityItem,
         jobService: GitHubWorkflowJobService,
+        timelineLoader: any GitHubDeliveryTimelineLoading,
+        timelineBuilder: GitHubDeliveryTimelineBuilder = GitHubDeliveryTimelineBuilder(),
         detailMapper: GitHubActivityJobDetailMapper = GitHubActivityJobDetailMapper()
     ) async throws -> ActivityDetailSnapshot {
         guard let destinationURL = item.destinationURL,
@@ -51,8 +53,41 @@ extension GitHubConnectionsRuntimeModel {
                 runID: runID,
                 query: GitHubWorkflowJobQuery(filter: .latest, limit: 100)
             )
+            let jobDetail = detailMapper.map(item: item, jobs: jobs)
 
-            return detailMapper.map(item: item, jobs: jobs)
+            let deliveryTimeline: DeliveryTimelineSnapshot
+            do {
+                let evidence = try await timelineLoader.timelineEvidence(
+                    connection: profile.connection,
+                    identity: profile.account,
+                    clientID: profile.clientID,
+                    repository: repository,
+                    runID: runID
+                )
+                deliveryTimeline = timelineBuilder.build(
+                    repositoryID: repository.id,
+                    evidence: evidence
+                )
+            } catch let cancellation as CancellationError {
+                throw cancellation
+            } catch {
+                deliveryTimeline = DeliveryTimelineSnapshot(
+                    status: .temporarilyUnavailable,
+                    confidence: .unknown,
+                    events: []
+                )
+            }
+
+            return ActivityDetailSnapshot(
+                id: jobDetail.id,
+                repository: jobDetail.repository,
+                title: jobDetail.title,
+                summary: jobDetail.summary,
+                state: jobDetail.state,
+                destinationURL: jobDetail.destinationURL,
+                deliveryTimeline: deliveryTimeline,
+                rows: jobDetail.rows
+            )
         }
 
         throw ActivityDetailLoadingError.activityContextUnavailable

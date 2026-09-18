@@ -113,21 +113,28 @@ Deferred intentionally:
 
 ## Phase 4 — Delivery Timeline 🚧
 
-Implemented correlation primitives:
+Implemented:
 
 - workflow execution correlation
 - safe run-to-run correlation
 - merged Pull Request correlation
 - current GitHub REST API compatible commit → associated Pull Request evidence
 - conservative rejection of stale, mismatched, or ambiguous evidence
+- demand-driven Delivery evidence loading only when Workflow detail is opened
+- bounded correlation evidence requests with exact-run, Pull Request, base-branch run, and commit-association limits
+- first user-visible PR → merge → base-branch execution timeline inside Workflow detail
+- confidence-aware correlated, evidence-unavailable, and temporarily-unavailable states
+- best-effort timeline composition that preserves successfully loaded Workflow Jobs
+- deterministic Light/Dark Delivery Timeline visual fixtures, including matrix-job detail
 
 Next:
 
-- surface correlation evidence in the user-facing delivery timeline
-- PR → merge → default-branch execution timeline presentation
 - deployments / environments
-- confidence-aware correlation states
+- explicit repository default-branch discovery
+- standalone delivery history/navigation
+- richer confidence/evidence explanations
 - recovery notifications
+- persisted delivery history
 
 ## Phase 5 — Enterprise
 
@@ -155,8 +162,8 @@ Still required:
 
 ## Current implementation priority
 
-1. Integrate existing correlation primitives into the Phase 4 delivery timeline.
-2. Add deployments/environments and recovery states.
+1. Add deployments/environments and recovery states to Phase 4.
+2. Add explicit default-branch discovery and standalone delivery history.
 3. Broaden enterprise validation toward Phase 5 requirements.
 4. Only then broaden system widgets or external provider/plugin scope.
 

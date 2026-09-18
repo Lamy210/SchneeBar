@@ -40,6 +40,7 @@ public struct ActivityDetailSnapshot: Identifiable, Equatable, Sendable {
     public let summary: String
     public let state: ActivityState
     public let destinationURL: URL?
+    public let deliveryTimeline: DeliveryTimelineSnapshot?
     public let rows: [ActivityDetailRow]
 
     public init(
@@ -49,6 +50,7 @@ public struct ActivityDetailSnapshot: Identifiable, Equatable, Sendable {
         summary: String,
         state: ActivityState,
         destinationURL: URL? = nil,
+        deliveryTimeline: DeliveryTimelineSnapshot? = nil,
         rows: [ActivityDetailRow]
     ) {
         self.id = id
@@ -57,6 +59,7 @@ public struct ActivityDetailSnapshot: Identifiable, Equatable, Sendable {
         self.summary = summary
         self.state = state
         self.destinationURL = destinationURL
+        self.deliveryTimeline = deliveryTimeline
         self.rows = rows
     }
 }

@@ -51,3 +51,50 @@ func activityDetailRowInteractionUsesNoneForPlainRow() {
 
     #expect(activityDetailRowInteraction(row) == .none)
 }
+
+@Test
+func deliveryTimelineConfidenceLabelsRemainExact() {
+    #expect(deliveryTimelineConfidenceLabel(.exact) == "Exact correlation")
+    #expect(deliveryTimelineConfidenceLabel(.high) == "High-confidence correlation")
+    #expect(deliveryTimelineConfidenceLabel(.medium) == "Medium-confidence correlation")
+    #expect(deliveryTimelineConfidenceLabel(.unknown) == "Correlation unavailable")
+}
+
+@Test
+func deliveryTimelineUnavailableCopyDistinguishesEvidenceFromTechnicalFailure() {
+    #expect(deliveryTimelineUnavailableMessage(for: .correlated) == nil)
+    #expect(
+        deliveryTimelineUnavailableMessage(for: .evidenceUnavailable)
+            == "Correlation evidence unavailable"
+    )
+    #expect(
+        deliveryTimelineUnavailableMessage(for: .temporarilyUnavailable)
+            == "Delivery timeline temporarily unavailable"
+    )
+}
+
+@Test
+func deliveryTimelineEventUsesExistingActivityDetailStateIconLanguage() {
+    let success = DeliveryTimelineEvent(
+        id: "success",
+        kind: .execution,
+        title: "CI",
+        state: .success
+    )
+    let failed = DeliveryTimelineEvent(
+        id: "failed",
+        kind: .execution,
+        title: "CI",
+        state: .failed
+    )
+    let waiting = DeliveryTimelineEvent(
+        id: "waiting",
+        kind: .execution,
+        title: "CI",
+        state: .waiting
+    )
+
+    #expect(deliveryTimelineEventIconName(success) == "checkmark.circle.fill")
+    #expect(deliveryTimelineEventIconName(failed) == "xmark.octagon.fill")
+    #expect(deliveryTimelineEventIconName(waiting) == "clock.fill")
+}

@@ -417,6 +417,23 @@ private func run() throws {
         )
     }
 
+    let deliveryScenarios: [ActivityDetailFixtureScenario] = [
+        .deliveryExact,
+        .deliveryEvidenceUnavailable,
+        .deliveryTemporarilyUnavailable,
+        .deliveryMatrixFailure,
+    ]
+    for scenario in deliveryScenarios {
+        for appearance in SnapshotAppearance.allCases {
+            try render(
+                rootView: activityDetailRoot(scenario: scenario, appearance: appearance),
+                appearance: appearance,
+                filename: "activity-detail-\(scenario.rawValue)-\(appearance.rawValue).png",
+                outputDirectory: outputDirectory
+            )
+        }
+    }
+
     for scenario in WidgetFixtureScenario.allCases {
         for appearance in SnapshotAppearance.allCases {
             try render(
