@@ -1,7 +1,7 @@
 # GitHub Deployment Timeline — Phase 4 Second Vertical Slice Design
 
 Date: 2026-09-18  
-Status: Proposed for written-spec review  
+Status: Approved after written-spec review  
 Base: `main@6a7ac415ee6676d579697c757a5b319d9d3f8d62`
 
 ## Context
