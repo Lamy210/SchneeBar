@@ -249,8 +249,8 @@ For the bounded first slice:
 
 1. production deployments before non-production;
 2. non-transient before transient;
-3. `updatedAt` descending;
-4. `createdAt` descending;
+3. `updatedAt` descending, with known timestamps before missing timestamps;
+4. `createdAt` descending, with known timestamps before missing timestamps;
 5. deployment ID descending.
 
 Ordering determines which three deployments receive status requests. Ordering itself is presentation/request planning, not correlation evidence.
@@ -401,7 +401,7 @@ New maximum explicit-detail Delivery budget:
 
 This is a hard network cap, not a logical-method cap.
 
-Tests must use recorded HTTP requests to prove the cap.
+Tests must use recorded HTTP requests to prove the cap. A combined budget test must run the existing correlation service and the Deployment enrichment service against one shared recording transport and assert that the complete path performs no more than 11 feature HTTP requests.
 
 No deployment pagination beyond page 1 is allowed in this slice.
 
