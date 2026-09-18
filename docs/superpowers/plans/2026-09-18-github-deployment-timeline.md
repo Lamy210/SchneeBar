@@ -332,6 +332,7 @@ git commit -m "feat: add bounded GitHub deployment client"
 **Files:**
 - Create: `Sources/SchneeBarGitHub/GitHubDeploymentTimelineService.swift`
 - Create: `Tests/SchneeBarGitHubTests/GitHubDeploymentTimelineServiceTests.swift`
+- Create: `Tests/SchneeBarGitHubTests/GitHubDeliveryAndDeploymentRequestBudgetTests.swift`
 
 **Interfaces:**
 - Consumes: `GitHubConnectionSessionCoordinator`, `GitHubDeploymentClient`.
@@ -406,6 +407,8 @@ because ordering is:
 4. createdAt descending;
 5. deployment ID descending.
 
+Known timestamps sort before missing timestamps at each date comparison. When both date fields tie or are absent, deployment ID is the final deterministic tie-breaker.
+
 - [ ] **Step 3: Verify RED**
 
 Run:
@@ -466,10 +469,35 @@ Run the GitHub test target. Require assertions against the transport's actual re
 
 Do not infer the budget from method-call counters.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 6: Add a combined eleven-request budget regression test**
+
+In `GitHubDeliveryAndDeploymentRequestBudgetTests.swift`, construct the existing `GitHubDeliveryTimelineService` and new `GitHubDeploymentTimelineService` with clients that all share one routing/recording `GitHubHTTPTransport`. Feed the correlation service a fixture that consumes its full 7-request budget (exact run + PR + base list + four association requests), then call Deployment enrichment for the proven candidate SHA with three deployments.
+
+Assert the feature requests recorded by that shared transport are exactly:
+
+```swift
+#expect(featureRequests.count == 11)
+#expect(featureRequests.filter { $0.url?.path.contains("/deployments") == true }.count == 4)
+```
+
+Credential/session setup requests, if the fixture requires them, must be recorded separately and excluded by explicit path classification rather than by subtracting a magic number.
+
+This test is the acceptance proof for the complete explicit-detail network ceiling.
+
+- [ ] **Step 7: Verify the combined budget test GREEN**
+
+Run:
 
 ```bash
-git add Sources/SchneeBarGitHub/GitHubDeploymentTimelineService.swift Tests/SchneeBarGitHubTests/GitHubDeploymentTimelineServiceTests.swift
+mise exec -- tuist test SchneeBarGitHubTests -- -skipMacroValidation CODE_SIGNING_ALLOWED=NO
+```
+
+Expected: PASS with the full-path feature request count at or below 11.
+
+- [ ] **Step 8: Commit**
+
+```bash
+git add Sources/SchneeBarGitHub/GitHubDeploymentTimelineService.swift Tests/SchneeBarGitHubTests/GitHubDeploymentTimelineServiceTests.swift Tests/SchneeBarGitHubTests/GitHubDeliveryAndDeploymentRequestBudgetTests.swift
 git commit -m "feat: load bounded deployment timeline evidence"
 ```
 
@@ -892,7 +920,7 @@ accessBadge("Deployments", access: repository.activityAccess.deployments)
 
 to the repository row.
 
-Include Deployments in `monitoredActivityAccess`, because the summary counts all surfaced access states.
+Include Deployments in `monitoredActivityAccess`, because the summary counts all surfaced access states. Rename the summary caption from `Activity source access` to `Feature access` so a detail-only Deployment capability is not described as a polling source.
 
 Update monitoring copy so it does not imply Deployments is background-polled. Preferred wording:
 
