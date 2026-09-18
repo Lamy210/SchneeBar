@@ -387,7 +387,7 @@ Given:
 ```swift
 [
     deployment(id: 1, production: false, transient: false, updatedAt: t4),
-    deployment(id: 2, production: true,  transient: false, updatedAt: t1),
+    deployment(id: 2, production: true,  transient: false, updatedAt: t4),
     deployment(id: 3, production: true,  transient: true,  updatedAt: t3),
     deployment(id: 4, production: true,  transient: false, updatedAt: t2),
 ]
