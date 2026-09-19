@@ -196,13 +196,13 @@ func environmentClientRejectsInvalidInputBeforeNetwork() async throws {
 @Test
 func environmentClientRejectsMalformedCatalogPayloads() async throws {
     let payloads = [
-        #"{\"total_count\":-1,\"environments\":[]}"#,
-        #"{\"total_count\":0,\"environments\":[{\"id\":101,\"name\":\"production\",\"protection_rules\":[],\"deployment_branch_policy\":null}]}"#,
-        #"{\"total_count\":1,\"environments\":[{\"id\":0,\"name\":\"production\",\"protection_rules\":[],\"deployment_branch_policy\":null}]}"#,
-        #"{\"total_count\":1,\"environments\":[{\"id\":101,\"name\":\"   \",\"protection_rules\":[],\"deployment_branch_policy\":null}]}"#,
-        #"{\"total_count\":1,\"environments\":[{\"id\":101,\"name\":\"production\",\"protection_rules\":[{\"type\":\"wait_timer\",\"wait_timer\":10},{\"type\":\"wait_timer\",\"wait_timer\":20}],\"deployment_branch_policy\":null}]}"#,
-        #"{\"total_count\":1,\"environments\":[{\"id\":101,\"name\":\"production\",\"protection_rules\":[{\"type\":\"required_reviewers\",\"reviewers\":[]},{\"type\":\"required_reviewers\",\"reviewers\":[]}],\"deployment_branch_policy\":null}]}"#,
-        #"{\"total_count\":1,\"environments\":[{\"id\":101,\"name\":\"production\",\"protection_rules\":[{\"type\":\"wait_timer\",\"wait_timer\":-1}],\"deployment_branch_policy\":null}]}"#,
+        "{\"total_count\":-1,\"environments\":[]}",
+        "{\"total_count\":0,\"environments\":[{\"id\":101,\"name\":\"production\",\"protection_rules\":[],\"deployment_branch_policy\":null}]}",
+        "{\"total_count\":1,\"environments\":[{\"id\":0,\"name\":\"production\",\"protection_rules\":[],\"deployment_branch_policy\":null}]}",
+        "{\"total_count\":1,\"environments\":[{\"id\":101,\"name\":\"   \",\"protection_rules\":[],\"deployment_branch_policy\":null}]}",
+        "{\"total_count\":1,\"environments\":[{\"id\":101,\"name\":\"production\",\"protection_rules\":[{\"type\":\"wait_timer\",\"wait_timer\":10},{\"type\":\"wait_timer\",\"wait_timer\":20}],\"deployment_branch_policy\":null}]}",
+        "{\"total_count\":1,\"environments\":[{\"id\":101,\"name\":\"production\",\"protection_rules\":[{\"type\":\"required_reviewers\",\"reviewers\":[]},{\"type\":\"required_reviewers\",\"reviewers\":[]}],\"deployment_branch_policy\":null}]}",
+        "{\"total_count\":1,\"environments\":[{\"id\":101,\"name\":\"production\",\"protection_rules\":[{\"type\":\"wait_timer\",\"wait_timer\":-1}],\"deployment_branch_policy\":null}]}",
     ]
 
     for json in payloads {
@@ -224,10 +224,10 @@ func environmentClientRejectsMalformedCatalogPayloads() async throws {
 func environmentClientMarksFirstPageAsTruncatedWithoutPagination() async throws {
     let entries = (1 ... 100)
         .map {
-            #"{"id":\#($0),"name":"env-\#($0)","protection_rules":[],"deployment_branch_policy":null}"#
+            "{\"id\":\($0),\"name\":\"env-\($0)\",\"protection_rules\":[],\"deployment_branch_policy\":null}"
         }
         .joined(separator: ",")
-    let json = #"{"total_count":101,"environments":[#(entries)]}"#
+    let json = "{\"total_count\":101,\"environments\":[\(entries)]}"
     let transport = EnvironmentQueueTransport([EnvironmentStubResponse(json)])
     let client = GitHubEnvironmentClient(transport: transport)
 
@@ -246,12 +246,12 @@ func environmentClientMarksFirstPageAsTruncatedWithoutPagination() async throws 
 @Test
 func environmentClientDistinguishesBranchPolicyPresence() async throws {
     let cases: [(String, GitHubEnvironmentBranchPolicy)] = [
-        (#"\"deployment_branch_policy\":null"#, .allBranches),
+        ("\"deployment_branch_policy\":null", .allBranches),
         ("", .unknown),
-        (#"\"deployment_branch_policy\":{\"protected_branches\":true,\"custom_branch_policies\":false}"#, .protectedBranches),
-        (#"\"deployment_branch_policy\":{\"protected_branches\":false,\"custom_branch_policies\":true}"#, .customBranches),
-        (#"\"deployment_branch_policy\":{\"protected_branches\":true,\"custom_branch_policies\":true}"#, .unknown),
-        (#"\"deployment_branch_policy\":{\"protected_branches\":false,\"custom_branch_policies\":false}"#, .unknown),
+        ("\"deployment_branch_policy\":{\"protected_branches\":true,\"custom_branch_policies\":false}", .protectedBranches),
+        ("\"deployment_branch_policy\":{\"protected_branches\":false,\"custom_branch_policies\":true}", .customBranches),
+        ("\"deployment_branch_policy\":{\"protected_branches\":true,\"custom_branch_policies\":true}", .unknown),
+        ("\"deployment_branch_policy\":{\"protected_branches\":false,\"custom_branch_policies\":false}", .unknown),
     ]
 
     for (fragment, expected) in cases {
