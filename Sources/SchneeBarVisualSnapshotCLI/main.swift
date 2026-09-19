@@ -427,6 +427,12 @@ private func run() throws {
         .deploymentNone,
         .deploymentCapabilityUnavailable,
         .deploymentBoundedMultiple,
+        .environmentProductionProtected,
+        .environmentStagingProtected,
+        .environmentCapabilityUnavailable,
+        .environmentRequestFailure,
+        .environmentCatalogTruncatedMatched,
+        .environmentPartialMatches,
     ]
     for scenario in deliveryScenarios {
         for appearance in SnapshotAppearance.allCases {
