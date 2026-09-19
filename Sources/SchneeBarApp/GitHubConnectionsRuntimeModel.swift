@@ -146,6 +146,9 @@ final class GitHubConnectionsRuntimeModel {
                         ),
                         checks: activityAccessPresentation(
                             assessment?.state(for: .checks, repositoryID: repository.id)
+                        ),
+                        deployments: activityAccessPresentation(
+                            assessment?.state(for: .deployments, repositoryID: repository.id)
                         )
                     )
                 )
@@ -744,6 +747,18 @@ final class GitHubConnectionsRuntimeModel {
                 }
                 return lhs.id < rhs.id
             }
+    }
+
+    func deploymentAccessPresentation(
+        profileID: UUID,
+        repositoryID: Int64
+    ) -> GitHubRepositoryActivityAccessPresentation {
+        activityAccessPresentation(
+            capabilitiesByConnectionID[profileID]?.state(
+                for: .deployments,
+                repositoryID: repositoryID
+            )
+        )
     }
 
     private func activityAccessPresentation(

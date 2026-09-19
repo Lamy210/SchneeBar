@@ -74,3 +74,30 @@ func activityDetailDefaultsDeliveryTimelineToNil() {
 
     #expect(detail.deliveryTimeline == nil)
 }
+
+
+@Test
+func deliveryTimelineSupportsDeploymentEventsWithoutReordering() {
+    let events = [
+        DeliveryTimelineEvent(
+            id: "execution",
+            kind: .execution,
+            title: "Base branch · CI",
+            state: .success
+        ),
+        DeliveryTimelineEvent(
+            id: "deployment",
+            kind: .deployment,
+            title: "Deployment · production",
+            state: .success
+        ),
+    ]
+
+    let snapshot = DeliveryTimelineSnapshot(
+        status: .correlated,
+        confidence: .exact,
+        events: events
+    )
+
+    #expect(snapshot.events.map(\.kind) == [.execution, .deployment])
+}
