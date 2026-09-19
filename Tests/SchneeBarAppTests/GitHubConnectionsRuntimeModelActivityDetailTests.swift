@@ -173,6 +173,58 @@ private actor DetailDeploymentLoader: GitHubDeploymentTimelineLoading {
     func SHAs() -> [String] { requestedSHAs }
 }
 
+private enum DetailEnvironmentOutcome: Sendable {
+    case catalog(GitHubEnvironmentCatalog)
+    case failure
+    case cancellation
+}
+
+private actor DetailEnvironmentCatalogLoader: GitHubEnvironmentCatalogLoading {
+    private let outcome: DetailEnvironmentOutcome
+    private var requestCount = 0
+
+    init(_ outcome: DetailEnvironmentOutcome) {
+        self.outcome = outcome
+    }
+
+    func environmentCatalog(
+        connection: GitHubConnection,
+        identity: GitHubAccountIdentity,
+        clientID: String?,
+        repository: GitHubRepositoryAccess
+    ) async throws -> GitHubEnvironmentCatalog {
+        requestCount += 1
+        switch outcome {
+        case let .catalog(catalog):
+            return catalog
+        case .failure:
+            throw DetailTimelineError.failed
+        case .cancellation:
+            throw CancellationError()
+        }
+    }
+
+    func calls() -> Int { requestCount }
+}
+
+private enum DetailActionsCapabilityFixture {
+    case available
+    case unavailable
+    case unknown
+}
+
+private func emptyEnvironmentCatalogLoader() -> DetailEnvironmentCatalogLoader {
+    DetailEnvironmentCatalogLoader(
+        .catalog(
+            GitHubEnvironmentCatalog(
+                totalCount: 0,
+                environments: [],
+                isTruncated: false
+            )
+        )
+    )
+}
+
 private enum DetailDeploymentCapabilityFixture {
     case available
     case unavailable
