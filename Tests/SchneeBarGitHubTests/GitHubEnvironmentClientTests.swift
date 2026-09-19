@@ -224,7 +224,7 @@ func environmentClientRejectsMalformedCatalogPayloads() async throws {
 func environmentClientMarksFirstPageAsTruncatedWithoutPagination() async throws {
     let entries = (1 ... 100)
         .map {
-            #"{"id":#($0),"name":"env-#($0)","protection_rules":[],"deployment_branch_policy":null}"#
+            #"{"id":\#($0),"name":"env-\#($0)","protection_rules":[],"deployment_branch_policy":null}"#
         }
         .joined(separator: ",")
     let json = #"{"total_count":101,"environments":[#(entries)]}"#
