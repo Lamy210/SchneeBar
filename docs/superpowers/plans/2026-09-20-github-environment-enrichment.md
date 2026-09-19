@@ -410,7 +410,11 @@ HTTP failure:
 
 ```swift
 await #expect(throws: GitHubEnvironmentClientError.httpStatus(403)) {
-    _ = try await client.environments(...)
+    _ = try await client.environments(
+        repository: try environmentRepository(),
+        connection: try environmentGitHubDotComConnection(),
+        credential: GitHubCredential(accessToken: "ghu_environment")
+    )
 }
 ```
 
@@ -689,7 +693,12 @@ Return HTTP 404 from the transport:
 
 ```swift
 await #expect(throws: GitHubEnvironmentClientError.httpStatus(404)) {
-    _ = try await service.environmentCatalog(...)
+    _ = try await service.environmentCatalog(
+        connection: connection,
+        identity: identity,
+        clientID: nil,
+        repository: repository
+    )
 }
 ```
 
@@ -1213,7 +1222,13 @@ This must match the explicit-detail conservative requestability policy.
 Environment loader throws a technical error:
 
 ```swift
-let detail = try await model.loadActivityDetail(...)
+let detail = try await model.loadActivityDetail(
+    for: item,
+    jobService: jobService,
+    timelineLoader: timelineLoader,
+    deploymentTimelineLoader: deploymentLoader,
+    environmentCatalogLoader: environmentLoader
+)
 
 #expect(await environmentLoader.requestCount() == 1)
 #expect(detail.deliveryTimeline?.status == .correlated)
@@ -1230,7 +1245,13 @@ Environment loader throws `CancellationError`:
 
 ```swift
 await #expect(throws: CancellationError.self) {
-    _ = try await model.loadActivityDetail(...)
+    _ = try await model.loadActivityDetail(
+        for: item,
+        jobService: jobService,
+        timelineLoader: timelineLoader,
+        deploymentTimelineLoader: deploymentLoader,
+        environmentCatalogLoader: environmentLoader
+    )
 }
 ```
 
@@ -1820,7 +1841,7 @@ Add:
 ```markdown
 ## Final exact-head gate
 
-Verified implementation head: `<exact SHA>`
+Verified implementation head: `69572a619c013273050565a1171fb04ae0644f81`
 
 - CI: success
 - Visual Regression: success
@@ -1833,7 +1854,7 @@ Verified implementation head: `<exact SHA>`
 - mergeable: true
 ```
 
-Use the real SHA; do not leave angle-bracket placeholders in the actual PR body.
+Replace that example SHA with the real implementation head before posting the final verification record.
 
 - [ ] **Step 9: Integration discipline**
 
