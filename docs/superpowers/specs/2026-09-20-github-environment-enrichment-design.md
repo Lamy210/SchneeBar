@@ -1,7 +1,7 @@
 # GitHub Environment Enrichment — Phase 4 Third Vertical Slice Design
 
 Date: 2026-09-20  
-Status: Proposed — awaiting written-spec review  
+Status: Approved after written-spec review  
 Stacked base: `feat/github-deployment-timeline@69572a619c013273050565a1171fb04ae0644f81`  
 Dependency: PR #51 (`feat: add GitHub deployment timeline enrichment`)
 
