@@ -527,16 +527,16 @@ private func detailSessionResponses(
 ) -> [DetailHTTPResponse] {
     let user = #"{"id":42,"login":"snow-user","name":"Snow User","avatar_url":null}"#
 
-    var permissionPairs = [#"\"pull_requests\":\"read\""#]
+    var permissionPairs = ["\"pull_requests\":\"read\""]
     switch actionsCapability {
     case .available:
-        permissionPairs.append(#"\"actions\":\"read\""#)
+        permissionPairs.append("\"actions\":\"read\"")
     case .unavailable, .unknown:
         break
     }
     switch deploymentCapability {
     case .available:
-        permissionPairs.append(#"\"deployments\":\"read\""#)
+        permissionPairs.append("\"deployments\":\"read\"")
     case .unavailable, .unknown:
         break
     }
