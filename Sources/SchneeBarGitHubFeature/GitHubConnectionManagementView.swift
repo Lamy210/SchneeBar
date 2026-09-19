@@ -57,15 +57,18 @@ public struct GitHubRepositoryActivityAccessModel: Equatable, Sendable {
     public let actions: GitHubRepositoryActivityAccessPresentation
     public let reviewRequests: GitHubRepositoryActivityAccessPresentation
     public let checks: GitHubRepositoryActivityAccessPresentation
+    public let deployments: GitHubRepositoryActivityAccessPresentation
 
     public init(
         actions: GitHubRepositoryActivityAccessPresentation,
         reviewRequests: GitHubRepositoryActivityAccessPresentation,
-        checks: GitHubRepositoryActivityAccessPresentation
+        checks: GitHubRepositoryActivityAccessPresentation,
+        deployments: GitHubRepositoryActivityAccessPresentation
     ) {
         self.actions = actions
         self.reviewRequests = reviewRequests
         self.checks = checks
+        self.deployments = deployments
     }
 }
 
@@ -323,7 +326,7 @@ public struct GitHubConnectionManagementView: View {
                 }
 
                 Spacer(minLength: 0)
-                Text("Activity source access")
+                Text("Feature access")
                     .foregroundStyle(.secondary)
             }
             .font(.caption)
@@ -373,6 +376,7 @@ public struct GitHubConnectionManagementView: View {
                 accessBadge("Actions", access: repository.activityAccess.actions)
                 accessBadge("Reviews", access: repository.activityAccess.reviewRequests)
                 accessBadge("Checks", access: repository.activityAccess.checks)
+                accessBadge("Deployments", access: repository.activityAccess.deployments)
             }
 
             if repository.isPrivate {
@@ -468,6 +472,7 @@ public struct GitHubConnectionManagementView: View {
                 repository.activityAccess.actions,
                 repository.activityAccess.reviewRequests,
                 repository.activityAccess.checks,
+                repository.activityAccess.deployments,
             ]
         }
     }
@@ -483,9 +488,9 @@ public struct GitHubConnectionManagementView: View {
     private var monitoringExplanation: String {
         switch selectionMode {
         case .allAccessible:
-            return "SchneeBar discovers all repositories granted to the GitHub App, while activity polling keeps bounded budgets for Workflows, Review Requests, and Checks."
+            return "SchneeBar discovers all repositories granted to the GitHub App. Activity polling stays bounded to Workflows, Review Requests, and Checks; Deployment access is used only when delivery detail is opened."
         case .selected:
-            return "Only selected repositories are eligible for developer activity polling. Repository access on GitHub is unchanged."
+            return "Only selected repositories are eligible for bounded developer activity polling. Deployment access is used only when delivery detail is opened. Repository access on GitHub is unchanged."
         }
     }
 
