@@ -746,6 +746,18 @@ final class GitHubConnectionsRuntimeModel {
             }
     }
 
+    func deploymentAccessPresentation(
+        profileID: UUID,
+        repositoryID: Int64
+    ) -> GitHubRepositoryActivityAccessPresentation {
+        activityAccessPresentation(
+            capabilitiesByConnectionID[profileID]?.state(
+                for: .deployments,
+                repositoryID: repositoryID
+            )
+        )
+    }
+
     private func activityAccessPresentation(
         _ state: GitHubCapabilityState?
     ) -> GitHubRepositoryActivityAccessPresentation {
