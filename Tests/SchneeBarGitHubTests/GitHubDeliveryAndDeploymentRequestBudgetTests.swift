@@ -87,6 +87,49 @@ private actor DeliveryBudgetRoutingTransport: GitHubHTTPTransport {
             json = deliveryBudgetStatusJSON(id: 1003, state: "pending", environment: "preview")
             statusCode = 200
 
+        case "/repos/octocat/project/environments":
+            json = """
+            {
+              "total_count":3,
+              "environments":[
+                {
+                  "id":301,
+                  "name":"production",
+                  "protection_rules":[
+                    {
+                      "type":"required_reviewers",
+                      "prevent_self_review":true,
+                      "reviewers":[{"type":"User","reviewer":{"id":1,"login":"synthetic"}}]
+                    },
+                    {"type":"wait_timer","wait_timer":30}
+                  ],
+                  "deployment_branch_policy":{
+                    "protected_branches":false,
+                    "custom_branch_policies":true
+                  },
+                  "created_at":"2026-09-18T00:00:00Z",
+                  "updated_at":"2026-09-18T00:01:00Z"
+                },
+                {
+                  "id":302,
+                  "name":"staging",
+                  "protection_rules":[],
+                  "deployment_branch_policy":null,
+                  "created_at":null,
+                  "updated_at":null
+                },
+                {
+                  "id":303,
+                  "name":"preview",
+                  "protection_rules":[],
+                  "created_at":null,
+                  "updated_at":null
+                }
+              ]
+            }
+            """
+            statusCode = 200
+
         default:
             json = #"{"message":"Unexpected request"}"#
             statusCode = 500
@@ -144,6 +187,10 @@ func completeDeliveryDeploymentAndEnvironmentEvidencePathUsesTwelveFeatureReques
         sessionCoordinator: coordinator,
         deploymentClient: GitHubDeploymentClient(transport: transport)
     )
+    let environmentService = GitHubEnvironmentCatalogService(
+        sessionCoordinator: coordinator,
+        environmentClient: GitHubEnvironmentClient(transport: transport)
+    )
 
     let correlationEvidence = try await deliveryService.timelineEvidence(
         connection: connection,
@@ -168,6 +215,15 @@ func completeDeliveryDeploymentAndEnvironmentEvidencePathUsesTwelveFeatureReques
 
     #expect(deploymentEvidence.deployments.count == 3)
 
+    let environmentCatalog = try await environmentService.environmentCatalog(
+        connection: connection,
+        identity: identity,
+        clientID: nil,
+        repository: repository
+    )
+
+    #expect(environmentCatalog.environments.count == 3)
+
     let featureRequests = await transport.recordedRequests()
     #expect(featureRequests.count == 12)
     #expect(
@@ -180,6 +236,15 @@ func completeDeliveryDeploymentAndEnvironmentEvidencePathUsesTwelveFeatureReques
             $0.url?.path.contains("/commits/") == true
         }.count == 4
     )
+
+    let environmentRequests = featureRequests.filter {
+        $0.url?.path == "/repos/octocat/project/environments"
+    }
+    #expect(environmentRequests.count == 1)
+
+    let environmentRequest = try #require(environmentRequests.first)
+    #expect(queryValue("per_page", in: environmentRequest) == "100")
+    #expect(queryValue("page", in: environmentRequest) == "1")
 }
 
 private func deliveryBudgetWorkflowRunJSON(
@@ -207,4 +272,19 @@ private func deliveryBudgetStatusJSON(
     """
     [{"id":\(id),"state":"\(state)","environment":"\(environment)","description":null,"environment_url":null,"log_url":null,"created_at":"2026-09-18T01:00:00Z","updated_at":"2026-09-18T01:01:00Z"}]
     """
+}
+
+
+private func queryValue(_ name: String, in request: URLRequest) -> String? {
+    guard let url = request.url,
+          let components = URLComponents(
+              url: url,
+              resolvingAgainstBaseURL: false
+          )
+    else {
+        return nil
+    }
+    return components.queryItems?
+        .first(where: { $0.name == name })?
+        .value
 }
