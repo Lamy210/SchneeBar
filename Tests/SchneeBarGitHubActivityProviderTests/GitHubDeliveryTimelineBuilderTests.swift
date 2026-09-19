@@ -515,3 +515,327 @@ private func deploymentEvidenceFixture(
         )
     )
 }
+
+
+@Test
+func deliveryTimelineBuilderEnrichesDeploymentWithExactEnvironmentProtection() throws {
+    let original = GitHubDeliveryTimelineBuilder().build(
+        repositoryID: 42,
+        evidence: try deliveryEvidence(
+            baseRuns: [deliveryRun(id: 801, branch: "main", headSHA: "landed-sha")],
+            associations: [801: [47]]
+        )
+    )
+    let evidence = GitHubDeploymentTimelineEvidence(
+        exactSHA: "landed-sha",
+        deployments: [
+            GitHubDeploymentEvidence(
+                deployment: deploymentFixture(
+                    id: 950,
+                    sha: "landed-sha",
+                    environment: "staging",
+                    production: true
+                ),
+                latestStatus: deploymentStatusFixture(
+                    state: .success,
+                    environment: "PRODUCTION",
+                    environmentURL: URL(string: "https://deploy.example.test/production")
+                )
+            ),
+        ]
+    )
+    let catalog = GitHubEnvironmentCatalog(
+        totalCount: 1,
+        environments: [
+            GitHubEnvironment(
+                id: 301,
+                name: " Production ",
+                protection: GitHubEnvironmentProtection(
+                    waitTimerMinutes: 30,
+                    requiredReviewerCount: 2,
+                    preventsSelfReview: true,
+                    branchPolicy: .customBranches
+                ),
+                createdAt: nil,
+                updatedAt: nil
+            ),
+        ],
+        isTruncated: false
+    )
+
+    let snapshot = GitHubDeliveryTimelineBuilder().appendDeployments(
+        to: original,
+        evidence: evidence,
+        environmentCatalog: catalog
+    )
+
+    let deployment = try #require(snapshot.events.last)
+    #expect(deployment.kind == .deployment)
+    #expect(deployment.title == "Deployment · PRODUCTION")
+    #expect(
+        deployment.detail
+            == "Succeeded · Production · 2 reviewers · 30m wait · No self-review · Custom branches"
+    )
+    #expect(deployment.state == .success)
+    #expect(
+        deployment.destinationURL?.absoluteString
+            == "https://deploy.example.test/production"
+    )
+    #expect(snapshot.status == original.status)
+    #expect(snapshot.confidence == original.confidence)
+}
+
+@Test
+func deliveryTimelineBuilderUsesStatusEnvironmentBeforeDeploymentEnvironment() throws {
+    let original = GitHubDeliveryTimelineBuilder().build(
+        repositoryID: 42,
+        evidence: try deliveryEvidence(
+            baseRuns: [deliveryRun(id: 801, branch: "main", headSHA: "landed-sha")],
+            associations: [801: [47]]
+        )
+    )
+    let evidence = GitHubDeploymentTimelineEvidence(
+        exactSHA: "landed-sha",
+        deployments: [
+            GitHubDeploymentEvidence(
+                deployment: deploymentFixture(
+                    id: 951,
+                    sha: "landed-sha",
+                    environment: "staging"
+                ),
+                latestStatus: deploymentStatusFixture(
+                    state: .success,
+                    environment: "production"
+                )
+            ),
+        ]
+    )
+    let catalog = GitHubEnvironmentCatalog(
+        totalCount: 2,
+        environments: [
+            GitHubEnvironment(
+                id: 302,
+                name: "staging",
+                protection: GitHubEnvironmentProtection(
+                    waitTimerMinutes: nil,
+                    requiredReviewerCount: 3,
+                    preventsSelfReview: nil,
+                    branchPolicy: .allBranches
+                ),
+                createdAt: nil,
+                updatedAt: nil
+            ),
+            GitHubEnvironment(
+                id: 303,
+                name: "production",
+                protection: GitHubEnvironmentProtection(
+                    waitTimerMinutes: nil,
+                    requiredReviewerCount: 1,
+                    preventsSelfReview: nil,
+                    branchPolicy: .allBranches
+                ),
+                createdAt: nil,
+                updatedAt: nil
+            ),
+        ],
+        isTruncated: false
+    )
+
+    let snapshot = GitHubDeliveryTimelineBuilder().appendDeployments(
+        to: original,
+        evidence: evidence,
+        environmentCatalog: catalog
+    )
+
+    #expect(snapshot.events.last?.detail == "Succeeded · 1 reviewer")
+}
+
+@Test
+func deliveryTimelineBuilderLeavesAmbiguousAndUnmatchedEnvironmentsUnchanged() throws {
+    let original = GitHubDeliveryTimelineBuilder().build(
+        repositoryID: 42,
+        evidence: try deliveryEvidence(
+            baseRuns: [deliveryRun(id: 801, branch: "main", headSHA: "landed-sha")],
+            associations: [801: [47]]
+        )
+    )
+    let evidence = GitHubDeploymentTimelineEvidence(
+        exactSHA: "landed-sha",
+        deployments: [
+            deploymentEvidenceFixture(
+                id: 952,
+                state: .success,
+                environment: "production"
+            ),
+            deploymentEvidenceFixture(
+                id: 953,
+                state: .success,
+                environment: "unmatched"
+            ),
+        ]
+    )
+    let catalog = GitHubEnvironmentCatalog(
+        totalCount: 2,
+        environments: [
+            GitHubEnvironment(
+                id: 304,
+                name: "production",
+                protection: GitHubEnvironmentProtection(
+                    waitTimerMinutes: nil,
+                    requiredReviewerCount: 1,
+                    preventsSelfReview: nil,
+                    branchPolicy: .allBranches
+                ),
+                createdAt: nil,
+                updatedAt: nil
+            ),
+            GitHubEnvironment(
+                id: 305,
+                name: "PRODUCTION",
+                protection: GitHubEnvironmentProtection(
+                    waitTimerMinutes: nil,
+                    requiredReviewerCount: 4,
+                    preventsSelfReview: nil,
+                    branchPolicy: .allBranches
+                ),
+                createdAt: nil,
+                updatedAt: nil
+            ),
+        ],
+        isTruncated: false
+    )
+
+    let snapshot = GitHubDeliveryTimelineBuilder().appendDeployments(
+        to: original,
+        evidence: evidence,
+        environmentCatalog: catalog
+    )
+    let deployments = snapshot.events.filter { $0.kind == .deployment }
+
+    #expect(deployments.map(\.detail) == ["Succeeded", "Succeeded"])
+}
+
+@Test
+func deliveryTimelineBuilderOmitsZeroProtectionValuesAndFormatsWaitTimers() throws {
+    let original = GitHubDeliveryTimelineBuilder().build(
+        repositoryID: 42,
+        evidence: try deliveryEvidence(
+            baseRuns: [deliveryRun(id: 801, branch: "main", headSHA: "landed-sha")],
+            associations: [801: [47]]
+        )
+    )
+    let evidence = GitHubDeploymentTimelineEvidence(
+        exactSHA: "landed-sha",
+        deployments: [
+            deploymentEvidenceFixture(id: 954, state: .success, environment: "zero"),
+            deploymentEvidenceFixture(id: 955, state: .success, environment: "hour"),
+            deploymentEvidenceFixture(id: 956, state: .success, environment: "day"),
+            deploymentEvidenceFixture(id: 957, state: .success, environment: "minute"),
+        ]
+    )
+    let catalog = GitHubEnvironmentCatalog(
+        totalCount: 4,
+        environments: [
+            GitHubEnvironment(
+                id: 306,
+                name: "zero",
+                protection: GitHubEnvironmentProtection(
+                    waitTimerMinutes: 0,
+                    requiredReviewerCount: 0,
+                    preventsSelfReview: false,
+                    branchPolicy: .protectedBranches
+                ),
+                createdAt: nil,
+                updatedAt: nil
+            ),
+            GitHubEnvironment(
+                id: 307,
+                name: "hour",
+                protection: GitHubEnvironmentProtection(
+                    waitTimerMinutes: 120,
+                    requiredReviewerCount: nil,
+                    preventsSelfReview: nil,
+                    branchPolicy: .allBranches
+                ),
+                createdAt: nil,
+                updatedAt: nil
+            ),
+            GitHubEnvironment(
+                id: 308,
+                name: "day",
+                protection: GitHubEnvironmentProtection(
+                    waitTimerMinutes: 2_880,
+                    requiredReviewerCount: nil,
+                    preventsSelfReview: nil,
+                    branchPolicy: .allBranches
+                ),
+                createdAt: nil,
+                updatedAt: nil
+            ),
+            GitHubEnvironment(
+                id: 309,
+                name: "minute",
+                protection: GitHubEnvironmentProtection(
+                    waitTimerMinutes: 90,
+                    requiredReviewerCount: nil,
+                    preventsSelfReview: nil,
+                    branchPolicy: .allBranches
+                ),
+                createdAt: nil,
+                updatedAt: nil
+            ),
+        ],
+        isTruncated: false
+    )
+
+    let snapshot = GitHubDeliveryTimelineBuilder().appendDeployments(
+        to: original,
+        evidence: evidence,
+        environmentCatalog: catalog
+    )
+    let details = snapshot.events
+        .filter { $0.kind == .deployment }
+        .map(\.detail)
+
+    #expect(details == [
+        "Succeeded · Protected branches",
+        "Succeeded · 2h wait",
+        "Succeeded · 2d wait",
+        "Succeeded · 90m wait",
+    ])
+}
+
+@Test
+func deliveryTimelineBuilderWithoutEnvironmentCatalogPreservesDeploymentBehavior() throws {
+    let original = GitHubDeliveryTimelineBuilder().build(
+        repositoryID: 42,
+        evidence: try deliveryEvidence(
+            baseRuns: [deliveryRun(id: 801, branch: "main", headSHA: "landed-sha")],
+            associations: [801: [47]]
+        )
+    )
+    let evidence = GitHubDeploymentTimelineEvidence(
+        exactSHA: "landed-sha",
+        deployments: [
+            GitHubDeploymentEvidence(
+                deployment: deploymentFixture(
+                    id: 958,
+                    sha: "landed-sha",
+                    environment: "production",
+                    production: true
+                ),
+                latestStatus: deploymentStatusFixture(
+                    state: .success,
+                    environment: "production"
+                )
+            ),
+        ]
+    )
+
+    let snapshot = GitHubDeliveryTimelineBuilder().appendDeployments(
+        to: original,
+        evidence: evidence
+    )
+
+    #expect(snapshot.events.last?.detail == "Succeeded · Production")
+}
