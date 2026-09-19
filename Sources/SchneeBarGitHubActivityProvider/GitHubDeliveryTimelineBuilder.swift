@@ -130,7 +130,8 @@ public struct GitHubDeliveryTimelineBuilder: Sendable {
 
     public func appendDeployments(
         to timeline: DeliveryTimelineSnapshot,
-        evidence: GitHubDeploymentTimelineEvidence
+        evidence: GitHubDeploymentTimelineEvidence,
+        environmentCatalog: GitHubEnvironmentCatalog? = nil
     ) -> DeliveryTimelineSnapshot {
         guard timeline.status == .correlated else {
             return timeline
@@ -153,9 +154,14 @@ public struct GitHubDeliveryTimelineBuilder: Sendable {
                 fallback: deployment.environment
             )
             let presentation = deploymentStatusPresentation(status?.state)
+            let matchedEnvironment = matchedEnvironment(
+                named: environment,
+                in: environmentCatalog
+            )
             let detail = deploymentDetail(
                 statusLabel: presentation.label,
-                deployment: deployment
+                deployment: deployment,
+                environment: matchedEnvironment
             )
 
             return DeliveryTimelineEvent(
@@ -293,16 +299,88 @@ public struct GitHubDeliveryTimelineBuilder: Sendable {
 
     private func deploymentDetail(
         statusLabel: String,
-        deployment: GitHubDeployment
+        deployment: GitHubDeployment,
+        environment: GitHubEnvironment?
     ) -> String {
         var parts = [statusLabel]
+
         if deployment.isProductionEnvironment {
             parts.append("Production")
         }
         if deployment.isTransientEnvironment {
             parts.append("Transient")
         }
+
+        if let reviewerCount = environment?.protection.requiredReviewerCount,
+           reviewerCount > 0
+        {
+            parts.append(
+                reviewerCount == 1
+                    ? "1 reviewer"
+                    : "\(reviewerCount) reviewers"
+            )
+        }
+
+        if let waitTimer = environment?.protection.waitTimerMinutes,
+           waitTimer > 0
+        {
+            parts.append(waitTimerLabel(waitTimer))
+        }
+
+        if environment?.protection.preventsSelfReview == true {
+            parts.append("No self-review")
+        }
+
+        switch environment?.protection.branchPolicy {
+        case .protectedBranches:
+            parts.append("Protected branches")
+        case .customBranches:
+            parts.append("Custom branches")
+        case .allBranches, .unknown, .none:
+            break
+        }
+
         return parts.joined(separator: " · ")
+    }
+
+    private func matchedEnvironment(
+        named environmentName: String,
+        in catalog: GitHubEnvironmentCatalog?
+    ) -> GitHubEnvironment? {
+        guard let catalog,
+              environmentName != "Unknown environment"
+        else {
+            return nil
+        }
+
+        let key = normalizedEnvironmentKey(environmentName)
+        guard !key.isEmpty else {
+            return nil
+        }
+
+        let matches = catalog.environments.filter {
+            normalizedEnvironmentKey($0.name) == key
+        }
+        guard matches.count == 1 else {
+            return nil
+        }
+        return matches[0]
+    }
+
+    private func normalizedEnvironmentKey(_ value: String) -> String {
+        value
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+    }
+
+    private func waitTimerLabel(_ minutes: Int) -> String {
+        if minutes % 1_440 == 0 {
+            return "\(minutes / 1_440)d wait"
+        }
+        if minutes % 60 == 0 {
+            return "\(minutes / 60)h wait"
+        }
+        return "\(minutes)m wait"
     }
 
     private func normalizedEnvironment(
