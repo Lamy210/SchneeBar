@@ -146,6 +146,9 @@ final class GitHubConnectionsRuntimeModel {
                         ),
                         checks: activityAccessPresentation(
                             assessment?.state(for: .checks, repositoryID: repository.id)
+                        ),
+                        deployments: activityAccessPresentation(
+                            assessment?.state(for: .deployments, repositoryID: repository.id)
                         )
                     )
                 )
