@@ -238,3 +238,280 @@ private func deliveryRun(
         updatedAt: updatedAt
     )
 }
+
+
+@Test
+func deliveryTimelineBuilderExposesCorrelatedBaseRunWithoutDuplicatingCorrelation() throws {
+    let evidence = try deliveryEvidence(
+        baseRuns: [deliveryRun(id: 801, branch: "main", headSHA: "landed-sha")],
+        associations: [801: [47]]
+    )
+
+    let result = GitHubDeliveryTimelineBuilder().buildResult(
+        repositoryID: 42,
+        evidence: evidence
+    )
+
+    #expect(result.timeline.status == .correlated)
+    #expect(result.timeline.confidence == .exact)
+    #expect(result.correlatedBaseRun?.id == 801)
+    #expect(result.correlatedBaseRun?.headSHA == "landed-sha")
+}
+
+@Test
+func deliveryTimelineBuilderReturnsNoBaseRunWhenCorrelationIsUnavailable() throws {
+    let evidence = try deliveryEvidence(
+        baseRuns: [deliveryRun(id: 801, branch: "main", headSHA: "landed-sha")],
+        associations: [801: [99]]
+    )
+
+    let result = GitHubDeliveryTimelineBuilder().buildResult(
+        repositoryID: 42,
+        evidence: evidence
+    )
+
+    #expect(result.timeline.status == .evidenceUnavailable)
+    #expect(result.correlatedBaseRun == nil)
+}
+
+@Test
+func deliveryTimelineBuilderAppendsExactSHADeploymentAfterExecution() throws {
+    let original = GitHubDeliveryTimelineBuilder().build(
+        repositoryID: 42,
+        evidence: try deliveryEvidence(
+            baseRuns: [deliveryRun(id: 801, branch: "main", headSHA: "landed-sha")],
+            associations: [801: [47]]
+        )
+    )
+    let evidence = GitHubDeploymentTimelineEvidence(
+        exactSHA: "LANDED-SHA",
+        deployments: [
+            GitHubDeploymentEvidence(
+                deployment: deploymentFixture(
+                    id: 901,
+                    sha: " landed-sha ",
+                    environment: "production",
+                    production: true
+                ),
+                latestStatus: deploymentStatusFixture(
+                    state: .success,
+                    environment: "production",
+                    environmentURL: URL(string: "https://deploy.example.test/production"),
+                    logURL: URL(string: "https://deploy.example.test/logs/901")
+                )
+            ),
+        ]
+    )
+
+    let snapshot = GitHubDeliveryTimelineBuilder().appendDeployments(
+        to: original,
+        evidence: evidence
+    )
+
+    #expect(snapshot.status == .correlated)
+    #expect(snapshot.confidence == .exact)
+    #expect(snapshot.events.map(\.kind) == [.pullRequest, .merge, .execution, .deployment])
+    #expect(snapshot.events.last?.title == "Deployment · production")
+    #expect(snapshot.events.last?.detail == "Succeeded · Production")
+    #expect(snapshot.events.last?.state == .success)
+    #expect(snapshot.events.last?.destinationURL?.absoluteString == "https://deploy.example.test/production")
+}
+
+@Test
+func deliveryTimelineBuilderRejectsMismatchedDeploymentSHAAndNonCorrelatedTimeline() throws {
+    let correlated = GitHubDeliveryTimelineBuilder().build(
+        repositoryID: 42,
+        evidence: try deliveryEvidence(
+            baseRuns: [deliveryRun(id: 801, branch: "main", headSHA: "landed-sha")],
+            associations: [801: [47]]
+        )
+    )
+    let mismatched = GitHubDeploymentTimelineEvidence(
+        exactSHA: "landed-sha",
+        deployments: [
+            GitHubDeploymentEvidence(
+                deployment: deploymentFixture(
+                    id: 901,
+                    sha: "other-sha",
+                    environment: "production",
+                    production: true
+                ),
+                latestStatus: deploymentStatusFixture(
+                    state: .success,
+                    environment: "production"
+                )
+            ),
+        ]
+    )
+
+    let unchangedCorrelated = GitHubDeliveryTimelineBuilder().appendDeployments(
+        to: correlated,
+        evidence: mismatched
+    )
+    #expect(unchangedCorrelated == correlated)
+
+    let unavailable = DeliveryTimelineSnapshot(
+        status: .evidenceUnavailable,
+        confidence: .unknown,
+        events: []
+    )
+    let matchingEvidence = GitHubDeploymentTimelineEvidence(
+        exactSHA: "landed-sha",
+        deployments: [
+            GitHubDeploymentEvidence(
+                deployment: deploymentFixture(
+                    id: 902,
+                    sha: "landed-sha",
+                    environment: "production",
+                    production: true
+                ),
+                latestStatus: nil
+            ),
+        ]
+    )
+
+    #expect(
+        GitHubDeliveryTimelineBuilder().appendDeployments(
+            to: unavailable,
+            evidence: matchingEvidence
+        ) == unavailable
+    )
+}
+
+@Test
+func deliveryTimelineBuilderUsesEnvironmentFallbackAndStatusURLPriority() throws {
+    let original = GitHubDeliveryTimelineBuilder().build(
+        repositoryID: 42,
+        evidence: try deliveryEvidence(
+            baseRuns: [deliveryRun(id: 801, branch: "main", headSHA: "landed-sha")],
+            associations: [801: [47]]
+        )
+    )
+    let evidence = GitHubDeploymentTimelineEvidence(
+        exactSHA: "landed-sha",
+        deployments: [
+            GitHubDeploymentEvidence(
+                deployment: deploymentFixture(
+                    id: 901,
+                    sha: "landed-sha",
+                    environment: "staging"
+                ),
+                latestStatus: deploymentStatusFixture(
+                    state: .inProgress,
+                    environment: "  ",
+                    environmentURL: nil,
+                    logURL: URL(string: "https://deploy.example.test/logs/901")
+                )
+            ),
+            GitHubDeploymentEvidence(
+                deployment: deploymentFixture(
+                    id: 902,
+                    sha: "landed-sha",
+                    environment: ""
+                ),
+                latestStatus: nil
+            ),
+        ]
+    )
+
+    let snapshot = GitHubDeliveryTimelineBuilder().appendDeployments(
+        to: original,
+        evidence: evidence
+    )
+    let deployments = snapshot.events.filter { $0.kind == .deployment }
+
+    #expect(deployments.count == 2)
+    #expect(deployments[0].title == "Deployment · staging")
+    #expect(deployments[0].detail == "Running")
+    #expect(deployments[0].state == .running)
+    #expect(deployments[0].destinationURL?.absoluteString == "https://deploy.example.test/logs/901")
+    #expect(deployments[1].title == "Deployment · Unknown environment")
+    #expect(deployments[1].detail == "Status unavailable")
+    #expect(deployments[1].state == .neutral)
+}
+
+@Test
+func deliveryTimelineBuilderMapsDeploymentStatusesWithoutChangingCorrelationConfidence() throws {
+    let original = GitHubDeliveryTimelineBuilder().build(
+        repositoryID: 42,
+        evidence: try deliveryEvidence(
+            baseRuns: [deliveryRun(id: 801, branch: "main", headSHA: "landed-sha")],
+            associations: [801: [47]]
+        )
+    )
+    let evidence = GitHubDeploymentTimelineEvidence(
+        exactSHA: "landed-sha",
+        deployments: [
+            deploymentEvidenceFixture(id: 901, state: .failure, environment: "failure"),
+            deploymentEvidenceFixture(id: 902, state: .error, environment: "error"),
+            deploymentEvidenceFixture(id: 903, state: .pending, environment: "pending"),
+            deploymentEvidenceFixture(id: 904, state: .queued, environment: "queued"),
+            deploymentEvidenceFixture(id: 905, state: .inactive, environment: "inactive"),
+            deploymentEvidenceFixture(id: 906, state: .unknown("future_state"), environment: "future"),
+        ]
+    )
+
+    let snapshot = GitHubDeliveryTimelineBuilder().appendDeployments(
+        to: original,
+        evidence: evidence
+    )
+    let deployments = snapshot.events.filter { $0.kind == .deployment }
+
+    #expect(snapshot.confidence == .exact)
+    #expect(deployments.map(\.state) == [.failed, .failed, .waiting, .waiting, .neutral, .neutral])
+    #expect(deployments.map(\.detail) == ["Failed", "Error", "Pending", "Queued", "Inactive", "future_state"])
+}
+
+private func deploymentFixture(
+    id: Int64,
+    sha: String,
+    environment: String,
+    production: Bool = false,
+    transient: Bool = false
+) -> GitHubDeployment {
+    GitHubDeployment(
+        id: id,
+        sha: sha,
+        environment: environment,
+        isProductionEnvironment: production,
+        isTransientEnvironment: transient,
+        createdAt: Date(timeIntervalSince1970: 400),
+        updatedAt: Date(timeIntervalSince1970: 500)
+    )
+}
+
+private func deploymentStatusFixture(
+    state: GitHubDeploymentStatusState,
+    environment: String?,
+    environmentURL: URL? = nil,
+    logURL: URL? = nil
+) -> GitHubDeploymentStatus {
+    GitHubDeploymentStatus(
+        id: 1_000,
+        state: state,
+        environment: environment,
+        description: nil,
+        environmentURL: environmentURL,
+        logURL: logURL,
+        createdAt: Date(timeIntervalSince1970: 510),
+        updatedAt: Date(timeIntervalSince1970: 520)
+    )
+}
+
+private func deploymentEvidenceFixture(
+    id: Int64,
+    state: GitHubDeploymentStatusState,
+    environment: String
+) -> GitHubDeploymentEvidence {
+    GitHubDeploymentEvidence(
+        deployment: deploymentFixture(
+            id: id,
+            sha: "landed-sha",
+            environment: environment
+        ),
+        latestStatus: deploymentStatusFixture(
+            state: state,
+            environment: environment
+        )
+    )
+}
