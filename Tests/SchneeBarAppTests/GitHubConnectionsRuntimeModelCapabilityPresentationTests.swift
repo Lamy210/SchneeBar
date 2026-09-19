@@ -95,7 +95,7 @@ private struct CapabilityPresentationCheckLoader: GitHubCheckRunLoading {
 }
 
 @Test @MainActor
-func managementModelMapsActionsReviewsAndChecksIndependently() async throws {
+func managementModelMapsActionsReviewsChecksAndDeploymentsIndependently() async throws {
     let profile = try capabilityPresentationProfile()
     let profileStore = CapabilityPresentationProfileStore(profile: profile)
     let credentialStore = CapabilityPresentationCredentialStore(profile: profile)
@@ -123,6 +123,7 @@ func managementModelMapsActionsReviewsAndChecksIndependently() async throws {
     #expect(repository.activityAccess.actions == .available)
     #expect(repository.activityAccess.reviewRequests == .unavailable)
     #expect(repository.activityAccess.checks == .unverified)
+    #expect(repository.activityAccess.deployments == .available)
 }
 
 private func capabilityPresentationProfile() throws -> GitHubConnectionProfile {
@@ -150,7 +151,7 @@ private func capabilityPresentationResponses() -> [CapabilityPresentationRespons
             json: #"{"id":42,"login":"snow-user","name":"Snow User","avatar_url":null}"#
         ),
         CapabilityPresentationResponse(
-            json: #"{"total_count":1,"installations":[{"id":10,"account":{"id":100,"login":"snow","type":"Organization","avatar_url":null},"repository_selection":"all","permissions":{"actions":"read","checks":"triage"},"suspended_at":null}]}"#
+            json: #"{"total_count":1,"installations":[{"id":10,"account":{"id":100,"login":"snow","type":"Organization","avatar_url":null},"repository_selection":"all","permissions":{"actions":"read","checks":"triage","deployments":"read"},"suspended_at":null}]}"#
         ),
         CapabilityPresentationResponse(
             json: #"{"total_count":1,"repositories":[{"id":1,"name":"app","full_name":"snow/app","private":true,"owner":{"id":100,"login":"snow","type":"Organization","avatar_url":null},"permissions":{"admin":false,"maintain":false,"push":false,"triage":false,"pull":true}}]}"#
