@@ -244,6 +244,7 @@ func activityDetailCombinesJobsAndCorrelatedTimeline() async throws {
         jobService: fixture.jobService,
         timelineLoader: timelineLoader,
         deploymentTimelineLoader: deploymentLoader,
+        environmentCatalogLoader: emptyEnvironmentCatalogLoader(),
         timelineBuilder: GitHubDeliveryTimelineBuilder()
     )
 
@@ -283,6 +284,7 @@ func activityDetailPreservesJobsWhenTimelineEvidenceIsUnavailable() async throws
         jobService: fixture.jobService,
         timelineLoader: timelineLoader,
         deploymentTimelineLoader: deploymentLoader,
+        environmentCatalogLoader: emptyEnvironmentCatalogLoader(),
         timelineBuilder: GitHubDeliveryTimelineBuilder()
     )
 
@@ -306,6 +308,7 @@ func activityDetailConvertsTimelineFailureWithoutHidingJobs() async throws {
         jobService: fixture.jobService,
         timelineLoader: timelineLoader,
         deploymentTimelineLoader: deploymentLoader,
+        environmentCatalogLoader: emptyEnvironmentCatalogLoader(),
         timelineBuilder: GitHubDeliveryTimelineBuilder()
     )
 
@@ -331,6 +334,7 @@ func activityDetailJobFailureStillFailsBeforeTimelineLoading() async throws {
             jobService: fixture.jobService,
             timelineLoader: timelineLoader,
             deploymentTimelineLoader: deploymentLoader,
+            environmentCatalogLoader: emptyEnvironmentCatalogLoader(),
             timelineBuilder: GitHubDeliveryTimelineBuilder()
         )
     }
@@ -350,6 +354,7 @@ func activityDetailAppendsDeploymentEvidenceUsingCorrelatedBaseSHA() async throw
         jobService: fixture.jobService,
         timelineLoader: timelineLoader,
         deploymentTimelineLoader: deploymentLoader,
+        environmentCatalogLoader: emptyEnvironmentCatalogLoader(),
         timelineBuilder: GitHubDeliveryTimelineBuilder()
     )
 
@@ -372,6 +377,7 @@ func activityDetailPreservesCorrelatedTimelineWhenDeploymentLoadingFails() async
         jobService: fixture.jobService,
         timelineLoader: timelineLoader,
         deploymentTimelineLoader: deploymentLoader,
+        environmentCatalogLoader: emptyEnvironmentCatalogLoader(),
         timelineBuilder: GitHubDeliveryTimelineBuilder()
     )
 
@@ -397,6 +403,7 @@ func activityDetailSkipsDeploymentWhenCapabilityIsUnavailable() async throws {
         jobService: fixture.jobService,
         timelineLoader: timelineLoader,
         deploymentTimelineLoader: deploymentLoader,
+        environmentCatalogLoader: emptyEnvironmentCatalogLoader(),
         timelineBuilder: GitHubDeliveryTimelineBuilder()
     )
 
@@ -420,6 +427,7 @@ func activityDetailAllowsDeploymentRequestWhenCapabilityIsUnknown() async throws
         jobService: fixture.jobService,
         timelineLoader: timelineLoader,
         deploymentTimelineLoader: deploymentLoader,
+        environmentCatalogLoader: emptyEnvironmentCatalogLoader(),
         timelineBuilder: GitHubDeliveryTimelineBuilder()
     )
 
@@ -439,6 +447,7 @@ func activityDetailPropagatesDeploymentCancellation() async throws {
             jobService: fixture.jobService,
             timelineLoader: timelineLoader,
             deploymentTimelineLoader: deploymentLoader,
+            environmentCatalogLoader: emptyEnvironmentCatalogLoader(),
             timelineBuilder: GitHubDeliveryTimelineBuilder()
         )
     }
@@ -455,13 +464,17 @@ private struct DetailFixture {
 @MainActor
 private func detailFixture(
     jobStatusCode: Int,
-    deploymentCapability: DetailDeploymentCapabilityFixture = .available
+    deploymentCapability: DetailDeploymentCapabilityFixture = .available,
+    actionsCapability: DetailActionsCapabilityFixture = .available
 ) async throws -> DetailFixture {
     let profile = try detailProfile()
     let profileStore = DetailProfileStore([profile])
     let credentialStore = DetailCredentialStore(profile: profile)
     let accessTransport = DetailQueueTransport(
-        detailSessionResponses(deploymentCapability: deploymentCapability)
+        detailSessionResponses(
+            deploymentCapability: deploymentCapability,
+            actionsCapability: actionsCapability
+        )
     )
     let coordinator = GitHubConnectionSessionCoordinator(
         credentialStore: credentialStore,
@@ -509,23 +522,30 @@ private func detailProfile() throws -> GitHubConnectionProfile {
 }
 
 private func detailSessionResponses(
-    deploymentCapability: DetailDeploymentCapabilityFixture
+    deploymentCapability: DetailDeploymentCapabilityFixture,
+    actionsCapability: DetailActionsCapabilityFixture
 ) -> [DetailHTTPResponse] {
     let user = #"{"id":42,"login":"snow-user","name":"Snow User","avatar_url":null}"#
 
-    let permissions: String
-    let repositoryIsPrivate: Bool
+    var permissionPairs = [#"\"pull_requests\":\"read\""#]
+    switch actionsCapability {
+    case .available:
+        permissionPairs.append(#"\"actions\":\"read\""#)
+    case .unavailable, .unknown:
+        break
+    }
     switch deploymentCapability {
     case .available:
-        permissions = #"{"actions":"read","pull_requests":"read","deployments":"read"}"#
-        repositoryIsPrivate = true
-    case .unavailable:
-        permissions = #"{"actions":"read","pull_requests":"read"}"#
-        repositoryIsPrivate = true
-    case .unknown:
-        permissions = #"{"actions":"read","pull_requests":"read"}"#
-        repositoryIsPrivate = false
+        permissionPairs.append(#"\"deployments\":\"read\""#)
+    case .unavailable, .unknown:
+        break
     }
+    let permissions = "{\(permissionPairs.joined(separator: ","))}"
+
+    let repositoryIsPrivate = !(
+        actionsCapability == .unknown
+            || deploymentCapability == .unknown
+    )
 
     let installation = """
     {"total_count":1,"installations":[{"id":10,"account":{"id":100,"login":"snow","type":"Organization","avatar_url":null},"repository_selection":"all","permissions":\(permissions),"suspended_at":null}]}
