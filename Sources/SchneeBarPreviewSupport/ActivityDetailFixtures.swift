@@ -14,6 +14,12 @@ public enum ActivityDetailFixtureScenario: String, CaseIterable, Identifiable {
     case deploymentNone = "deployment-none"
     case deploymentCapabilityUnavailable = "deployment-capability-unavailable"
     case deploymentBoundedMultiple = "deployment-bounded-multiple"
+    case environmentProductionProtected = "environment-production-protected"
+    case environmentStagingProtected = "environment-staging-protected"
+    case environmentCapabilityUnavailable = "environment-capability-unavailable"
+    case environmentRequestFailure = "environment-request-failure"
+    case environmentCatalogTruncatedMatched = "environment-catalog-truncated-matched"
+    case environmentPartialMatches = "environment-partial-matches"
 
     public var id: String { rawValue }
 
@@ -31,6 +37,12 @@ public enum ActivityDetailFixtureScenario: String, CaseIterable, Identifiable {
         case .deploymentNone: "Deployment none"
         case .deploymentCapabilityUnavailable: "Deployment capability unavailable"
         case .deploymentBoundedMultiple: "Deployment bounded multiple"
+        case .environmentProductionProtected: "Environment production protected"
+        case .environmentStagingProtected: "Environment staging protected"
+        case .environmentCapabilityUnavailable: "Environment capability unavailable"
+        case .environmentRequestFailure: "Environment request failure"
+        case .environmentCatalogTruncatedMatched: "Environment truncated matched"
+        case .environmentPartialMatches: "Environment partial matches"
         }
     }
 
@@ -52,6 +64,12 @@ public enum ActivityDetailFixtureScenario: String, CaseIterable, Identifiable {
         case .deploymentNone: ActivityDetailFixture.deploymentNone
         case .deploymentCapabilityUnavailable: ActivityDetailFixture.deploymentCapabilityUnavailable
         case .deploymentBoundedMultiple: ActivityDetailFixture.deploymentBoundedMultiple
+        case .environmentProductionProtected: ActivityDetailFixture.environmentProductionProtected
+        case .environmentStagingProtected: ActivityDetailFixture.environmentStagingProtected
+        case .environmentCapabilityUnavailable: ActivityDetailFixture.environmentCapabilityUnavailable
+        case .environmentRequestFailure: ActivityDetailFixture.environmentRequestFailure
+        case .environmentCatalogTruncatedMatched: ActivityDetailFixture.environmentCatalogTruncatedMatched
+        case .environmentPartialMatches: ActivityDetailFixture.environmentPartialMatches
         }
     }
 }
@@ -418,6 +436,155 @@ public enum ActivityDetailFixture {
         state: .success,
         destinationURL: item.destinationURL,
         deliveryTimeline: boundedMultipleDeploymentTimeline,
+        rows: matrixSuccess.rows
+    )
+
+
+    public static let environmentProductionProtectedTimeline = DeliveryTimelineSnapshot(
+        status: .correlated,
+        confidence: .exact,
+        events: exactDeliveryTimeline.events + [
+            DeliveryTimelineEvent(
+                id: "github-delivery-deployment:1001",
+                kind: .deployment,
+                title: "Deployment · production",
+                detail: "Succeeded · Production · 2 reviewers · 30m wait · No self-review · Custom branches",
+                state: .success,
+                destinationURL: URL(string: "https://deploy.example.test/production"),
+                occurredAt: Date(timeIntervalSince1970: 1_789_710_300)
+            ),
+        ]
+    )
+
+    public static let environmentStagingProtectedTimeline = DeliveryTimelineSnapshot(
+        status: .correlated,
+        confidence: .exact,
+        events: exactDeliveryTimeline.events + [
+            DeliveryTimelineEvent(
+                id: "github-delivery-deployment:1002",
+                kind: .deployment,
+                title: "Deployment · staging",
+                detail: "Running · Protected branches",
+                state: .running,
+                destinationURL: URL(string: "https://deploy.example.test/staging"),
+                occurredAt: Date(timeIntervalSince1970: 1_789_710_310)
+            ),
+        ]
+    )
+
+    public static let environmentTruncatedMatchedTimeline = DeliveryTimelineSnapshot(
+        status: .correlated,
+        confidence: .exact,
+        events: exactDeliveryTimeline.events + [
+            DeliveryTimelineEvent(
+                id: "github-delivery-deployment:1003",
+                kind: .deployment,
+                title: "Deployment · production",
+                detail: "Succeeded · Production · 1 reviewer · 1h wait",
+                state: .success,
+                destinationURL: URL(string: "https://deploy.example.test/production"),
+                occurredAt: Date(timeIntervalSince1970: 1_789_710_320)
+            ),
+        ]
+    )
+
+    public static let environmentPartialMatchesTimeline = DeliveryTimelineSnapshot(
+        status: .correlated,
+        confidence: .exact,
+        events: exactDeliveryTimeline.events + [
+            DeliveryTimelineEvent(
+                id: "github-delivery-deployment:1004",
+                kind: .deployment,
+                title: "Deployment · production",
+                detail: "Succeeded · Production · 2 reviewers · Custom branches",
+                state: .success,
+                destinationURL: URL(string: "https://deploy.example.test/production"),
+                occurredAt: Date(timeIntervalSince1970: 1_789_710_330)
+            ),
+            DeliveryTimelineEvent(
+                id: "github-delivery-deployment:1005",
+                kind: .deployment,
+                title: "Deployment · staging",
+                detail: "Running",
+                state: .running,
+                destinationURL: URL(string: "https://deploy.example.test/staging"),
+                occurredAt: Date(timeIntervalSince1970: 1_789_710_325)
+            ),
+            DeliveryTimelineEvent(
+                id: "github-delivery-deployment:1006",
+                kind: .deployment,
+                title: "Deployment · preview",
+                detail: "Pending · Transient · 15m wait",
+                state: .waiting,
+                destinationURL: URL(string: "https://deploy.example.test/preview"),
+                occurredAt: Date(timeIntervalSince1970: 1_789_710_315)
+            ),
+        ]
+    )
+
+    public static let environmentProductionProtected = ActivityDetailSnapshot(
+        id: "github-actions:42:501:environment-production-protected",
+        repository: item.repository,
+        title: item.context,
+        summary: matrixSuccess.summary,
+        state: .success,
+        destinationURL: item.destinationURL,
+        deliveryTimeline: environmentProductionProtectedTimeline,
+        rows: matrixSuccess.rows
+    )
+
+    public static let environmentStagingProtected = ActivityDetailSnapshot(
+        id: "github-actions:42:501:environment-staging-protected",
+        repository: item.repository,
+        title: item.context,
+        summary: matrixSuccess.summary,
+        state: .success,
+        destinationURL: item.destinationURL,
+        deliveryTimeline: environmentStagingProtectedTimeline,
+        rows: matrixSuccess.rows
+    )
+
+    public static let environmentCapabilityUnavailable = ActivityDetailSnapshot(
+        id: "github-actions:42:501:environment-capability-unavailable",
+        repository: item.repository,
+        title: item.context,
+        summary: matrixSuccess.summary,
+        state: .success,
+        destinationURL: item.destinationURL,
+        deliveryTimeline: productionDeploymentTimeline,
+        rows: matrixSuccess.rows
+    )
+
+    public static let environmentRequestFailure = ActivityDetailSnapshot(
+        id: "github-actions:42:501:environment-request-failure",
+        repository: item.repository,
+        title: item.context,
+        summary: matrixSuccess.summary,
+        state: .success,
+        destinationURL: item.destinationURL,
+        deliveryTimeline: productionDeploymentTimeline,
+        rows: matrixSuccess.rows
+    )
+
+    public static let environmentCatalogTruncatedMatched = ActivityDetailSnapshot(
+        id: "github-actions:42:501:environment-catalog-truncated-matched",
+        repository: item.repository,
+        title: item.context,
+        summary: matrixSuccess.summary,
+        state: .success,
+        destinationURL: item.destinationURL,
+        deliveryTimeline: environmentTruncatedMatchedTimeline,
+        rows: matrixSuccess.rows
+    )
+
+    public static let environmentPartialMatches = ActivityDetailSnapshot(
+        id: "github-actions:42:501:environment-partial-matches",
+        repository: item.repository,
+        title: item.context,
+        summary: matrixSuccess.summary,
+        state: .success,
+        destinationURL: item.destinationURL,
+        deliveryTimeline: environmentPartialMatchesTimeline,
         rows: matrixSuccess.rows
     )
 
