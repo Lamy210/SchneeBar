@@ -459,19 +459,19 @@ private func detailProfile() throws -> GitHubConnectionProfile {
 private func detailSessionResponses(
     deploymentCapability: DetailDeploymentCapabilityFixture
 ) -> [DetailHTTPResponse] {
-    let user = #"{\"id\":42,\"login\":\"snow-user\",\"name\":\"Snow User\",\"avatar_url\":null}"#
+    let user = #"{"id":42,"login":"snow-user","name":"Snow User","avatar_url":null}"#
 
     let permissions: String
     let repositoryIsPrivate: Bool
     switch deploymentCapability {
     case .available:
-        permissions = #"{\"actions\":\"read\",\"pull_requests\":\"read\",\"deployments\":\"read\"}"#
+        permissions = #"{"actions":"read","pull_requests":"read","deployments":"read"}"#
         repositoryIsPrivate = true
     case .unavailable:
-        permissions = #"{\"actions\":\"read\",\"pull_requests\":\"read\"}"#
+        permissions = #"{"actions":"read","pull_requests":"read"}"#
         repositoryIsPrivate = true
     case .unknown:
-        permissions = #"{\"actions\":\"read\",\"pull_requests\":\"read\"}"#
+        permissions = #"{"actions":"read","pull_requests":"read"}"#
         repositoryIsPrivate = false
     }
 
