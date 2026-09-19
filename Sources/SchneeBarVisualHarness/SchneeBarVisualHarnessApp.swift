@@ -58,7 +58,7 @@ private enum GitHubManagementHarnessScenario: String, CaseIterable, Hashable {
 
 private struct VisualHarnessView: View {
     @State private var activityScenario: ActivityFixtureScenario = .mainFailure
-    @State private var activityDetailScenario: ActivityDetailFixtureScenario = .deliveryMatrixFailure
+    @State private var activityDetailScenario: ActivityDetailFixtureScenario = .deploymentProductionSuccess
     @State private var widgetScenario: WidgetFixtureScenario = .critical
     @State private var githubScenario: GitHubConnectionsFixture = .multiConnection
     @State private var recoveryScenario: GitHubRecoveryHarnessScenario = .deviceCode
