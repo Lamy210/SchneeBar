@@ -127,20 +127,27 @@ Implemented:
 - deterministic Light/Dark Delivery Timeline visual fixtures, including matrix-job detail
 - exact-SHA GitHub Deployment loading after proven base-execution correlation
 - bounded Deployment enrichment with one deployment-list request and at most three latest-status requests
-- full explicit-detail Delivery request ceiling verified at 11 HTTP requests
+- full explicit-detail Delivery request ceiling verified at 12 HTTP requests
 - provider-neutral Deployment timeline events with success/running/waiting/failure/neutral state mapping
 - Deployment capability gating that skips definitive unavailability while keeping unknown evidence explicitly requestable
 - best-effort Deployment enrichment that preserves Jobs and the existing PR → merge → execution timeline on absence or technical failure
 - deterministic Light/Dark Deployment Timeline fixtures for production success, staging running, no evidence, unavailable capability, and the three-deployment bound
+- demand-driven repository Environment enrichment for already-correlated exact-SHA Deployments
+- built-in Environment protection summaries for reviewer count, wait timer, self-review prevention, and branch-policy mode
+- one-request Environment enrichment cap with a complete explicit-detail Delivery ceiling of 12 feature HTTP requests
+- conservative page-1 Environment matching that preserves existing Deployment events on truncation, absence, ambiguity, or technical failure
+- Actions-capability-gated Environment detail loading with no background Environment polling
+- reviewer-identity and provider-Environment-URL minimization at normalization boundaries
+- deterministic Light/Dark Environment protection and fallback fixtures
 
 Next:
 
-- repository Environment inventory and protection-rule presentation
 - explicit repository default-branch discovery
 - standalone delivery history/navigation
 - richer confidence/evidence explanations
 - recovery notifications
 - persisted delivery history
+- revisit standalone/paginated Environment browsing and custom protection-rule details only if product usage justifies the extra scope
 
 ## Phase 5 — Enterprise
 
@@ -168,9 +175,9 @@ Still required:
 
 ## Current implementation priority
 
-1. Add repository Environment inventory/protection metadata without widening background polling.
-2. Add explicit default-branch discovery and standalone delivery history.
-3. Add recovery notifications and persisted Delivery history.
+1. Add explicit repository default-branch discovery and standalone Delivery history.
+2. Add recovery notifications and persisted Delivery history.
+3. Revisit standalone/paginated Environment browsing and custom protection-rule details only if product usage justifies the extra scope.
 4. Broaden enterprise validation toward Phase 5 requirements.
 5. Only then broaden system widgets or external provider/plugin scope.
 
