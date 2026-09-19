@@ -222,7 +222,6 @@ public struct GitHubEnvironmentProtection: Equatable, Sendable {
 public struct GitHubEnvironment: Equatable, Sendable {
     public let id: Int64
     public let name: String
-    public let htmlURL: URL?
     public let protection: GitHubEnvironmentProtection
     public let createdAt: Date?
     public let updatedAt: Date?
@@ -263,12 +262,12 @@ Rules:
 - `limit` is clamped to `1...100`;
 - page is always exactly `1`;
 - `total_count` must be non-negative;
+- `total_count < environments.count` is invalid;
 - `isTruncated = totalCount > environments.count`;
 - invalid Environment IDs/names fail the client response rather than being partially trusted;
 - GitHub.com/GHE.com API-version handling follows existing REST clients;
 - GHES uses the existing explicit/no-version policy;
-- only sanitized HTTPS `html_url` values may enter the normalized model;
-- API `url` is not exposed as a user destination.
+- provider `url` and `html_url` values are ignored and never enter the normalized model.
 
 ## DTO Normalization
 
@@ -315,12 +314,15 @@ When multiple required-reviewer rules are returned unexpectedly, treat the paylo
 
 ### Branch policy
 
-Prefer the structured `deployment_branch_policy` field:
+Prefer the structured `deployment_branch_policy` field.
 
-- `null` -> `.allBranches`;
-- `protected_branches == true && custom_branch_policies == false` -> `.protectedBranches`;
-- `protected_branches == false && custom_branch_policies == true` -> `.customBranches`;
-- contradictory/partial values -> `.unknown`.
+The DTO decoder must preserve whether the key was present so an older/partial payload cannot be mistaken for an explicit `null`.
+
+- key present with `null` -> `.allBranches`;
+- key present with `protected_branches == true && custom_branch_policies == false` -> `.protectedBranches`;
+- key present with `protected_branches == false && custom_branch_policies == true` -> `.customBranches`;
+- key missing -> `.unknown`;
+- contradictory/partial object -> `.unknown`.
 
 The presence of a generic `branch_policy` item in `protection_rules` does not trigger an additional network request.
 
@@ -334,21 +336,15 @@ They must not be summarized as absent protection.
 
 This is important because custom deployment protection rules are a separate API family and future built-in rule types may appear.
 
-## URL Safety
+## Provider URL Handling
 
-Environment `html_url` is exposed only when it is:
+This slice does not need an Environment URL.
 
-- absolute;
-- HTTPS;
-- has a non-empty host;
-- has no username;
-- has no password.
+Provider `url` and `html_url` fields from the Environment payload are ignored during normalization and are not retained in memory beyond DTO decoding.
 
-The existing user-visible Deployment destination URL keeps priority.
+The existing user-visible Deployment destination URL remains authoritative.
 
-Environment enrichment does not automatically replace a Deployment's `environmentURL` or `logURL`.
-
-No automatic navigation occurs.
+Environment enrichment never replaces a Deployment's sanitized `environmentURL` or `logURL`, and no automatic navigation occurs.
 
 ## Environment Loading Service
 
@@ -487,7 +483,9 @@ Labels:
 
 - one reviewer -> `1 reviewer`;
 - multiple reviewers -> `N reviewers`;
-- wait timer -> `Nm wait`, or a compact hours/days form when exactly divisible;
+- positive wait timer -> `Nm wait`, or a compact hours/days form when exactly divisible;
+- a zero-minute wait timer produces no label;
+- reviewer count zero produces no reviewer label;
 - protected-branch mode -> `Protected branches`;
 - custom-branch mode -> `Custom branches`;
 - all-branches mode -> no branch-policy label;
@@ -622,7 +620,7 @@ If cancellation occurs:
 - private Environment names are only held in memory for the open detail path;
 - no persistence is added;
 - fixtures use synthetic Environment names and `example.test` URLs only;
-- external Environment URLs are sanitized before retention;
+- provider Environment URLs are discarded rather than retained;
 - no third-party action changes;
 - no `pull_request_target`;
 - no raw provider DTO reaches Core or SwiftUI.
@@ -682,7 +680,8 @@ Test:
 - `null` branch policy;
 - unknown protection-rule tolerance;
 - duplicate built-in rule rejection;
-- sanitized `html_url`;
+- provider URL fields are discarded;
+- missing versus explicit-null `deployment_branch_policy`;
 - invalid repository/credential/response handling.
 
 ### GitHubEnvironmentCatalogService
@@ -809,7 +808,7 @@ No Core model change is expected.
 
 Before implementation planning:
 
-- no `TODO` or `TBD`;
+- no unresolved placeholders;
 - no hidden custom-rule request;
 - no hidden branch-policy pattern request;
 - no background Environment polling;
