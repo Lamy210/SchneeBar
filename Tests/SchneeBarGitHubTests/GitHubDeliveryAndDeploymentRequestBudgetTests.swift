@@ -109,7 +109,7 @@ private actor DeliveryBudgetRoutingTransport: GitHubHTTPTransport {
 }
 
 @Test
-func completeDeliveryAndDeploymentEvidencePathNeverExceedsElevenFeatureRequests() async throws {
+func completeDeliveryDeploymentAndEnvironmentEvidencePathUsesTwelveFeatureRequests() async throws {
     let connection = GitHubConnection(
         id: UUID(uuidString: "33333333-4444-5555-6666-777777777777")!,
         displayName: "GitHub.com",
@@ -169,7 +169,7 @@ func completeDeliveryAndDeploymentEvidencePathNeverExceedsElevenFeatureRequests(
     #expect(deploymentEvidence.deployments.count == 3)
 
     let featureRequests = await transport.recordedRequests()
-    #expect(featureRequests.count == 11)
+    #expect(featureRequests.count == 12)
     #expect(
         featureRequests.filter {
             $0.url?.path.contains("/deployments") == true
