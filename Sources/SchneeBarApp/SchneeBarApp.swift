@@ -31,6 +31,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let workflowJobService: GitHubWorkflowJobService
     private let deliveryTimelineService: GitHubDeliveryTimelineService
     private let deploymentTimelineService: GitHubDeploymentTimelineService
+    private let environmentCatalogService: GitHubEnvironmentCatalogService
 
     private var menuBarController: MenuBarController?
 
@@ -58,6 +59,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         deploymentTimelineService = GitHubDeploymentTimelineService(
             sessionCoordinator: sessionCoordinator
         )
+        environmentCatalogService = GitHubEnvironmentCatalogService(
+            sessionCoordinator: sessionCoordinator
+        )
         let activityProvider = GitHubActivityProvider(
             workflowRunLoader: workflowRunService,
             reviewRequestLoader: reviewRequestService,
@@ -79,13 +83,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let workflowJobService = workflowJobService
         let deliveryTimelineService = deliveryTimelineService
         let deploymentTimelineService = deploymentTimelineService
+        let environmentCatalogService = environmentCatalogService
 
         activityRuntimeModel.configureDetailLoader { item in
             try await githubRuntimeModel.loadActivityDetail(
                 for: item,
                 jobService: workflowJobService,
                 timelineLoader: deliveryTimelineService,
-                deploymentTimelineLoader: deploymentTimelineService
+                deploymentTimelineLoader: deploymentTimelineService,
+                environmentCatalogLoader: environmentCatalogService
             )
         }
 
