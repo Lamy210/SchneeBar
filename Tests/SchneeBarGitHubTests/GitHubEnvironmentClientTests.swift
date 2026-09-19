@@ -193,26 +193,30 @@ func environmentClientRejectsInvalidInputBeforeNetwork() async throws {
     #expect(await transport.recordedRequests().isEmpty)
 }
 
-@Test(arguments: [
-    #"{"total_count":-1,"environments":[]}"#,
-    #"{"total_count":0,"environments":[{"id":101,"name":"production","protection_rules":[],"deployment_branch_policy":null}]}"#,
-    #"{"total_count":1,"environments":[{"id":0,"name":"production","protection_rules":[],"deployment_branch_policy":null}]}"#,
-    #"{"total_count":1,"environments":[{"id":101,"name":"   ","protection_rules":[],"deployment_branch_policy":null}]}"#,
-    #"{"total_count":1,"environments":[{"id":101,"name":"production","protection_rules":[{"type":"wait_timer","wait_timer":10},{"type":"wait_timer","wait_timer":20}],"deployment_branch_policy":null}]}"#,
-    #"{"total_count":1,"environments":[{"id":101,"name":"production","protection_rules":[{"type":"required_reviewers","reviewers":[]},{"type":"required_reviewers","reviewers":[]}],"deployment_branch_policy":null}]}"#,
-    #"{"total_count":1,"environments":[{"id":101,"name":"production","protection_rules":[{"type":"wait_timer","wait_timer":-1}],"deployment_branch_policy":null}]}"#,
-])
-func environmentClientRejectsMalformedCatalogPayload(json: String) async throws {
-    let client = GitHubEnvironmentClient(
-        transport: EnvironmentQueueTransport([EnvironmentStubResponse(json)])
-    )
+@Test
+func environmentClientRejectsMalformedCatalogPayloads() async throws {
+    let payloads = [
+        #"{\"total_count\":-1,\"environments\":[]}"#,
+        #"{\"total_count\":0,\"environments\":[{\"id\":101,\"name\":\"production\",\"protection_rules\":[],\"deployment_branch_policy\":null}]}"#,
+        #"{\"total_count\":1,\"environments\":[{\"id\":0,\"name\":\"production\",\"protection_rules\":[],\"deployment_branch_policy\":null}]}"#,
+        #"{\"total_count\":1,\"environments\":[{\"id\":101,\"name\":\"   \",\"protection_rules\":[],\"deployment_branch_policy\":null}]}"#,
+        #"{\"total_count\":1,\"environments\":[{\"id\":101,\"name\":\"production\",\"protection_rules\":[{\"type\":\"wait_timer\",\"wait_timer\":10},{\"type\":\"wait_timer\",\"wait_timer\":20}],\"deployment_branch_policy\":null}]}"#,
+        #"{\"total_count\":1,\"environments\":[{\"id\":101,\"name\":\"production\",\"protection_rules\":[{\"type\":\"required_reviewers\",\"reviewers\":[]},{\"type\":\"required_reviewers\",\"reviewers\":[]}],\"deployment_branch_policy\":null}]}"#,
+        #"{\"total_count\":1,\"environments\":[{\"id\":101,\"name\":\"production\",\"protection_rules\":[{\"type\":\"wait_timer\",\"wait_timer\":-1}],\"deployment_branch_policy\":null}]}"#,
+    ]
 
-    await #expect(throws: GitHubEnvironmentClientError.invalidResponse) {
-        _ = try await client.environments(
-            repository: environmentRepository(),
-            connection: environmentGitHubDotComConnection(),
-            credential: GitHubCredential(accessToken: "ghu_environment")
+    for json in payloads {
+        let client = GitHubEnvironmentClient(
+            transport: EnvironmentQueueTransport([EnvironmentStubResponse(json)])
         )
+
+        await #expect(throws: GitHubEnvironmentClientError.invalidResponse) {
+            _ = try await client.environments(
+                repository: environmentRepository(),
+                connection: environmentGitHubDotComConnection(),
+                credential: GitHubCredential(accessToken: "ghu_environment")
+            )
+        }
     }
 }
 
@@ -239,43 +243,44 @@ func environmentClientMarksFirstPageAsTruncatedWithoutPagination() async throws 
     #expect(await transport.recordedRequests().count == 1)
 }
 
-@Test(arguments: [
-    (#""deployment_branch_policy":null"#, GitHubEnvironmentBranchPolicy.allBranches),
-    ("", GitHubEnvironmentBranchPolicy.unknown),
-    (#""deployment_branch_policy":{"protected_branches":true,"custom_branch_policies":false}"#, GitHubEnvironmentBranchPolicy.protectedBranches),
-    (#""deployment_branch_policy":{"protected_branches":false,"custom_branch_policies":true}"#, GitHubEnvironmentBranchPolicy.customBranches),
-    (#""deployment_branch_policy":{"protected_branches":true,"custom_branch_policies":true}"#, GitHubEnvironmentBranchPolicy.unknown),
-    (#""deployment_branch_policy":{"protected_branches":false,"custom_branch_policies":false}"#, GitHubEnvironmentBranchPolicy.unknown),
-])
-func environmentClientDistinguishesBranchPolicyPresence(
-    fragment: String,
-    expected: GitHubEnvironmentBranchPolicy
-) async throws {
-    let suffix = fragment.isEmpty ? "" : ",\(fragment)"
-    let json = """
-    {
-      "total_count":1,
-      "environments":[
+@Test
+func environmentClientDistinguishesBranchPolicyPresence() async throws {
+    let cases: [(String, GitHubEnvironmentBranchPolicy)] = [
+        (#"\"deployment_branch_policy\":null"#, .allBranches),
+        ("", .unknown),
+        (#"\"deployment_branch_policy\":{\"protected_branches\":true,\"custom_branch_policies\":false}"#, .protectedBranches),
+        (#"\"deployment_branch_policy\":{\"protected_branches\":false,\"custom_branch_policies\":true}"#, .customBranches),
+        (#"\"deployment_branch_policy\":{\"protected_branches\":true,\"custom_branch_policies\":true}"#, .unknown),
+        (#"\"deployment_branch_policy\":{\"protected_branches\":false,\"custom_branch_policies\":false}"#, .unknown),
+    ]
+
+    for (fragment, expected) in cases {
+        let suffix = fragment.isEmpty ? "" : ",\(fragment)"
+        let json = """
         {
-          "id":101,
-          "name":"production",
-          "protection_rules":[]
-          \(suffix)
+          "total_count":1,
+          "environments":[
+            {
+              "id":101,
+              "name":"production",
+              "protection_rules":[]
+              \(suffix)
+            }
+          ]
         }
-      ]
+        """
+        let client = GitHubEnvironmentClient(
+            transport: EnvironmentQueueTransport([EnvironmentStubResponse(json)])
+        )
+
+        let catalog = try await client.environments(
+            repository: environmentRepository(),
+            connection: environmentGitHubDotComConnection(),
+            credential: GitHubCredential(accessToken: "ghu_environment")
+        )
+
+        #expect(catalog.environments.first?.protection.branchPolicy == expected)
     }
-    """
-    let client = GitHubEnvironmentClient(
-        transport: EnvironmentQueueTransport([EnvironmentStubResponse(json)])
-    )
-
-    let catalog = try await client.environments(
-        repository: environmentRepository(),
-        connection: environmentGitHubDotComConnection(),
-        credential: GitHubCredential(accessToken: "ghu_environment")
-    )
-
-    #expect(catalog.environments.first?.protection.branchPolicy == expected)
 }
 
 @Test
