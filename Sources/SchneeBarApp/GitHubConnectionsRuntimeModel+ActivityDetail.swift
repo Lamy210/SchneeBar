@@ -11,6 +11,7 @@ extension GitHubConnectionsRuntimeModel {
         jobService: GitHubWorkflowJobService,
         timelineLoader: any GitHubDeliveryTimelineLoading,
         deploymentTimelineLoader: any GitHubDeploymentTimelineLoading,
+        environmentCatalogLoader: any GitHubEnvironmentCatalogLoading,
         timelineBuilder: GitHubDeliveryTimelineBuilder = GitHubDeliveryTimelineBuilder(),
         detailMapper: GitHubActivityJobDetailMapper = GitHubActivityJobDetailMapper()
     ) async throws -> ActivityDetailSnapshot {
@@ -85,9 +86,31 @@ extension GitHubConnectionsRuntimeModel {
                             repository: repository,
                             exactSHA: baseRun.headSHA
                         )
+
+                        var environmentCatalog: GitHubEnvironmentCatalog?
+                        if !deploymentEvidence.deployments.isEmpty,
+                           option.activityAccess.actions != .unavailable
+                        {
+                            do {
+                                environmentCatalog = try await environmentCatalogLoader.environmentCatalog(
+                                    connection: profile.connection,
+                                    identity: profile.account,
+                                    clientID: profile.clientID,
+                                    repository: repository
+                                )
+                            } catch let cancellation as CancellationError {
+                                throw cancellation
+                            } catch {
+                                // Environment enrichment is best effort.
+                                // Preserve the already-proven Deployment evidence.
+                                environmentCatalog = nil
+                            }
+                        }
+
                         deliveryTimeline = timelineBuilder.appendDeployments(
                             to: deliveryTimeline,
-                            evidence: deploymentEvidence
+                            evidence: deploymentEvidence,
+                            environmentCatalog: environmentCatalog
                         )
                     } catch let cancellation as CancellationError {
                         throw cancellation
