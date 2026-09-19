@@ -206,6 +206,7 @@ func environmentClientRejectsMalformedCatalogPayloads() async throws {
     ]
 
     for json in payloads {
+        _ = try JSONSerialization.jsonObject(with: Data(json.utf8))
         let client = GitHubEnvironmentClient(
             transport: EnvironmentQueueTransport([EnvironmentStubResponse(json)])
         )
@@ -228,6 +229,10 @@ func environmentClientMarksFirstPageAsTruncatedWithoutPagination() async throws 
         }
         .joined(separator: ",")
     let json = "{\"total_count\":101,\"environments\":[\(entries)]}"
+    let decodedObject = try JSONSerialization.jsonObject(with: Data(json.utf8))
+    let decodedDictionary = try #require(decodedObject as? [String: Any])
+    let decodedEnvironments = try #require(decodedDictionary["environments"] as? [[String: Any]])
+    #expect(decodedEnvironments.count == 100)
     let transport = EnvironmentQueueTransport([EnvironmentStubResponse(json)])
     let client = GitHubEnvironmentClient(transport: transport)
 
