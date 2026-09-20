@@ -38,19 +38,101 @@ public struct GitHubDeliveryTimelineBuilder: Sendable {
         repositoryID: Int64,
         evidence: GitHubDeliveryTimelineEvidence
     ) -> GitHubDeliveryTimelineBuildResult {
-        guard repositoryID > 0,
-              let pullRequest = evidence.pullRequest,
-              pullRequest.isMerged,
-              let mergedAt = pullRequest.mergedAt,
-              selectedPullRequestNumber(in: evidence.selectedRun) == pullRequest.number
-        else {
-            return unavailableResult()
+        guard repositoryID > 0 else {
+            return unavailableResult(
+                evidence: [
+                    explanation(
+                        id: "repository-context",
+                        title: "Repository context",
+                        detail: "Repository context is unavailable",
+                        state: .missing
+                    ),
+                ]
+            )
         }
 
-        let baseRef = pullRequest.baseRef.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !baseRef.isEmpty else {
-            return unavailableResult()
+        var explanations: [DeliveryTimelineEvidenceItem] = []
+
+        guard let selectedPullRequestNumber = selectedPullRequestNumber(
+            in: evidence.selectedRun
+        ) else {
+            return unavailableResult(
+                evidence: [
+                    explanation(
+                        id: "workflow-pull-request",
+                        title: "Workflow pull request",
+                        detail: "Workflow does not identify exactly one pull request",
+                        state: .missing
+                    ),
+                ]
+            )
         }
+
+        explanations.append(
+            explanation(
+                id: "workflow-pull-request",
+                title: "Workflow pull request",
+                detail: "Selected workflow is attached to PR #\(selectedPullRequestNumber)",
+                state: .confirmed
+            )
+        )
+
+        guard let pullRequest = evidence.pullRequest,
+              pullRequest.number == selectedPullRequestNumber
+        else {
+            return unavailableResult(
+                evidence: explanations + [
+                    explanation(
+                        id: "merged-pull-request",
+                        title: "Merged pull request",
+                        detail: "Merged pull request metadata is unavailable",
+                        state: .missing
+                    ),
+                ]
+            )
+        }
+
+        guard pullRequest.isMerged,
+              let mergedAt = pullRequest.mergedAt
+        else {
+            return unavailableResult(
+                evidence: explanations + [
+                    explanation(
+                        id: "merged-pull-request",
+                        title: "Merged pull request",
+                        detail: "PR #\(pullRequest.number) is not proven merged",
+                        state: .missing
+                    ),
+                ]
+            )
+        }
+
+        explanations.append(
+            explanation(
+                id: "merged-pull-request",
+                title: "Merged pull request",
+                detail: "PR #\(pullRequest.number) is merged",
+                state: .confirmed
+            )
+        )
+
+        let baseRef = pullRequest.baseRef
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !baseRef.isEmpty else {
+            return unavailableResult(
+                evidence: explanations + [
+                    explanation(
+                        id: "target-branch",
+                        title: "Target branch",
+                        detail: "Pull request target branch is unavailable",
+                        state: .missing
+                    ),
+                ]
+            )
+        }
+
+        var foundEligibleTargetBranchRun = false
+        var foundCommitAssociation = false
 
         for candidate in orderedCandidates(
             evidence.baseRuns,
@@ -68,11 +150,15 @@ public struct GitHubDeliveryTimelineBuilder: Sendable {
                 continue
             }
 
+            foundEligibleTargetBranchRun = true
+
             let associatedPullRequests =
                 evidence.associatedPullRequestNumbersByRunID[candidate.id] ?? []
             guard associatedPullRequests.contains(pullRequest.number) else {
                 continue
             }
+
+            foundCommitAssociation = true
 
             let correlation = correlator.correlateMergedPullRequest(
                 repositoryID: repositoryID,
@@ -84,6 +170,33 @@ public struct GitHubDeliveryTimelineBuilder: Sendable {
             guard correlation.confidence != .unknown else {
                 continue
             }
+
+            var correlatedEvidence = explanations
+            correlatedEvidence.append(
+                correlationExplanation(
+                    correlation,
+                    pullRequestNumber: pullRequest.number
+                )
+            )
+            correlatedEvidence.append(
+                explanation(
+                    id: "target-branch-execution",
+                    title: "Target branch execution",
+                    detail: targetBranchExecutionDetail(
+                        baseRef: baseRef,
+                        repositoryDefaultBranch: evidence.repositoryDefaultBranch
+                    ),
+                    state: .confirmed
+                )
+            )
+            correlatedEvidence.append(
+                explanation(
+                    id: "commit-association",
+                    title: "Commit association",
+                    detail: "Target-branch execution is associated with PR #\(pullRequest.number)",
+                    state: .confirmed
+                )
+            )
 
             let executionBranch = executionBranchLabel(
                 baseRef: baseRef,
@@ -120,7 +233,8 @@ public struct GitHubDeliveryTimelineBuilder: Sendable {
                         destinationURL: candidate.webURL,
                         occurredAt: candidate.updatedAt
                     ),
-                ]
+                ],
+                evidence: correlatedEvidence
             )
 
             return GitHubDeliveryTimelineBuildResult(
@@ -129,7 +243,42 @@ public struct GitHubDeliveryTimelineBuilder: Sendable {
             )
         }
 
-        return unavailableResult()
+        if !foundEligibleTargetBranchRun {
+            return unavailableResult(
+                evidence: explanations + [
+                    explanation(
+                        id: "target-branch-execution",
+                        title: "Target branch execution",
+                        detail: "No eligible workflow execution was found on target branch \(baseRef)",
+                        state: .missing
+                    ),
+                ]
+            )
+        }
+
+        if !foundCommitAssociation {
+            return unavailableResult(
+                evidence: explanations + [
+                    explanation(
+                        id: "commit-association",
+                        title: "Commit association",
+                        detail: "No target-branch execution commit was associated with the pull request",
+                        state: .missing
+                    ),
+                ]
+            )
+        }
+
+        return unavailableResult(
+            evidence: explanations + [
+                explanation(
+                    id: "final-pull-request-revision",
+                    title: "Final pull request revision",
+                    detail: "Selected workflow could not be verified as the merged pull request's final revision",
+                    state: .missing
+                ),
+            ]
+        )
     }
 
     public func appendDeployments(
@@ -187,10 +336,23 @@ public struct GitHubDeliveryTimelineBuilder: Sendable {
             return timeline
         }
 
+        var explanations = timeline.evidence.filter {
+            $0.id != "deployment-commit-match"
+        }
+        explanations.append(
+            explanation(
+                id: "deployment-commit-match",
+                title: "Deployment commit match",
+                detail: deploymentMatchDetail(count: deploymentEvents.count),
+                state: .confirmed
+            )
+        )
+
         return DeliveryTimelineSnapshot(
             status: timeline.status,
             confidence: timeline.confidence,
-            events: timeline.events + deploymentEvents
+            events: timeline.events + deploymentEvents,
+            evidence: explanations
         )
     }
 
@@ -435,18 +597,98 @@ public struct GitHubDeliveryTimelineBuilder: Sendable {
         return url
     }
 
-    private func unavailableResult() -> GitHubDeliveryTimelineBuildResult {
+    private func correlationExplanation(
+        _ correlation: GitHubWorkflowExecutionCorrelation,
+        pullRequestNumber: Int
+    ) -> DeliveryTimelineEvidenceItem {
+        switch correlation.reason {
+        case .mergedPullRequest:
+            return explanation(
+                id: "final-pull-request-revision",
+                title: "Final pull request revision",
+                detail: "Selected workflow represents the merged pull request's final revision",
+                state: .confirmed
+            )
+        case let .sharedPullRequest(number):
+            return explanation(
+                id: "shared-pull-request",
+                title: "Shared pull request",
+                detail: "Both workflow executions reference PR #\(number)",
+                state: .confirmed
+            )
+        case .sharedHeadCommit:
+            return explanation(
+                id: "shared-workflow-commit",
+                title: "Shared workflow commit",
+                detail: "Selected and target-branch executions share a commit",
+                state: .confirmed
+            )
+        case .sameRun:
+            return explanation(
+                id: "workflow-execution-identity",
+                title: "Workflow execution identity",
+                detail: "Both evidence records refer to the same workflow execution",
+                state: .confirmed
+            )
+        case .noReliableEvidence:
+            return explanation(
+                id: "final-pull-request-revision",
+                title: "Final pull request revision",
+                detail: "Selected workflow could not be verified as the merged pull request's final revision",
+                state: .missing
+            )
+        }
+    }
+
+    private func targetBranchExecutionDetail(
+        baseRef: String,
+        repositoryDefaultBranch: String?
+    ) -> String {
+        if let repositoryDefaultBranch = nonEmpty(repositoryDefaultBranch),
+           baseRef == repositoryDefaultBranch
+        {
+            return "Workflow execution found on default branch \(baseRef)"
+        }
+        return "Workflow execution found on target branch \(baseRef)"
+    }
+
+    private func deploymentMatchDetail(count: Int) -> String {
+        count == 1
+            ? "1 deployment matched the correlated execution commit"
+            : "\(count) deployments matched the correlated execution commit"
+    }
+
+    private func explanation(
+        id: String,
+        title: String,
+        detail: String,
+        state: DeliveryTimelineEvidenceState
+    ) -> DeliveryTimelineEvidenceItem {
+        DeliveryTimelineEvidenceItem(
+            id: id,
+            title: title,
+            detail: detail,
+            state: state
+        )
+    }
+
+    private func unavailableResult(
+        evidence: [DeliveryTimelineEvidenceItem] = []
+    ) -> GitHubDeliveryTimelineBuildResult {
         GitHubDeliveryTimelineBuildResult(
-            timeline: unavailable(),
+            timeline: unavailable(evidence: evidence),
             correlatedBaseRun: nil
         )
     }
 
-    private func unavailable() -> DeliveryTimelineSnapshot {
+    private func unavailable(
+        evidence: [DeliveryTimelineEvidenceItem] = []
+    ) -> DeliveryTimelineSnapshot {
         DeliveryTimelineSnapshot(
             status: .evidenceUnavailable,
             confidence: .unknown,
-            events: []
+            events: [],
+            evidence: evidence
         )
     }
 }
