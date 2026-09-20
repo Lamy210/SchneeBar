@@ -20,7 +20,7 @@ public enum DeliveryTimelineStatus: String, Codable, CaseIterable, Sendable {
     case temporarilyUnavailable
 }
 
-public enum DeliveryTimelineEvidenceState: String, Codable, CaseIterable, Sendable {
+public enum DeliveryTimelineEvidenceState: String, Codable, CaseIterable, Hashable, Sendable {
     case confirmed
     case missing
     case unavailable
