@@ -90,6 +90,33 @@ func activityRuntimeHistoryRetryOnlyRepeatsHistoryLoader() async throws {
 }
 
 @Test @MainActor
+func activityRuntimeHistoryDismissCancelsStaleCompletion() async throws {
+    let model = ActivityRuntimeModel()
+    let item = historyRuntimeItem()
+    let detail = historyRuntimeDetail(item: item)
+
+    model.selectedItem = item
+    model.detail = detail
+    model.configureDeliveryHistoryLoader { _ in
+        try await Task.sleep(nanoseconds: 5_000_000_000)
+        return historyRuntimeSnapshot()
+    }
+
+    model.requestDeliveryHistory()
+    #expect(model.deliveryHistoryIsLoading)
+    model.dismissDeliveryHistory()
+
+    await Task.yield()
+    await Task.yield()
+
+    #expect(!model.isPresentingDeliveryHistory)
+    #expect(!model.deliveryHistoryIsLoading)
+    #expect(model.deliveryHistory == nil)
+    #expect(model.selectedItem == item)
+    #expect(model.detail == detail)
+}
+
+@Test @MainActor
 func activityRuntimeDismissDetailClearsHistoryState() async throws {
     let model = ActivityRuntimeModel()
     let item = historyRuntimeItem()
