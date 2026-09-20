@@ -31,6 +31,59 @@ func deliveryTimelineBuilderBuildsExactPullRequestMergeAndBaseExecution() throws
 }
 
 @Test
+func deliveryTimelineBuilderLabelsOnlyProvenExactDefaultBranch() throws {
+    let defaultEvidence = try deliveryEvidence(
+        baseRuns: [deliveryRun(id: 801, branch: "main", headSHA: "landed-sha")],
+        associations: [801: [47]],
+        repositoryDefaultBranch: "main"
+    )
+    let trimmedEvidence = try deliveryEvidence(
+        pullRequest: deliveryPullRequest(baseRef: " main "),
+        baseRuns: [deliveryRun(id: 801, branch: "main", headSHA: "landed-sha")],
+        associations: [801: [47]],
+        repositoryDefaultBranch: "main"
+    )
+    let caseMismatchEvidence = try deliveryEvidence(
+        baseRuns: [deliveryRun(id: 801, branch: "main", headSHA: "landed-sha")],
+        associations: [801: [47]],
+        repositoryDefaultBranch: "Main"
+    )
+
+    let builder = GitHubDeliveryTimelineBuilder()
+    #expect(builder.build(repositoryID: 42, evidence: defaultEvidence).events.last?.title == "Default branch · CI")
+    #expect(builder.build(repositoryID: 42, evidence: trimmedEvidence).events.last?.title == "Default branch · CI")
+    #expect(builder.build(repositoryID: 42, evidence: caseMismatchEvidence).events.last?.title == "Base branch · CI")
+}
+
+@Test
+func deliveryTimelineBuilderKeepsNonDefaultTargetCorrelatedAndChangesOnlyTitle() throws {
+    let pullRequest = try deliveryPullRequest(baseRef: "release/1.x")
+    let unknownDefault = try deliveryEvidence(
+        pullRequest: pullRequest,
+        baseRuns: [deliveryRun(id: 801, branch: "release/1.x", headSHA: "landed-sha")],
+        associations: [801: [47]]
+    )
+    let provenDifferentDefault = try deliveryEvidence(
+        pullRequest: pullRequest,
+        baseRuns: [deliveryRun(id: 801, branch: "release/1.x", headSHA: "landed-sha")],
+        associations: [801: [47]],
+        repositoryDefaultBranch: "main"
+    )
+
+    let builder = GitHubDeliveryTimelineBuilder()
+    let baseline = builder.build(repositoryID: 42, evidence: unknownDefault)
+    let snapshot = builder.build(repositoryID: 42, evidence: provenDifferentDefault)
+
+    #expect(snapshot.status == .correlated)
+    #expect(snapshot.confidence == .exact)
+    #expect(snapshot.events.last?.title == "Base branch · CI")
+    #expect(snapshot.events.map(\.id) == baseline.events.map(\.id))
+    #expect(snapshot.events.map(\.state) == baseline.events.map(\.state))
+    #expect(snapshot.events.map(\.destinationURL) == baseline.events.map(\.destinationURL))
+    #expect(snapshot.events.map(\.occurredAt) == baseline.events.map(\.occurredAt))
+}
+
+@Test
 func deliveryTimelineBuilderRejectsWrongPullRequestAssociation() throws {
     let evidence = try deliveryEvidence(
         baseRuns: [deliveryRun(id: 801, branch: "main", headSHA: "landed-sha")],
@@ -174,7 +227,8 @@ func deliveryTimelineBuilderUsesDeterministicCandidateOrdering() throws {
 private func deliveryEvidence(
     pullRequest: GitHubPullRequestMetadata? = nil,
     baseRuns: [GitHubWorkflowRun],
-    associations: [Int64: [Int]]
+    associations: [Int64: [Int]],
+    repositoryDefaultBranch: String? = nil
 ) throws -> GitHubDeliveryTimelineEvidence {
     GitHubDeliveryTimelineEvidence(
         selectedRun: deliveryRun(
@@ -188,13 +242,15 @@ private func deliveryEvidence(
         ),
         pullRequest: try pullRequest ?? deliveryPullRequest(),
         baseRuns: baseRuns,
-        associatedPullRequestNumbersByRunID: associations
+        associatedPullRequestNumbersByRunID: associations,
+        repositoryDefaultBranch: repositoryDefaultBranch
     )
 }
 
 private func deliveryPullRequest(
     isMerged: Bool = true,
-    mergedAt: Date? = Date(timeIntervalSince1970: 150)
+    mergedAt: Date? = Date(timeIntervalSince1970: 150),
+    baseRef: String = "main"
 ) throws -> GitHubPullRequestMetadata {
     GitHubPullRequestMetadata(
         number: 47,
@@ -203,7 +259,7 @@ private func deliveryPullRequest(
         isMerged: isMerged,
         headRef: "feature/timeline",
         headSHA: "final-head",
-        baseRef: "main",
+        baseRef: baseRef,
         baseSHA: "base-before-merge",
         mergeCommitSHA: nil,
         webURL: try #require(URL(string: "https://github.com/octocat/project/pull/47")),
