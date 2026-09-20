@@ -1,7 +1,7 @@
 import Foundation
 import SchneeBarCore
 
-public enum DeliveryHistoryFixtureScenario: String, CaseIterable, Identifiable {
+public enum DeliveryHistoryFixtureScenario: String, CaseIterable, Identifiable, Hashable {
     case mixedBranches = "mixed-branches"
     case neutralCompleted = "neutral-completed"
     case empty
