@@ -419,6 +419,8 @@ private func run() throws {
 
     let deliveryScenarios: [ActivityDetailFixtureScenario] = [
         .deliveryExact,
+        .deliveryDefaultBranch,
+        .deliveryNonDefaultBranch,
         .deliveryEvidenceUnavailable,
         .deliveryTemporarilyUnavailable,
         .deliveryMatrixFailure,
