@@ -78,9 +78,12 @@ func recoveryNotifierSchedulesOnlyAuthorizedOrProvisionalDelivery() async throws
     await DeliveryRecoveryNotifier(center: provisionalCenter).deliver(event)
     await DeliveryRecoveryNotifier(center: deniedCenter).deliver(event)
 
-    #expect(await authorizedCenter.snapshot().requests.count == 1)
-    #expect(await provisionalCenter.snapshot().requests.count == 1)
-    #expect(await deniedCenter.snapshot().requests.isEmpty)
+    let authorized = await authorizedCenter.snapshot()
+    let provisional = await provisionalCenter.snapshot()
+    let denied = await deniedCenter.snapshot()
+    #expect(authorized.requests.count == 1)
+    #expect(provisional.requests.count == 1)
+    #expect(denied.requests.isEmpty)
 }
 
 @Test
@@ -106,7 +109,8 @@ func recoveryNotifierUsesImmediatePrivacyMinimizedRequest() async throws {
 
     await notifier.deliver(event)
 
-    let request = try #require(await center.snapshot().requests.first)
+    let snapshot = await center.snapshot()
+    let request = try #require(snapshot.requests.first)
     #expect(request.identifier == event.id)
     #expect(request.title == "Delivery recovered")
     #expect(
@@ -132,7 +136,8 @@ func recoveryNotifierSwallowsSchedulingFailure() async throws {
 
     await notifier.deliver(try recoveryNotificationEvent())
 
-    #expect(await center.snapshot().statusReads == 1)
+    let snapshot = await center.snapshot()
+    #expect(snapshot.statusReads == 1)
 }
 
 private func recoveryNotificationEvent() throws -> DeliveryRecoveryEvent {
