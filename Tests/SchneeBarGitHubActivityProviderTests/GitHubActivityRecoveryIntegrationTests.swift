@@ -11,10 +11,15 @@ private actor RecoverySequenceLoader: GitHubWorkflowRunLoading {
     }
 
     private var responses: [Response]
+    private let delayNanoseconds: UInt64
     private var callCount = 0
 
-    init(_ responses: [Response]) {
+    init(
+        _ responses: [Response],
+        delayNanoseconds: UInt64 = 0
+    ) {
         self.responses = responses
+        self.delayNanoseconds = delayNanoseconds
     }
 
     func workflowRuns(
@@ -25,6 +30,9 @@ private actor RecoverySequenceLoader: GitHubWorkflowRunLoading {
         query: GitHubWorkflowRunQuery
     ) async throws -> [GitHubWorkflowRun] {
         callCount += 1
+        if delayNanoseconds > 0 {
+            try await Task.sleep(nanoseconds: delayNanoseconds)
+        }
         guard !responses.isEmpty else {
             return []
         }
@@ -184,6 +192,119 @@ func activityProviderResetClearsRecoveryState() async throws {
     let afterReset = await provider.load(profile: profile, inventory: inventory)
 
     #expect(afterReset.recoveryEvents.isEmpty)
+    #expect(await loader.calls() == 2)
+}
+
+@Test
+func activityProviderCachedReentrantResultNeverReplaysRecovery() async throws {
+    let repository = try recoveryIntegrationRepository()
+    let loader = RecoverySequenceLoader(
+        [
+            .runs([
+                try recoveryIntegrationRun(
+                    id: 100,
+                    runNumber: 10,
+                    conclusion: .failure,
+                    repository: repository
+                ),
+            ]),
+            .runs([
+                try recoveryIntegrationRun(
+                    id: 101,
+                    runNumber: 11,
+                    conclusion: .success,
+                    repository: repository
+                ),
+            ]),
+            .runs([
+                try recoveryIntegrationRun(
+                    id: 101,
+                    runNumber: 11,
+                    conclusion: .success,
+                    repository: repository
+                ),
+            ]),
+        ],
+        delayNanoseconds: 50_000_000
+    )
+    let provider = GitHubActivityProvider(
+        workflowRunLoader: loader,
+        maximumConcurrentRepositories: 1,
+        maximumRepositoriesPerRefresh: 1,
+        minimumColdRepositoriesPerRefresh: 1
+    )
+    let profile = try recoveryIntegrationProfile()
+    let inventory = try recoveryIntegrationInventory(
+        profile: profile,
+        repository: repository
+    )
+
+    _ = await provider.load(profile: profile, inventory: inventory)
+    let recovered = await provider.load(profile: profile, inventory: inventory)
+    #expect(recovered.recoveryEvents.count == 1)
+
+    async let polling = provider.load(profile: profile, inventory: inventory)
+    try await Task.sleep(nanoseconds: 5_000_000)
+    let cached = await provider.load(profile: profile, inventory: inventory)
+    let completed = await polling
+
+    #expect(cached.recoveryEvents.isEmpty)
+    #expect(completed.recoveryEvents.isEmpty)
+}
+
+@Test
+func activityProviderPruningMonitoredRepositoryClearsRecoveryState() async throws {
+    let repository = try recoveryIntegrationRepository()
+    let loader = RecoverySequenceLoader([
+        .runs([
+            try recoveryIntegrationRun(
+                id: 100,
+                runNumber: 10,
+                conclusion: .failure,
+                repository: repository
+            ),
+        ]),
+        .runs([
+            try recoveryIntegrationRun(
+                id: 101,
+                runNumber: 11,
+                conclusion: .success,
+                repository: repository
+            ),
+        ]),
+    ])
+    let provider = GitHubActivityProvider(
+        workflowRunLoader: loader,
+        maximumConcurrentRepositories: 1,
+        maximumRepositoriesPerRefresh: 1,
+        minimumColdRepositoriesPerRefresh: 1
+    )
+    let profile = try recoveryIntegrationProfile()
+    let inventory = try recoveryIntegrationInventory(
+        profile: profile,
+        repository: repository
+    )
+
+    _ = await provider.load(profile: profile, inventory: inventory)
+
+    let unmonitored = GitHubConnectionProfile(
+        connection: profile.connection,
+        account: profile.account,
+        authenticationMethod: profile.authenticationMethod,
+        clientID: profile.clientID,
+        repositorySelection: .selected([]),
+        isEnabled: true,
+        createdAt: profile.createdAt,
+        lastConnectedAt: profile.lastConnectedAt
+    )
+    _ = await provider.load(profile: unmonitored, inventory: inventory)
+
+    let afterReenable = await provider.load(
+        profile: profile,
+        inventory: inventory
+    )
+
+    #expect(afterReenable.recoveryEvents.isEmpty)
     #expect(await loader.calls() == 2)
 }
 
