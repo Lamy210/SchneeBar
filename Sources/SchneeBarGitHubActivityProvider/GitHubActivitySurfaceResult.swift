@@ -124,10 +124,12 @@ public struct GitHubActivitySurfaceResult: Equatable, Sendable {
 public struct GitHubActivityLoadResult: Equatable, Sendable {
     public let items: [ActivityItem]
     public let surfaces: [GitHubActivitySurface: GitHubActivitySurfaceResult]
+    public let recoveryEvents: [DeliveryRecoveryEvent]
 
     public init(
         items: [ActivityItem],
-        surfaces: [GitHubActivitySurface: GitHubActivitySurfaceResult]
+        surfaces: [GitHubActivitySurface: GitHubActivitySurfaceResult],
+        recoveryEvents: [DeliveryRecoveryEvent] = []
     ) {
         var normalized = surfaces
         for surface in GitHubActivitySurface.allCases where normalized[surface] == nil {
@@ -135,14 +137,19 @@ public struct GitHubActivityLoadResult: Equatable, Sendable {
         }
         self.surfaces = normalized
         self.items = items.sorted(by: ActivityInboxOrdering().areInIncreasingOrder)
+        self.recoveryEvents = recoveryEvents.sorted(by: Self.recoveryEventSort)
     }
 
-    public init(surfaces: [GitHubActivitySurface: GitHubActivitySurfaceResult]) {
+    public init(
+        surfaces: [GitHubActivitySurface: GitHubActivitySurfaceResult],
+        recoveryEvents: [DeliveryRecoveryEvent] = []
+    ) {
         self.init(
             items: GitHubActivitySurface.allCases.flatMap {
                 surfaces[$0]?.items ?? []
             },
-            surfaces: surfaces
+            surfaces: surfaces,
+            recoveryEvents: recoveryEvents
         )
     }
 
@@ -226,6 +233,24 @@ public struct GitHubActivityLoadResult: Equatable, Sendable {
                 ),
             ]
         )
+    }
+
+    public func droppingRecoveryEvents() -> GitHubActivityLoadResult {
+        GitHubActivityLoadResult(
+            items: items,
+            surfaces: surfaces,
+            recoveryEvents: []
+        )
+    }
+
+    private static func recoveryEventSort(
+        lhs: DeliveryRecoveryEvent,
+        rhs: DeliveryRecoveryEvent
+    ) -> Bool {
+        if lhs.occurredAt != rhs.occurredAt {
+            return lhs.occurredAt > rhs.occurredAt
+        }
+        return lhs.id < rhs.id
     }
 
     public static var empty: GitHubActivityLoadResult {
