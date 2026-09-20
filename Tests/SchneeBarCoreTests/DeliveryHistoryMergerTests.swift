@@ -81,7 +81,7 @@ func deliveryHistoryMergerCanReturnCacheWithoutLiveData() throws {
     )
 
     let merged = try #require(
-        DeliveryHistoryMerger(maximumEntries: 200).merge(
+        DeliveryHistoryMerger(maximumEntries: 200).resolve(
             cached: cached,
             live: nil
         )
