@@ -131,6 +131,7 @@ func timelineEvidenceAuthorizesOnceAndReturnsEarlyWithoutPullRequestIdentity() a
     #expect(evidence.pullRequest == nil)
     #expect(evidence.baseRuns.isEmpty)
     #expect(evidence.associatedPullRequestNumbersByRunID.isEmpty)
+    #expect(evidence.repositoryDefaultBranch == "main")
     #expect(await fixture.store.recordedLoadCount() == 1)
     #expect(await fixture.transport.recordedRequests().count == 1)
 }
@@ -176,6 +177,7 @@ func timelineEvidenceReturnsEarlyForUnmergedPullRequest() async throws {
     #expect(evidence.pullRequest?.isMerged == false)
     #expect(evidence.baseRuns.isEmpty)
     #expect(evidence.associatedPullRequestNumbersByRunID.isEmpty)
+    #expect(evidence.repositoryDefaultBranch == "main")
     #expect(await transport.recordedRequests().count == 2)
 }
 
@@ -212,6 +214,7 @@ func timelineEvidenceUsesBaseBranchLimitAndDeterministicCandidateOrder() async t
     #expect(evidence.associatedPullRequestNumbersByRunID[803] == [])
     #expect(evidence.associatedPullRequestNumbersByRunID[802] == [47])
     #expect(evidence.associatedPullRequestNumbersByRunID[801] == nil)
+    #expect(evidence.repositoryDefaultBranch == "main")
 
     let requests = await transport.recordedRequests()
     let baseRequest = try #require(requests.first(where: { $0.url?.path.hasSuffix("/actions/runs") == true }))
@@ -408,7 +411,8 @@ private func timelineFixture(
         isPrivate: false,
         webURL: try #require(URL(string: "https://github.com/octocat/project")),
         ownerLogin: "octocat",
-        permissions: GitHubRepositoryPermissions(pull: true)
+        permissions: GitHubRepositoryPermissions(pull: true),
+        defaultBranch: "main"
     )
     let store = TimelineCredentialStore()
     try await store.save(

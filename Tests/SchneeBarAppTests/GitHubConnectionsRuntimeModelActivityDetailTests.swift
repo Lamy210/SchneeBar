@@ -113,6 +113,7 @@ private enum DetailTimelineError: Error {
 private actor DetailTimelineLoader: GitHubDeliveryTimelineLoading {
     private let outcome: DetailTimelineOutcome
     private var callCount = 0
+    private var repositories: [GitHubRepositoryAccess] = []
 
     init(_ outcome: DetailTimelineOutcome) {
         self.outcome = outcome
@@ -126,6 +127,7 @@ private actor DetailTimelineLoader: GitHubDeliveryTimelineLoading {
         runID: Int64
     ) async throws -> GitHubDeliveryTimelineEvidence {
         callCount += 1
+        repositories.append(repository)
         switch outcome {
         case let .evidence(evidence):
             return evidence
@@ -135,6 +137,7 @@ private actor DetailTimelineLoader: GitHubDeliveryTimelineLoading {
     }
 
     func calls() -> Int { callCount }
+    func requestedRepositories() -> [GitHubRepositoryAccess] { repositories }
 }
 
 private enum DetailDeploymentOutcome: Sendable {
@@ -253,7 +256,36 @@ func activityDetailCombinesJobsAndCorrelatedTimeline() async throws {
     #expect(detail.deliveryTimeline?.confidence == .exact)
     #expect(detail.deliveryTimeline?.events.map(\.kind) == [.pullRequest, .merge, .execution])
     #expect(await timelineLoader.calls() == 1)
+    let requestedRepository = try #require(await timelineLoader.requestedRepositories().first)
+    #expect(requestedRepository.fullName == "snow/app")
+    #expect(requestedRepository.defaultBranch == "main")
     #expect(await deploymentLoader.SHAs() == ["landed-sha"])
+}
+
+@Test @MainActor
+func activityDetailRejectsAmbiguousRuntimeRepositoryMatch() async throws {
+    let fixture = try await detailFixture(
+        jobStatusCode: 200,
+        duplicateRepositoryFullName: true
+    )
+    let timelineLoader = DetailTimelineLoader(.evidence(try correlatedDetailEvidence()))
+    let deploymentLoader = DetailDeploymentLoader(
+        .evidence(GitHubDeploymentTimelineEvidence(exactSHA: "unused", deployments: []))
+    )
+
+    await #expect(throws: (any Error).self) {
+        _ = try await fixture.model.loadActivityDetail(
+            for: detailActivityItem(),
+            jobService: fixture.jobService,
+            timelineLoader: timelineLoader,
+            deploymentTimelineLoader: deploymentLoader,
+            environmentCatalogLoader: emptyEnvironmentCatalogLoader(),
+            timelineBuilder: GitHubDeliveryTimelineBuilder()
+        )
+    }
+
+    #expect(await timelineLoader.calls() == 0)
+    #expect(await deploymentLoader.calls() == 0)
 }
 
 @Test @MainActor
@@ -465,7 +497,8 @@ private struct DetailFixture {
 private func detailFixture(
     jobStatusCode: Int,
     deploymentCapability: DetailDeploymentCapabilityFixture = .available,
-    actionsCapability: DetailActionsCapabilityFixture = .available
+    actionsCapability: DetailActionsCapabilityFixture = .available,
+    duplicateRepositoryFullName: Bool = false
 ) async throws -> DetailFixture {
     let profile = try detailProfile()
     let profileStore = DetailProfileStore([profile])
@@ -473,7 +506,8 @@ private func detailFixture(
     let accessTransport = DetailQueueTransport(
         detailSessionResponses(
             deploymentCapability: deploymentCapability,
-            actionsCapability: actionsCapability
+            actionsCapability: actionsCapability,
+            duplicateRepositoryFullName: duplicateRepositoryFullName
         )
     )
     let coordinator = GitHubConnectionSessionCoordinator(
@@ -523,7 +557,8 @@ private func detailProfile() throws -> GitHubConnectionProfile {
 
 private func detailSessionResponses(
     deploymentCapability: DetailDeploymentCapabilityFixture,
-    actionsCapability: DetailActionsCapabilityFixture
+    actionsCapability: DetailActionsCapabilityFixture,
+    duplicateRepositoryFullName: Bool
 ) -> [DetailHTTPResponse] {
     let user = #"{"id":42,"login":"snow-user","name":"Snow User","avatar_url":null}"#
 
@@ -550,8 +585,14 @@ private func detailSessionResponses(
     let installation = """
     {"total_count":1,"installations":[{"id":10,"account":{"id":100,"login":"snow","type":"Organization","avatar_url":null},"repository_selection":"all","permissions":\(permissions),"suspended_at":null}]}
     """
+    let duplicateRepository = duplicateRepositoryFullName
+        ? """
+        ,{"id":2,"name":"app-shadow","full_name":"snow/app","private":\(repositoryIsPrivate),"owner":{"id":100,"login":"snow","type":"Organization","avatar_url":null},"permissions":{"admin":false,"maintain":false,"push":false,"triage":false,"pull":true},"default_branch":"main"}
+        """
+        : ""
+    let repositoryCount = duplicateRepositoryFullName ? 2 : 1
     let repositories = """
-    {"total_count":1,"repositories":[{"id":1,"name":"app","full_name":"snow/app","private":\(repositoryIsPrivate),"owner":{"id":100,"login":"snow","type":"Organization","avatar_url":null},"permissions":{"admin":false,"maintain":false,"push":false,"triage":false,"pull":true}}]}
+    {"total_count":\(repositoryCount),"repositories":[{"id":1,"name":"app","full_name":"snow/app","private":\(repositoryIsPrivate),"owner":{"id":100,"login":"snow","type":"Organization","avatar_url":null},"permissions":{"admin":false,"maintain":false,"push":false,"triage":false,"pull":true},"default_branch":"main"}\(duplicateRepository)]}
     """
     return [
         DetailHTTPResponse(user),

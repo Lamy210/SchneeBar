@@ -85,6 +85,10 @@ public struct GitHubDeliveryTimelineBuilder: Sendable {
                 continue
             }
 
+            let executionBranch = executionBranchLabel(
+                baseRef: baseRef,
+                repositoryDefaultBranch: evidence.repositoryDefaultBranch
+            )
             let timeline = DeliveryTimelineSnapshot(
                 status: .correlated,
                 confidence: timelineConfidence(correlation.confidence),
@@ -110,7 +114,7 @@ public struct GitHubDeliveryTimelineBuilder: Sendable {
                     DeliveryTimelineEvent(
                         id: "github-delivery-execution:\(candidate.id)",
                         kind: .execution,
-                        title: "Base branch · \(candidate.name)",
+                        title: "\(executionBranch) · \(candidate.name)",
                         detail: workflowStatusLabel(candidate),
                         state: workflowState(candidate),
                         destinationURL: candidate.webURL,
@@ -211,6 +215,19 @@ public struct GitHubDeliveryTimelineBuilder: Sendable {
             }
             return lhs.id > rhs.id
         }
+    }
+
+    private func executionBranchLabel(
+        baseRef: String,
+        repositoryDefaultBranch: String?
+    ) -> String {
+        guard let repositoryDefaultBranch = nonEmpty(repositoryDefaultBranch),
+              baseRef.trimmingCharacters(in: .whitespacesAndNewlines)
+                == repositoryDefaultBranch
+        else {
+            return "Base branch"
+        }
+        return "Default branch"
     }
 
     private func timelineConfidence(

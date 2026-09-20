@@ -749,6 +749,37 @@ final class GitHubConnectionsRuntimeModel {
             }
     }
 
+    func repositoryAccess(
+        profileID: UUID,
+        fullName: String
+    ) -> GitHubRepositoryAccess? {
+        guard let inventory = inventoryByConnectionID[profileID] else {
+            return nil
+        }
+
+        var match: GitHubRepositoryAccess?
+        for repository in accessibleRepositories(inventory)
+        where repository.fullName == fullName {
+            guard match == nil else {
+                return nil
+            }
+            match = repository
+        }
+        return match
+    }
+
+    func actionsAccessPresentation(
+        profileID: UUID,
+        repositoryID: Int64
+    ) -> GitHubRepositoryActivityAccessPresentation {
+        activityAccessPresentation(
+            capabilitiesByConnectionID[profileID]?.state(
+                for: .actions,
+                repositoryID: repositoryID
+            )
+        )
+    }
+
     func deploymentAccessPresentation(
         profileID: UUID,
         repositoryID: Int64

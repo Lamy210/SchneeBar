@@ -35,15 +35,10 @@ extension GitHubConnectionsRuntimeModel {
                 continue
             }
 
-            guard let management = managementModel(profileID: profile.id),
-                  let option = management.repositories.first(where: {
-                      $0.fullName == item.repository
-                  }),
-                  let repository = makeRepository(
-                      option: option,
-                      webBaseURL: endpoints.webBaseURL
-                  )
-            else {
+            guard let repository = repositoryAccess(
+                profileID: profile.id,
+                fullName: item.repository
+            ) else {
                 continue
             }
 
@@ -89,7 +84,10 @@ extension GitHubConnectionsRuntimeModel {
 
                         var environmentCatalog: GitHubEnvironmentCatalog?
                         if !deploymentEvidence.deployments.isEmpty,
-                           option.activityAccess.actions != .unavailable
+                           actionsAccessPresentation(
+                               profileID: profile.id,
+                               repositoryID: repository.id
+                           ) != .unavailable
                         {
                             do {
                                 environmentCatalog = try await environmentCatalogLoader.environmentCatalog(
@@ -154,29 +152,6 @@ extension GitHubConnectionsRuntimeModel {
         return Int64(components[runsIndex + 1])
     }
 
-    private func makeRepository(
-        option: GitHubRepositoryOptionModel,
-        webBaseURL: URL
-    ) -> GitHubRepositoryAccess? {
-        let components = option.fullName.split(separator: "/", maxSplits: 1)
-        guard components.count == 2 else { return nil }
-
-        let owner = String(components[0])
-        let name = String(components[1])
-        let webURL = webBaseURL
-            .appendingPathComponent(owner, isDirectory: true)
-            .appendingPathComponent(name, isDirectory: false)
-
-        return GitHubRepositoryAccess(
-            id: option.id,
-            name: name,
-            fullName: option.fullName,
-            isPrivate: option.isPrivate,
-            webURL: webURL,
-            ownerLogin: owner,
-            permissions: GitHubRepositoryPermissions(pull: true)
-        )
-    }
 }
 
 private enum ActivityDetailLoadingError: Error {

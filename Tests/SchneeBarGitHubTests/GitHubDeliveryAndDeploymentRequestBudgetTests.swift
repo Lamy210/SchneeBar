@@ -167,7 +167,8 @@ func completeDeliveryDeploymentAndEnvironmentEvidencePathUsesTwelveFeatureReques
         isPrivate: false,
         webURL: try #require(URL(string: "https://github.com/octocat/project")),
         ownerLogin: "octocat",
-        permissions: GitHubRepositoryPermissions(pull: true)
+        permissions: GitHubRepositoryPermissions(pull: true),
+        defaultBranch: "main"
     )
     let store = DeliveryBudgetCredentialStore()
     try await store.save(
@@ -201,6 +202,7 @@ func completeDeliveryDeploymentAndEnvironmentEvidencePathUsesTwelveFeatureReques
     )
 
     #expect(correlationEvidence.associatedPullRequestNumbersByRunID[804] == [47])
+    #expect(correlationEvidence.repositoryDefaultBranch == "main")
 
     let beforeDeployment = await transport.recordedRequests()
     #expect(beforeDeployment.count == 7)
