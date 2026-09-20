@@ -5,17 +5,20 @@ public struct GitHubDeliveryTimelineEvidence: Equatable, Sendable {
     public let pullRequest: GitHubPullRequestMetadata?
     public let baseRuns: [GitHubWorkflowRun]
     public let associatedPullRequestNumbersByRunID: [Int64: [Int]]
+    public let repositoryDefaultBranch: String?
 
     public init(
         selectedRun: GitHubWorkflowRun,
         pullRequest: GitHubPullRequestMetadata?,
         baseRuns: [GitHubWorkflowRun],
-        associatedPullRequestNumbersByRunID: [Int64: [Int]]
+        associatedPullRequestNumbersByRunID: [Int64: [Int]],
+        repositoryDefaultBranch: String? = nil
     ) {
         self.selectedRun = selectedRun
         self.pullRequest = pullRequest
         self.baseRuns = baseRuns
         self.associatedPullRequestNumbersByRunID = associatedPullRequestNumbersByRunID
+        self.repositoryDefaultBranch = repositoryDefaultBranch
     }
 }
 
@@ -75,7 +78,10 @@ public struct GitHubDeliveryTimelineService: GitHubDeliveryTimelineLoading, Send
         guard pullRequestNumbers.count == 1,
               let pullRequestNumber = pullRequestNumbers.first
         else {
-            return emptyEvidence(selectedRun: selectedRun)
+            return emptyEvidence(
+                selectedRun: selectedRun,
+                repositoryDefaultBranch: repository.defaultBranch
+            )
         }
 
         try Task.checkCancellation()
@@ -91,7 +97,8 @@ public struct GitHubDeliveryTimelineService: GitHubDeliveryTimelineLoading, Send
                 selectedRun: selectedRun,
                 pullRequest: pullRequest,
                 baseRuns: [],
-                associatedPullRequestNumbersByRunID: [:]
+                associatedPullRequestNumbersByRunID: [:],
+                repositoryDefaultBranch: repository.defaultBranch
             )
         }
 
@@ -147,18 +154,21 @@ public struct GitHubDeliveryTimelineService: GitHubDeliveryTimelineLoading, Send
             selectedRun: selectedRun,
             pullRequest: pullRequest,
             baseRuns: candidates,
-            associatedPullRequestNumbersByRunID: associationsByRunID
+            associatedPullRequestNumbersByRunID: associationsByRunID,
+            repositoryDefaultBranch: repository.defaultBranch
         )
     }
 
     private func emptyEvidence(
-        selectedRun: GitHubWorkflowRun
+        selectedRun: GitHubWorkflowRun,
+        repositoryDefaultBranch: String?
     ) -> GitHubDeliveryTimelineEvidence {
         GitHubDeliveryTimelineEvidence(
             selectedRun: selectedRun,
             pullRequest: nil,
             baseRuns: [],
-            associatedPullRequestNumbersByRunID: [:]
+            associatedPullRequestNumbersByRunID: [:],
+            repositoryDefaultBranch: repositoryDefaultBranch
         )
     }
 
