@@ -87,6 +87,7 @@ public struct GitHubRepositoryAccess: Equatable, Sendable, Identifiable {
     public let webURL: URL
     public let ownerLogin: String
     public let permissions: GitHubRepositoryPermissions
+    public let defaultBranch: String?
 
     public init(
         id: Int64,
@@ -95,7 +96,8 @@ public struct GitHubRepositoryAccess: Equatable, Sendable, Identifiable {
         isPrivate: Bool,
         webURL: URL,
         ownerLogin: String,
-        permissions: GitHubRepositoryPermissions
+        permissions: GitHubRepositoryPermissions,
+        defaultBranch: String? = nil
     ) {
         self.id = id
         self.name = name
@@ -104,6 +106,7 @@ public struct GitHubRepositoryAccess: Equatable, Sendable, Identifiable {
         self.webURL = webURL
         self.ownerLogin = ownerLogin
         self.permissions = permissions
+        self.defaultBranch = defaultBranch
     }
 }
 
@@ -497,8 +500,17 @@ public struct GitHubAccessClient: Sendable {
                 push: payload.permissions?.push ?? false,
                 triage: payload.permissions?.triage ?? false,
                 pull: payload.permissions?.pull ?? false
-            )
+            ),
+            defaultBranch: normalizedOptionalBranch(payload.defaultBranch)
         )
+    }
+
+    private func normalizedOptionalBranch(_ value: String?) -> String? {
+        guard let value else {
+            return nil
+        }
+        let normalized = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        return normalized.isEmpty ? nil : normalized
     }
 }
 
@@ -573,6 +585,7 @@ private struct RepositoryPayload: Decodable {
     let isPrivate: Bool
     let owner: AccountPayload
     let permissions: RepositoryPermissionPayload?
+    let defaultBranch: String?
 
     private enum CodingKeys: String, CodingKey {
         case id
@@ -581,6 +594,7 @@ private struct RepositoryPayload: Decodable {
         case isPrivate = "private"
         case owner
         case permissions
+        case defaultBranch = "default_branch"
     }
 }
 
