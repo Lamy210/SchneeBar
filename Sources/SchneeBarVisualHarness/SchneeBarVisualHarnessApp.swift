@@ -59,6 +59,7 @@ private enum GitHubManagementHarnessScenario: String, CaseIterable, Hashable {
 private struct VisualHarnessView: View {
     @State private var activityScenario: ActivityFixtureScenario = .mainFailure
     @State private var activityDetailScenario: ActivityDetailFixtureScenario = .environmentProductionProtected
+    @State private var deliveryHistoryScenario: DeliveryHistoryFixtureScenario = .mixedBranches
     @State private var widgetScenario: WidgetFixtureScenario = .critical
     @State private var githubScenario: GitHubConnectionsFixture = .multiConnection
     @State private var recoveryScenario: GitHubRecoveryHarnessScenario = .deviceCode
@@ -78,6 +79,12 @@ private struct VisualHarnessView: View {
 
                 Picker("Activity detail", selection: $activityDetailScenario) {
                     ForEach(ActivityDetailFixtureScenario.allCases) { scenario in
+                        Text(scenario.title).tag(scenario)
+                    }
+                }
+
+                Picker("Delivery history", selection: $deliveryHistoryScenario) {
+                    ForEach(DeliveryHistoryFixtureScenario.allCases) { scenario in
                         Text(scenario.title).tag(scenario)
                     }
                 }
@@ -137,6 +144,16 @@ private struct VisualHarnessView: View {
                         detail: activityDetailScenario.detail,
                         isLoading: false,
                         errorMessage: nil,
+                        onBack: {},
+                        onRetry: {}
+                    )
+                    .frame(maxWidth: 400)
+
+                    DeliveryHistoryView(
+                        repository: deliveryHistoryScenario.repository,
+                        history: deliveryHistoryScenario.history,
+                        isLoading: false,
+                        errorMessage: deliveryHistoryScenario.errorMessage,
                         onBack: {},
                         onRetry: {}
                     )
