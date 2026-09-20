@@ -18,7 +18,7 @@ public struct DeliveryHistoryMerger: Sendable {
         )
     }
 
-    public func merge(
+    public func resolve(
         cached: DeliveryHistorySnapshot?,
         live: DeliveryHistorySnapshot?
     ) -> DeliveryHistorySnapshot? {
