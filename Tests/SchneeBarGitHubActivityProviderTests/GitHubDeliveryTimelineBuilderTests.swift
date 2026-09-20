@@ -250,7 +250,8 @@ private func deliveryEvidence(
 private func deliveryPullRequest(
     isMerged: Bool = true,
     mergedAt: Date? = Date(timeIntervalSince1970: 150),
-    baseRef: String = "main"
+    baseRef: String = "main",
+    headSHA: String = "final-head"
 ) throws -> GitHubPullRequestMetadata {
     GitHubPullRequestMetadata(
         number: 47,
@@ -258,7 +259,7 @@ private func deliveryPullRequest(
         isDraft: false,
         isMerged: isMerged,
         headRef: "feature/timeline",
-        headSHA: "final-head",
+        headSHA: headSHA,
         baseRef: baseRef,
         baseSHA: "base-before-merge",
         mergeCommitSHA: nil,
@@ -1033,4 +1034,62 @@ func deliveryTimelineBuilderAddsDeploymentCommitMatchEvidenceOnce() throws {
             == "2 deployments matched the correlated execution commit"
     )
     #expect(twice.evidence.filter { $0.id == "deployment-commit-match" }.count == 1)
+}
+
+
+@Test
+func deliveryTimelineBuilderExplainsUnprovenMerge() throws {
+    let snapshot = GitHubDeliveryTimelineBuilder().build(
+        repositoryID: 42,
+        evidence: try deliveryEvidence(
+            pullRequest: deliveryPullRequest(isMerged: false, mergedAt: nil),
+            baseRuns: [deliveryRun(id: 801, branch: "main", headSHA: "landed-sha")],
+            associations: [801: [47]]
+        )
+    )
+
+    #expect(snapshot.status == .evidenceUnavailable)
+    #expect(snapshot.evidence.map(\.title) == [
+        "Workflow pull request",
+        "Merged pull request",
+    ])
+    #expect(snapshot.evidence.last?.state == .missing)
+    #expect(snapshot.evidence.last?.detail == "PR #47 is not proven merged")
+}
+
+@Test
+func deliveryTimelineBuilderExplainsMissingTargetBranch() throws {
+    let snapshot = GitHubDeliveryTimelineBuilder().build(
+        repositoryID: 42,
+        evidence: try deliveryEvidence(
+            pullRequest: deliveryPullRequest(baseRef: "   "),
+            baseRuns: [],
+            associations: [:]
+        )
+    )
+
+    #expect(snapshot.status == .evidenceUnavailable)
+    #expect(snapshot.evidence.last?.title == "Target branch")
+    #expect(snapshot.evidence.last?.state == .missing)
+    #expect(snapshot.evidence.last?.detail == "Pull request target branch is unavailable")
+}
+
+@Test
+func deliveryTimelineBuilderExplainsUnverifiedFinalRevision() throws {
+    let snapshot = GitHubDeliveryTimelineBuilder().build(
+        repositoryID: 42,
+        evidence: try deliveryEvidence(
+            pullRequest: deliveryPullRequest(headSHA: "different-final-head"),
+            baseRuns: [deliveryRun(id: 801, branch: "main", headSHA: "landed-sha")],
+            associations: [801: [47]]
+        )
+    )
+
+    #expect(snapshot.status == .evidenceUnavailable)
+    #expect(snapshot.evidence.last?.title == "Final pull request revision")
+    #expect(snapshot.evidence.last?.state == .missing)
+    #expect(
+        snapshot.evidence.last?.detail
+            == "Selected workflow could not be verified as the merged pull request's final revision"
+    )
 }
