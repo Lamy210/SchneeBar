@@ -155,10 +155,14 @@ Implemented:
 - replay-safe ephemeral recovery events that survive transient polling failures but reset on monitoring removal/connection reset
 - privacy-minimized macOS local recovery notifications using provisional authorization and current notification settings
 - generic system notification copy with no repository, account, branch, Pull Request, workflow, or URL disclosure
+- bounded persisted Delivery history in versioned Application Support JSON with atomic writes
+- deterministic live + cached Delivery history merging up to 200 entries per repository scope
+- cached Delivery history fallback for transient GitHub failure or definitive current Actions unavailability
+- source-scoped persisted history cleanup on explicit connection disconnect
+- zero additional GitHub requests: live standalone history remains exactly one completed-runs request
 
 Next:
 
-- persisted delivery history
 - revisit standalone/paginated Environment browsing and custom protection-rule details only if product usage justifies the extra scope
 
 ## Phase 5 — Enterprise
