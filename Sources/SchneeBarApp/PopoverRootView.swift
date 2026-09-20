@@ -18,7 +18,22 @@ struct PopoverRootView: View {
                 Divider()
                     .padding(.horizontal, 12)
 
-                if let selectedItem = activityModel.selectedItem {
+                if let selectedItem = activityModel.selectedItem,
+                   activityModel.isPresentingDeliveryHistory
+                {
+                    DeliveryHistoryView(
+                        repository: selectedItem.repository,
+                        history: activityModel.deliveryHistory,
+                        isLoading: activityModel.deliveryHistoryIsLoading,
+                        errorMessage: activityModel.deliveryHistoryErrorMessage,
+                        onBack: {
+                            activityModel.dismissDeliveryHistory()
+                        },
+                        onRetry: {
+                            activityModel.retryDeliveryHistory()
+                        }
+                    )
+                } else if let selectedItem = activityModel.selectedItem {
                     ActivityDetailView(
                         item: selectedItem,
                         detail: activityModel.detail,
@@ -29,6 +44,9 @@ struct PopoverRootView: View {
                         },
                         onRetry: {
                             activityModel.retryDetail()
+                        },
+                        onShowHistory: {
+                            activityModel.requestDeliveryHistory()
                         }
                     )
                 } else {

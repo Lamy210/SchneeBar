@@ -48,6 +48,13 @@ func deliveryTimelineEventIconName(
     activityDetailIconName(for: event.state)
 }
 
+func deliveryHistoryActionIsAvailable(
+    detail: ActivityDetailSnapshot?,
+    hasHandler: Bool
+) -> Bool {
+    detail != nil && hasHandler
+}
+
 func activityDetailIconName(for state: ActivityDetailState) -> String {
     switch state {
     case .success: "checkmark.circle.fill"
@@ -65,6 +72,7 @@ public struct ActivityDetailView: View {
     private let errorMessage: String?
     private let onBack: () -> Void
     private let onRetry: () -> Void
+    private let onShowHistory: (() -> Void)?
     private let surfaceStyle: SchneeSurfaceStyle
 
     public init(
@@ -74,6 +82,7 @@ public struct ActivityDetailView: View {
         errorMessage: String?,
         onBack: @escaping () -> Void,
         onRetry: @escaping () -> Void,
+        onShowHistory: (() -> Void)? = nil,
         surfaceStyle: SchneeSurfaceStyle = .adaptive
     ) {
         self.item = item
@@ -82,6 +91,7 @@ public struct ActivityDetailView: View {
         self.errorMessage = errorMessage
         self.onBack = onBack
         self.onRetry = onRetry
+        self.onShowHistory = onShowHistory
         self.surfaceStyle = surfaceStyle
     }
 
@@ -131,6 +141,18 @@ public struct ActivityDetailView: View {
             }
 
             Spacer(minLength: 8)
+
+            if deliveryHistoryActionIsAvailable(
+                detail: detail,
+                hasHandler: onShowHistory != nil
+            ), let onShowHistory {
+                Button(action: onShowHistory) {
+                    Image(systemName: "clock.arrow.circlepath")
+                }
+                .buttonStyle(.plain)
+                .help("Show delivery history")
+                .accessibilityLabel("Show delivery history")
+            }
 
             if let destinationURL = item.destinationURL {
                 Link(destination: destinationURL) {

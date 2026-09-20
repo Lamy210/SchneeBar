@@ -143,10 +143,14 @@ Implemented:
 - authoritative Activity-detail repository resolution from runtime inventory instead of UI-model reconstruction
 - exact, case-sensitive default-branch presentation that keeps non-default Pull Request targets fully correlatable
 - deterministic Light/Dark proven-default and proven-non-default Delivery Timeline fixtures
+- repository-scoped standalone Delivery history reachable from loaded Workflow detail
+- one-request completed Workflow history loading capped at 20 rows
+- zero-request Back navigation that preserves the loaded Workflow detail
+- deterministic Light/Dark Delivery history fixtures for mixed branches, neutral completions, empty history, and request failure
 
 Next:
 
-- standalone delivery history/navigation
+- richer confidence/evidence explanations
 - richer confidence/evidence explanations
 - recovery notifications
 - persisted delivery history
@@ -178,9 +182,9 @@ Still required:
 
 ## Current implementation priority
 
-1. Add standalone Delivery history/navigation.
+1. Add richer Delivery confidence/evidence explanations.
 2. Add recovery notifications and persisted Delivery history.
-3. Revisit standalone/paginated Environment browsing and custom protection-rule details only if product usage justifies the extra scope.
+3. Revisit standalone/paginated Environment browsing, local history-row drill-down, and custom protection-rule details only if product usage justifies the extra scope.
 4. Broaden enterprise validation toward Phase 5 requirements.
 5. Only then broaden system widgets or external provider/plugin scope.
 

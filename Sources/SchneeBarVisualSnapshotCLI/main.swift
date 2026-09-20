@@ -217,6 +217,29 @@ private func activityDetailRoot(
 }
 
 @MainActor
+private func deliveryHistoryRoot(
+    scenario: DeliveryHistoryFixtureScenario,
+    appearance: SnapshotAppearance
+) -> some View {
+    ZStack {
+        appearance.background
+
+        DeliveryHistoryView(
+            repository: scenario.repository,
+            history: scenario.history,
+            isLoading: false,
+            errorMessage: scenario.errorMessage,
+            onBack: {},
+            onRetry: {},
+            surfaceStyle: .deterministic
+        )
+        .padding(24)
+    }
+    .frame(width: 400)
+    .environment(\.colorScheme, appearance.colorScheme)
+}
+
+@MainActor
 private func widgetRoot(
     scenario: WidgetFixtureScenario,
     appearance: SnapshotAppearance
@@ -442,6 +465,20 @@ private func run() throws {
                 rootView: activityDetailRoot(scenario: scenario, appearance: appearance),
                 appearance: appearance,
                 filename: "activity-detail-\(scenario.rawValue)-\(appearance.rawValue).png",
+                outputDirectory: outputDirectory
+            )
+        }
+    }
+
+    for scenario in DeliveryHistoryFixtureScenario.allCases {
+        for appearance in SnapshotAppearance.allCases {
+            try render(
+                rootView: deliveryHistoryRoot(
+                    scenario: scenario,
+                    appearance: appearance
+                ),
+                appearance: appearance,
+                filename: "delivery-history-\(scenario.rawValue)-\(appearance.rawValue).png",
                 outputDirectory: outputDirectory
             )
         }
