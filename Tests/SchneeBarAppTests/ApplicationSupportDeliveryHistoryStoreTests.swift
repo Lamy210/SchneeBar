@@ -88,7 +88,8 @@ func applicationSupportDeliveryHistoryStoreCapsOneScopeAtTwoHundredEntries() asy
     )
 
     try await fixture.store.save(snapshot, scope: scope)
-    let stored = try #require(await fixture.store.load(scope: scope))
+    let loaded = try await fixture.store.load(scope: scope)
+    let stored = try #require(loaded)
 
     #expect(stored.entries.count == 200)
     #expect(stored.entries.first?.id == "run-249")
@@ -119,22 +120,20 @@ func applicationSupportDeliveryHistoryStoreCapsGlobalScopesAtOneHundred() async 
         )
     }
 
-    #expect(
-        try await fixture.store.load(
-            scope: DeliveryHistoryStorageScope(
-                sourceID: "source",
-                repositoryID: "0"
-            )
-        ) == nil
+    let oldest = try await fixture.store.load(
+        scope: DeliveryHistoryStorageScope(
+            sourceID: "source",
+            repositoryID: "0"
+        )
     )
-    #expect(
-        try await fixture.store.load(
-            scope: DeliveryHistoryStorageScope(
-                sourceID: "source",
-                repositoryID: "104"
-            )
-        ) != nil
+    let newest = try await fixture.store.load(
+        scope: DeliveryHistoryStorageScope(
+            sourceID: "source",
+            repositoryID: "104"
+        )
     )
+    #expect(oldest == nil)
+    #expect(newest != nil)
 }
 
 @Test
@@ -159,8 +158,10 @@ func applicationSupportDeliveryHistoryStoreDeletesOnlyRequestedSource() async th
     try await fixture.store.save(snapshot, scope: second)
     try await fixture.store.delete(sourceID: "source-a")
 
-    #expect(try await fixture.store.load(scope: first) == nil)
-    #expect(try await fixture.store.load(scope: second) == snapshot)
+    let deleted = try await fixture.store.load(scope: first)
+    let retained = try await fixture.store.load(scope: second)
+    #expect(deleted == nil)
+    #expect(retained == snapshot)
 }
 
 private final class HistoryStoreClock: @unchecked Sendable {
