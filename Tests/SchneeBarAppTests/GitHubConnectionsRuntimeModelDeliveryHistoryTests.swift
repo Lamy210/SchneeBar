@@ -97,6 +97,74 @@ private actor RecordingHistoryWorkflowLoader: GitHubWorkflowRunLoading {
     func recordedRequests() -> [Request] { requests }
 }
 
+private struct ThrowingHistoryWorkflowLoader: GitHubWorkflowRunLoading {
+    func workflowRuns(
+        connection: GitHubConnection,
+        identity: GitHubAccountIdentity,
+        clientID: String?,
+        repository: GitHubRepositoryAccess,
+        query: GitHubWorkflowRunQuery
+    ) async throws -> [GitHubWorkflowRun] {
+        throw URLError(.timedOut)
+    }
+}
+
+private actor MemoryDeliveryHistoryStore: DeliveryHistoryStoring {
+    private var values: [DeliveryHistoryStorageScope: DeliveryHistorySnapshot]
+    private let failRead: Bool
+    private let failSave: Bool
+    private var deletedSourceIDs: [String] = []
+
+    init(
+        values: [DeliveryHistoryStorageScope: DeliveryHistorySnapshot] = [:],
+        failRead: Bool = false,
+        failSave: Bool = false
+    ) {
+        self.values = values
+        self.failRead = failRead
+        self.failSave = failSave
+    }
+
+    func load(
+        scope: DeliveryHistoryStorageScope
+    ) async throws -> DeliveryHistorySnapshot? {
+        if failRead {
+            throw StoreFailure.read
+        }
+        return values[scope]
+    }
+
+    func save(
+        _ snapshot: DeliveryHistorySnapshot,
+        scope: DeliveryHistoryStorageScope
+    ) async throws {
+        if failSave {
+            throw StoreFailure.write
+        }
+        values[scope] = snapshot
+    }
+
+    func delete(sourceID: String) async throws {
+        deletedSourceIDs.append(sourceID)
+        values = values.filter { $0.key.sourceID != sourceID }
+    }
+
+    func value(
+        scope: DeliveryHistoryStorageScope
+    ) -> DeliveryHistorySnapshot? {
+        values[scope]
+    }
+
+    func deletedSources() -> [String] {
+        deletedSourceIDs
+    }
+
+    private enum StoreFailure: Error {
+        case read
+        case write
+    }
+}
+
 private enum HistoryActionsCapabilityFixture {
     case available
     case unavailable
@@ -220,15 +288,166 @@ func deliveryHistoryRejectsRepositoryOutsideRuntimeInventory() async throws {
     #expect(await loader.recordedRequests().isEmpty)
 }
 
+@Test @MainActor
+func deliveryHistoryAccumulatesUniqueEntriesAcrossExplicitLoads() async throws {
+    let store = MemoryDeliveryHistoryStore()
+    let fixture = try await historyFixture(
+        actionsCapability: .available,
+        historyStore: store
+    )
+    let firstLoader = RecordingHistoryWorkflowLoader(
+        runs: (800 ..< 820).map {
+            historyRun(id: Int64($0), branch: "main", conclusion: .success)
+        }
+    )
+    let secondLoader = RecordingHistoryWorkflowLoader(
+        runs: (820 ..< 840).map {
+            historyRun(id: Int64($0), branch: "main", conclusion: .success)
+        }
+    )
+
+    let first = try await fixture.model.loadDeliveryHistory(
+        for: historyActivityItem(),
+        workflowRunLoader: firstLoader
+    )
+    let second = try await fixture.model.loadDeliveryHistory(
+        for: historyActivityItem(),
+        workflowRunLoader: secondLoader
+    )
+
+    let scope = DeliveryHistoryStorageScope(
+        sourceID: fixture.profile.id.uuidString,
+        repositoryID: "1"
+    )
+    let persisted = await store.value(scope: scope)
+
+    #expect(first.entries.count == 20)
+    #expect(second.entries.count == 40)
+    #expect(second.entries.first?.id == "github-actions:1:839")
+    #expect(second.entries.last?.id == "github-actions:1:800")
+    #expect(persisted == second)
+    #expect(await firstLoader.recordedRequests().count == 1)
+    #expect(await secondLoader.recordedRequests().count == 1)
+}
+
+@Test @MainActor
+func deliveryHistoryFallsBackToCacheOnNetworkFailure() async throws {
+    let profile = try historyProfile()
+    let scope = DeliveryHistoryStorageScope(
+        sourceID: profile.id.uuidString,
+        repositoryID: "1"
+    )
+    let cached = DeliveryHistorySnapshot(
+        repository: "snow/app",
+        entries: [
+            DeliveryHistoryEntry(
+                id: "cached",
+                title: "CI",
+                state: .failed,
+                occurredAt: Date(timeIntervalSince1970: 100)
+            ),
+        ]
+    )
+    let store = MemoryDeliveryHistoryStore(values: [scope: cached])
+    let fixture = try await historyFixture(
+        actionsCapability: .available,
+        historyStore: store
+    )
+
+    let history = try await fixture.model.loadDeliveryHistory(
+        for: historyActivityItem(),
+        workflowRunLoader: ThrowingHistoryWorkflowLoader()
+    )
+
+    #expect(history == cached)
+}
+
+@Test @MainActor
+func deliveryHistoryUsesCacheWhenActionsCapabilityIsUnavailable() async throws {
+    let profile = try historyProfile()
+    let scope = DeliveryHistoryStorageScope(
+        sourceID: profile.id.uuidString,
+        repositoryID: "1"
+    )
+    let cached = DeliveryHistorySnapshot(
+        repository: "snow/app",
+        entries: [
+            DeliveryHistoryEntry(
+                id: "cached",
+                title: "CI",
+                state: .success,
+                occurredAt: Date(timeIntervalSince1970: 100)
+            ),
+        ]
+    )
+    let store = MemoryDeliveryHistoryStore(values: [scope: cached])
+    let fixture = try await historyFixture(
+        actionsCapability: .unavailable,
+        historyStore: store
+    )
+    let loader = RecordingHistoryWorkflowLoader(runs: [])
+
+    let history = try await fixture.model.loadDeliveryHistory(
+        for: historyActivityItem(),
+        workflowRunLoader: loader
+    )
+
+    #expect(history == cached)
+    #expect(await loader.recordedRequests().isEmpty)
+}
+
+@Test @MainActor
+func deliveryHistoryPersistenceFailureNeverHidesLiveHistory() async throws {
+    let store = MemoryDeliveryHistoryStore(
+        failRead: true,
+        failSave: true
+    )
+    let fixture = try await historyFixture(
+        actionsCapability: .available,
+        historyStore: store
+    )
+    let loader = RecordingHistoryWorkflowLoader(
+        runs: [
+            historyRun(id: 950, branch: "main", conclusion: .success),
+        ]
+    )
+
+    let history = try await fixture.model.loadDeliveryHistory(
+        for: historyActivityItem(),
+        workflowRunLoader: loader
+    )
+
+    #expect(history.entries.map(\.id) == ["github-actions:1:950"])
+    #expect(await loader.recordedRequests().count == 1)
+}
+
+@Test @MainActor
+func disconnectBestEffortDeletesPersistedHistoryForSource() async throws {
+    let store = MemoryDeliveryHistoryStore()
+    let fixture = try await historyFixture(
+        actionsCapability: .available,
+        historyStore: store
+    )
+
+    await fixture.model.disconnect(profileID: fixture.profile.id)
+
+    #expect(
+        await store.deletedSources()
+            == [fixture.profile.id.uuidString]
+    )
+}
+
 @MainActor
 private struct HistoryFixture {
     let model: GitHubConnectionsRuntimeModel
+    let profile: GitHubConnectionProfile
 }
 
 @MainActor
 private func historyFixture(
     actionsCapability: HistoryActionsCapabilityFixture,
-    duplicateRepositoryFullName: Bool = false
+    duplicateRepositoryFullName: Bool = false,
+    historyStore: any DeliveryHistoryStoring = NoopDeliveryHistoryStore()
 ) async throws -> HistoryFixture {
     let profile = try historyProfile()
     let profileStore = HistoryProfileStore([profile])
@@ -251,11 +470,15 @@ private func historyFixture(
             workflowRunLoader: emptyWorkflow,
             reviewRequestLoader: EmptyHistoryReviewLoader(),
             checkRunLoader: EmptyHistoryCheckLoader()
-        )
+        ),
+        deliveryHistoryStore: historyStore
     )
     model.profiles = [profile]
     await model.refresh(profileID: profile.id)
-    return HistoryFixture(model: model)
+    return HistoryFixture(
+        model: model,
+        profile: profile
+    )
 }
 
 private func historyProfile() throws -> GitHubConnectionProfile {
