@@ -287,7 +287,7 @@ func repeatedPaginationPageDoesNotLoopForever() async throws {
 func preservesAndNormalizesRepositoryDefaultBranchMetadata() async throws {
     let transport = AccessQueueTransport([
         AccessStubResponse(
-            #"{"total_count":4,"repositories":[{"id":41,"name":"main-repo","full_name":"octocat/main-repo","private":false,"owner":{"id":10,"login":"octocat","type":"User"},"permissions":{"pull":true},"default_branch":" main "},{"id":42,"name":"null-repo","full_name":"octocat/null-repo","private":false,"owner":{"id":10,"login":"octocat","type":"User"},"permissions":{"pull":true},"default_branch":null},{"id":43,"name":"missing-repo","full_name":"octocat/missing-repo","private":false,"owner":{"id":10,"login":"octocat","type":"User"},"permissions":{"pull":true}},{"id":44,"name":"blank-repo","full_name":"octocat/blank-repo","private":false,"owner":{"id":10,"login":"octocat","type":"User"},"permissions":{"pull":true},"default_branch":"  \n  "}]}"#
+            #"{"total_count":5,"repositories":[{"id":41,"name":"main-repo","full_name":"octocat/main-repo","private":false,"owner":{"id":10,"login":"octocat","type":"User"},"permissions":{"pull":true},"default_branch":" main "},{"id":42,"name":"null-repo","full_name":"octocat/null-repo","private":false,"owner":{"id":10,"login":"octocat","type":"User"},"permissions":{"pull":true},"default_branch":null},{"id":43,"name":"missing-repo","full_name":"octocat/missing-repo","private":false,"owner":{"id":10,"login":"octocat","type":"User"},"permissions":{"pull":true}},{"id":44,"name":"blank-repo","full_name":"octocat/blank-repo","private":false,"owner":{"id":10,"login":"octocat","type":"User"},"permissions":{"pull":true},"default_branch":"  \n  "},{"id":45,"name":"case-repo","full_name":"octocat/case-repo","private":false,"owner":{"id":10,"login":"octocat","type":"User"},"permissions":{"pull":true},"default_branch":"Main"}]}"#
         )
     ])
     let client = GitHubAccessClient(transport: transport)
@@ -298,11 +298,12 @@ func preservesAndNormalizesRepositoryDefaultBranchMetadata() async throws {
         credential: GitHubCredential(accessToken: "ghu_access")
     )
 
-    #expect(repositories.count == 4)
+    #expect(repositories.count == 5)
     #expect(repositories[0].defaultBranch == "main")
     #expect(repositories[1].defaultBranch == nil)
     #expect(repositories[2].defaultBranch == nil)
     #expect(repositories[3].defaultBranch == nil)
+    #expect(repositories[4].defaultBranch == "Main")
     #expect(await transport.recordedRequests().count == 1)
 }
 
