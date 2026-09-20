@@ -9,6 +9,11 @@ public enum ActivityDetailFixtureScenario: String, CaseIterable, Identifiable {
     case deliveryEvidenceUnavailable = "delivery-evidence-unavailable"
     case deliveryTemporarilyUnavailable = "delivery-temporarily-unavailable"
     case deliveryMatrixFailure = "delivery-matrix-failure"
+    case deploymentProductionSuccess = "deployment-production-success"
+    case deploymentStagingRunning = "deployment-staging-running"
+    case deploymentNone = "deployment-none"
+    case deploymentCapabilityUnavailable = "deployment-capability-unavailable"
+    case deploymentBoundedMultiple = "deployment-bounded-multiple"
 
     public var id: String { rawValue }
 
@@ -21,6 +26,11 @@ public enum ActivityDetailFixtureScenario: String, CaseIterable, Identifiable {
         case .deliveryEvidenceUnavailable: "Delivery evidence unavailable"
         case .deliveryTemporarilyUnavailable: "Delivery temporarily unavailable"
         case .deliveryMatrixFailure: "Delivery + matrix failure"
+        case .deploymentProductionSuccess: "Deployment production success"
+        case .deploymentStagingRunning: "Deployment staging running"
+        case .deploymentNone: "Deployment none"
+        case .deploymentCapabilityUnavailable: "Deployment capability unavailable"
+        case .deploymentBoundedMultiple: "Deployment bounded multiple"
         }
     }
 
@@ -37,6 +47,11 @@ public enum ActivityDetailFixtureScenario: String, CaseIterable, Identifiable {
         case .deliveryEvidenceUnavailable: ActivityDetailFixture.deliveryEvidenceUnavailable
         case .deliveryTemporarilyUnavailable: ActivityDetailFixture.deliveryTemporarilyUnavailable
         case .deliveryMatrixFailure: ActivityDetailFixture.deliveryMatrixFailure
+        case .deploymentProductionSuccess: ActivityDetailFixture.deploymentProductionSuccess
+        case .deploymentStagingRunning: ActivityDetailFixture.deploymentStagingRunning
+        case .deploymentNone: ActivityDetailFixture.deploymentNone
+        case .deploymentCapabilityUnavailable: ActivityDetailFixture.deploymentCapabilityUnavailable
+        case .deploymentBoundedMultiple: ActivityDetailFixture.deploymentBoundedMultiple
         }
     }
 }
@@ -282,6 +297,128 @@ public enum ActivityDetailFixture {
         destinationURL: item.destinationURL,
         deliveryTimeline: exactDeliveryTimeline,
         rows: matrixFailure.rows
+    )
+
+
+    public static let productionDeploymentTimeline = DeliveryTimelineSnapshot(
+        status: .correlated,
+        confidence: .exact,
+        events: exactDeliveryTimeline.events + [
+            DeliveryTimelineEvent(
+                id: "github-delivery-deployment:901",
+                kind: .deployment,
+                title: "Deployment · production",
+                detail: "Succeeded · Production",
+                state: .success,
+                destinationURL: URL(string: "https://deploy.example.test/production"),
+                occurredAt: Date(timeIntervalSince1970: 1_789_710_240)
+            ),
+        ]
+    )
+
+    public static let stagingRunningDeploymentTimeline = DeliveryTimelineSnapshot(
+        status: .correlated,
+        confidence: .exact,
+        events: exactDeliveryTimeline.events + [
+            DeliveryTimelineEvent(
+                id: "github-delivery-deployment:902",
+                kind: .deployment,
+                title: "Deployment · staging",
+                detail: "Running",
+                state: .running,
+                destinationURL: URL(string: "https://deploy.example.test/staging"),
+                occurredAt: Date(timeIntervalSince1970: 1_789_710_260)
+            ),
+        ]
+    )
+
+    public static let boundedMultipleDeploymentTimeline = DeliveryTimelineSnapshot(
+        status: .correlated,
+        confidence: .exact,
+        events: exactDeliveryTimeline.events + [
+            DeliveryTimelineEvent(
+                id: "github-delivery-deployment:903",
+                kind: .deployment,
+                title: "Deployment · production",
+                detail: "Succeeded · Production",
+                state: .success,
+                destinationURL: URL(string: "https://deploy.example.test/production"),
+                occurredAt: Date(timeIntervalSince1970: 1_789_710_300)
+            ),
+            DeliveryTimelineEvent(
+                id: "github-delivery-deployment:904",
+                kind: .deployment,
+                title: "Deployment · staging",
+                detail: "Running",
+                state: .running,
+                destinationURL: URL(string: "https://deploy.example.test/staging"),
+                occurredAt: Date(timeIntervalSince1970: 1_789_710_290)
+            ),
+            DeliveryTimelineEvent(
+                id: "github-delivery-deployment:905",
+                kind: .deployment,
+                title: "Deployment · preview",
+                detail: "Pending · Transient",
+                state: .waiting,
+                destinationURL: URL(string: "https://deploy.example.test/preview"),
+                occurredAt: Date(timeIntervalSince1970: 1_789_710_280)
+            ),
+        ]
+    )
+
+    public static let deploymentProductionSuccess = ActivityDetailSnapshot(
+        id: "github-actions:42:501:deployment-production-success",
+        repository: item.repository,
+        title: item.context,
+        summary: matrixSuccess.summary,
+        state: .success,
+        destinationURL: item.destinationURL,
+        deliveryTimeline: productionDeploymentTimeline,
+        rows: matrixSuccess.rows
+    )
+
+    public static let deploymentStagingRunning = ActivityDetailSnapshot(
+        id: "github-actions:42:501:deployment-staging-running",
+        repository: item.repository,
+        title: item.context,
+        summary: matrixSuccess.summary,
+        state: .success,
+        destinationURL: item.destinationURL,
+        deliveryTimeline: stagingRunningDeploymentTimeline,
+        rows: matrixSuccess.rows
+    )
+
+    public static let deploymentNone = ActivityDetailSnapshot(
+        id: "github-actions:42:501:deployment-none",
+        repository: item.repository,
+        title: item.context,
+        summary: matrixSuccess.summary,
+        state: .success,
+        destinationURL: item.destinationURL,
+        deliveryTimeline: exactDeliveryTimeline,
+        rows: matrixSuccess.rows
+    )
+
+    public static let deploymentCapabilityUnavailable = ActivityDetailSnapshot(
+        id: "github-actions:42:501:deployment-capability-unavailable",
+        repository: item.repository,
+        title: item.context,
+        summary: matrixSuccess.summary,
+        state: .success,
+        destinationURL: item.destinationURL,
+        deliveryTimeline: exactDeliveryTimeline,
+        rows: matrixSuccess.rows
+    )
+
+    public static let deploymentBoundedMultiple = ActivityDetailSnapshot(
+        id: "github-actions:42:501:deployment-bounded-multiple",
+        repository: item.repository,
+        title: item.context,
+        summary: matrixSuccess.summary,
+        state: .success,
+        destinationURL: item.destinationURL,
+        deliveryTimeline: boundedMultipleDeploymentTimeline,
+        rows: matrixSuccess.rows
     )
 
 }

@@ -422,6 +422,11 @@ private func run() throws {
         .deliveryEvidenceUnavailable,
         .deliveryTemporarilyUnavailable,
         .deliveryMatrixFailure,
+        .deploymentProductionSuccess,
+        .deploymentStagingRunning,
+        .deploymentNone,
+        .deploymentCapabilityUnavailable,
+        .deploymentBoundedMultiple,
     ]
     for scenario in deliveryScenarios {
         for appearance in SnapshotAppearance.allCases {

@@ -95,11 +95,52 @@ private struct CapabilityPresentationCheckLoader: GitHubCheckRunLoading {
 }
 
 @Test @MainActor
-func managementModelMapsActionsReviewsAndChecksIndependently() async throws {
+func managementModelMapsActionsReviewsChecksAndDeploymentsIndependently() async throws {
+    let access = try await capabilityPresentationAccess(
+        deploymentPermission: "read",
+        isPrivate: true
+    )
+
+    #expect(access.actions == .available)
+    #expect(access.reviewRequests == .unavailable)
+    #expect(access.checks == .unverified)
+    #expect(access.deployments == .available)
+}
+
+@Test @MainActor
+func managementModelMarksPrivateDeploymentAccessUnavailableWithoutPermission() async throws {
+    let access = try await capabilityPresentationAccess(
+        deploymentPermission: nil,
+        isPrivate: true
+    )
+
+    #expect(access.deployments == .unavailable)
+}
+
+@Test @MainActor
+func managementModelKeepsPublicDeploymentAccessUnverifiedWithoutPermission() async throws {
+    let access = try await capabilityPresentationAccess(
+        deploymentPermission: nil,
+        isPrivate: false
+    )
+
+    #expect(access.deployments == .unverified)
+}
+
+@MainActor
+private func capabilityPresentationAccess(
+    deploymentPermission: String?,
+    isPrivate: Bool
+) async throws -> GitHubRepositoryActivityAccessModel {
     let profile = try capabilityPresentationProfile()
     let profileStore = CapabilityPresentationProfileStore(profile: profile)
     let credentialStore = CapabilityPresentationCredentialStore(profile: profile)
-    let transport = CapabilityPresentationTransport(capabilityPresentationResponses())
+    let transport = CapabilityPresentationTransport(
+        capabilityPresentationResponses(
+            deploymentPermission: deploymentPermission,
+            isPrivate: isPrivate
+        )
+    )
     let coordinator = GitHubConnectionSessionCoordinator(
         credentialStore: credentialStore,
         accessClient: GitHubAccessClient(transport: transport)
@@ -119,10 +160,7 @@ func managementModelMapsActionsReviewsAndChecksIndependently() async throws {
     await model.refresh(profileID: profile.id)
 
     let management = try #require(model.managementModel(profileID: profile.id))
-    let repository = try #require(management.repositories.first)
-    #expect(repository.activityAccess.actions == .available)
-    #expect(repository.activityAccess.reviewRequests == .unavailable)
-    #expect(repository.activityAccess.checks == .unverified)
+    return try #require(management.repositories.first).activityAccess
 }
 
 private func capabilityPresentationProfile() throws -> GitHubConnectionProfile {
@@ -141,8 +179,16 @@ private func capabilityPresentationProfile() throws -> GitHubConnectionProfile {
     )
 }
 
-private func capabilityPresentationResponses() -> [CapabilityPresentationResponse] {
-    [
+private func capabilityPresentationResponses(
+    deploymentPermission: String?,
+    isPrivate: Bool
+) -> [CapabilityPresentationResponse] {
+    let deploymentPermissionJSON = deploymentPermission.map {
+        ",\"deployments\":\"\($0)\""
+    } ?? ""
+    let privateJSON = isPrivate ? "true" : "false"
+
+    return [
         CapabilityPresentationResponse(
             json: #"{"id":42,"login":"snow-user","name":"Snow User","avatar_url":null}"#
         ),
@@ -150,10 +196,10 @@ private func capabilityPresentationResponses() -> [CapabilityPresentationRespons
             json: #"{"id":42,"login":"snow-user","name":"Snow User","avatar_url":null}"#
         ),
         CapabilityPresentationResponse(
-            json: #"{"total_count":1,"installations":[{"id":10,"account":{"id":100,"login":"snow","type":"Organization","avatar_url":null},"repository_selection":"all","permissions":{"actions":"read","checks":"triage"},"suspended_at":null}]}"#
+            json: "{\"total_count\":1,\"installations\":[{\"id\":10,\"account\":{\"id\":100,\"login\":\"snow\",\"type\":\"Organization\",\"avatar_url\":null},\"repository_selection\":\"all\",\"permissions\":{\"actions\":\"read\",\"checks\":\"triage\"\(deploymentPermissionJSON)},\"suspended_at\":null}]}"
         ),
         CapabilityPresentationResponse(
-            json: #"{"total_count":1,"repositories":[{"id":1,"name":"app","full_name":"snow/app","private":true,"owner":{"id":100,"login":"snow","type":"Organization","avatar_url":null},"permissions":{"admin":false,"maintain":false,"push":false,"triage":false,"pull":true}}]}"#
+            json: "{\"total_count\":1,\"repositories\":[{\"id\":1,\"name\":\"app\",\"full_name\":\"snow/app\",\"private\":\(privateJSON),\"owner\":{\"id\":100,\"login\":\"snow\",\"type\":\"Organization\",\"avatar_url\":null},\"permissions\":{\"admin\":false,\"maintain\":false,\"push\":false,\"triage\":false,\"pull\":true}}]}"
         ),
     ]
 }

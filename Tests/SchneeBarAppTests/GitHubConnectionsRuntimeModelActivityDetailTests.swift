@@ -137,15 +137,61 @@ private actor DetailTimelineLoader: GitHubDeliveryTimelineLoading {
     func calls() -> Int { callCount }
 }
 
+private enum DetailDeploymentOutcome: Sendable {
+    case evidence(GitHubDeploymentTimelineEvidence)
+    case failure
+    case cancellation
+}
+
+private actor DetailDeploymentLoader: GitHubDeploymentTimelineLoading {
+    private let outcome: DetailDeploymentOutcome
+    private var requestedSHAs: [String] = []
+
+    init(_ outcome: DetailDeploymentOutcome) {
+        self.outcome = outcome
+    }
+
+    func deploymentEvidence(
+        connection: GitHubConnection,
+        identity: GitHubAccountIdentity,
+        clientID: String?,
+        repository: GitHubRepositoryAccess,
+        exactSHA: String
+    ) async throws -> GitHubDeploymentTimelineEvidence {
+        requestedSHAs.append(exactSHA)
+        switch outcome {
+        case let .evidence(evidence):
+            return evidence
+        case .failure:
+            throw DetailTimelineError.failed
+        case .cancellation:
+            throw CancellationError()
+        }
+    }
+
+    func calls() -> Int { requestedSHAs.count }
+    func SHAs() -> [String] { requestedSHAs }
+}
+
+private enum DetailDeploymentCapabilityFixture {
+    case available
+    case unavailable
+    case unknown
+}
+
 @Test @MainActor
 func activityDetailCombinesJobsAndCorrelatedTimeline() async throws {
     let fixture = try await detailFixture(jobStatusCode: 200)
-    let loader = DetailTimelineLoader(.evidence(try correlatedDetailEvidence()))
+    let timelineLoader = DetailTimelineLoader(.evidence(try correlatedDetailEvidence()))
+    let deploymentLoader = DetailDeploymentLoader(
+        .evidence(GitHubDeploymentTimelineEvidence(exactSHA: "landed-sha", deployments: []))
+    )
 
     let detail = try await fixture.model.loadActivityDetail(
         for: detailActivityItem(),
         jobService: fixture.jobService,
-        timelineLoader: loader,
+        timelineLoader: timelineLoader,
+        deploymentTimelineLoader: deploymentLoader,
         timelineBuilder: GitHubDeliveryTimelineBuilder()
     )
 
@@ -153,7 +199,8 @@ func activityDetailCombinesJobsAndCorrelatedTimeline() async throws {
     #expect(detail.deliveryTimeline?.status == .correlated)
     #expect(detail.deliveryTimeline?.confidence == .exact)
     #expect(detail.deliveryTimeline?.events.map(\.kind) == [.pullRequest, .merge, .execution])
-    #expect(await loader.calls() == 1)
+    #expect(await timelineLoader.calls() == 1)
+    #expect(await deploymentLoader.SHAs() == ["landed-sha"])
 }
 
 @Test @MainActor
@@ -165,7 +212,7 @@ func activityDetailPreservesJobsWhenTimelineEvidenceIsUnavailable() async throws
         headSHA: "final-head",
         pullRequestNumbers: []
     )
-    let loader = DetailTimelineLoader(
+    let timelineLoader = DetailTimelineLoader(
         .evidence(
             GitHubDeliveryTimelineEvidence(
                 selectedRun: selectedRun,
@@ -175,11 +222,15 @@ func activityDetailPreservesJobsWhenTimelineEvidenceIsUnavailable() async throws
             )
         )
     )
+    let deploymentLoader = DetailDeploymentLoader(
+        .evidence(GitHubDeploymentTimelineEvidence(exactSHA: "unused", deployments: []))
+    )
 
     let detail = try await fixture.model.loadActivityDetail(
         for: detailActivityItem(),
         jobService: fixture.jobService,
-        timelineLoader: loader,
+        timelineLoader: timelineLoader,
+        deploymentTimelineLoader: deploymentLoader,
         timelineBuilder: GitHubDeliveryTimelineBuilder()
     )
 
@@ -187,17 +238,22 @@ func activityDetailPreservesJobsWhenTimelineEvidenceIsUnavailable() async throws
     #expect(detail.deliveryTimeline?.status == .evidenceUnavailable)
     #expect(detail.deliveryTimeline?.confidence == .unknown)
     #expect(detail.deliveryTimeline?.events.isEmpty == true)
+    #expect(await deploymentLoader.calls() == 0)
 }
 
 @Test @MainActor
 func activityDetailConvertsTimelineFailureWithoutHidingJobs() async throws {
     let fixture = try await detailFixture(jobStatusCode: 200)
-    let loader = DetailTimelineLoader(.failure)
+    let timelineLoader = DetailTimelineLoader(.failure)
+    let deploymentLoader = DetailDeploymentLoader(
+        .evidence(GitHubDeploymentTimelineEvidence(exactSHA: "unused", deployments: []))
+    )
 
     let detail = try await fixture.model.loadActivityDetail(
         for: detailActivityItem(),
         jobService: fixture.jobService,
-        timelineLoader: loader,
+        timelineLoader: timelineLoader,
+        deploymentTimelineLoader: deploymentLoader,
         timelineBuilder: GitHubDeliveryTimelineBuilder()
     )
 
@@ -205,24 +261,137 @@ func activityDetailConvertsTimelineFailureWithoutHidingJobs() async throws {
     #expect(detail.deliveryTimeline?.status == .temporarilyUnavailable)
     #expect(detail.deliveryTimeline?.confidence == .unknown)
     #expect(detail.deliveryTimeline?.events.isEmpty == true)
-    #expect(await loader.calls() == 1)
+    #expect(await timelineLoader.calls() == 1)
+    #expect(await deploymentLoader.calls() == 0)
 }
 
 @Test @MainActor
 func activityDetailJobFailureStillFailsBeforeTimelineLoading() async throws {
     let fixture = try await detailFixture(jobStatusCode: 500)
-    let loader = DetailTimelineLoader(.evidence(try correlatedDetailEvidence()))
+    let timelineLoader = DetailTimelineLoader(.evidence(try correlatedDetailEvidence()))
+    let deploymentLoader = DetailDeploymentLoader(
+        .evidence(GitHubDeploymentTimelineEvidence(exactSHA: "unused", deployments: []))
+    )
 
     await #expect(throws: (any Error).self) {
         try await fixture.model.loadActivityDetail(
             for: detailActivityItem(),
             jobService: fixture.jobService,
-            timelineLoader: loader,
+            timelineLoader: timelineLoader,
+            deploymentTimelineLoader: deploymentLoader,
             timelineBuilder: GitHubDeliveryTimelineBuilder()
         )
     }
 
-    #expect(await loader.calls() == 0)
+    #expect(await timelineLoader.calls() == 0)
+    #expect(await deploymentLoader.calls() == 0)
+}
+
+@Test @MainActor
+func activityDetailAppendsDeploymentEvidenceUsingCorrelatedBaseSHA() async throws {
+    let fixture = try await detailFixture(jobStatusCode: 200)
+    let timelineLoader = DetailTimelineLoader(.evidence(try correlatedDetailEvidence()))
+    let deploymentLoader = DetailDeploymentLoader(.evidence(detailDeploymentEvidence()))
+
+    let detail = try await fixture.model.loadActivityDetail(
+        for: detailActivityItem(),
+        jobService: fixture.jobService,
+        timelineLoader: timelineLoader,
+        deploymentTimelineLoader: deploymentLoader,
+        timelineBuilder: GitHubDeliveryTimelineBuilder()
+    )
+
+    #expect(detail.rows.map(\.id) == ["7001"])
+    #expect(detail.deliveryTimeline?.events.map(\.kind) == [
+        .pullRequest, .merge, .execution, .deployment,
+    ])
+    #expect(detail.deliveryTimeline?.events.last?.title == "Deployment · production")
+    #expect(await deploymentLoader.SHAs() == ["landed-sha"])
+}
+
+@Test @MainActor
+func activityDetailPreservesCorrelatedTimelineWhenDeploymentLoadingFails() async throws {
+    let fixture = try await detailFixture(jobStatusCode: 200)
+    let timelineLoader = DetailTimelineLoader(.evidence(try correlatedDetailEvidence()))
+    let deploymentLoader = DetailDeploymentLoader(.failure)
+
+    let detail = try await fixture.model.loadActivityDetail(
+        for: detailActivityItem(),
+        jobService: fixture.jobService,
+        timelineLoader: timelineLoader,
+        deploymentTimelineLoader: deploymentLoader,
+        timelineBuilder: GitHubDeliveryTimelineBuilder()
+    )
+
+    #expect(detail.rows.map(\.id) == ["7001"])
+    #expect(detail.deliveryTimeline?.status == .correlated)
+    #expect(detail.deliveryTimeline?.events.map(\.kind) == [
+        .pullRequest, .merge, .execution,
+    ])
+    #expect(await deploymentLoader.calls() == 1)
+}
+
+@Test @MainActor
+func activityDetailSkipsDeploymentWhenCapabilityIsUnavailable() async throws {
+    let fixture = try await detailFixture(
+        jobStatusCode: 200,
+        deploymentCapability: .unavailable
+    )
+    let timelineLoader = DetailTimelineLoader(.evidence(try correlatedDetailEvidence()))
+    let deploymentLoader = DetailDeploymentLoader(.evidence(detailDeploymentEvidence()))
+
+    let detail = try await fixture.model.loadActivityDetail(
+        for: detailActivityItem(),
+        jobService: fixture.jobService,
+        timelineLoader: timelineLoader,
+        deploymentTimelineLoader: deploymentLoader,
+        timelineBuilder: GitHubDeliveryTimelineBuilder()
+    )
+
+    #expect(detail.deliveryTimeline?.events.map(\.kind) == [
+        .pullRequest, .merge, .execution,
+    ])
+    #expect(await deploymentLoader.calls() == 0)
+}
+
+@Test @MainActor
+func activityDetailAllowsDeploymentRequestWhenCapabilityIsUnknown() async throws {
+    let fixture = try await detailFixture(
+        jobStatusCode: 200,
+        deploymentCapability: .unknown
+    )
+    let timelineLoader = DetailTimelineLoader(.evidence(try correlatedDetailEvidence()))
+    let deploymentLoader = DetailDeploymentLoader(.evidence(detailDeploymentEvidence()))
+
+    let detail = try await fixture.model.loadActivityDetail(
+        for: detailActivityItem(),
+        jobService: fixture.jobService,
+        timelineLoader: timelineLoader,
+        deploymentTimelineLoader: deploymentLoader,
+        timelineBuilder: GitHubDeliveryTimelineBuilder()
+    )
+
+    #expect(detail.deliveryTimeline?.events.last?.kind == .deployment)
+    #expect(await deploymentLoader.SHAs() == ["landed-sha"])
+}
+
+@Test @MainActor
+func activityDetailPropagatesDeploymentCancellation() async throws {
+    let fixture = try await detailFixture(jobStatusCode: 200)
+    let timelineLoader = DetailTimelineLoader(.evidence(try correlatedDetailEvidence()))
+    let deploymentLoader = DetailDeploymentLoader(.cancellation)
+
+    await #expect(throws: CancellationError.self) {
+        try await fixture.model.loadActivityDetail(
+            for: detailActivityItem(),
+            jobService: fixture.jobService,
+            timelineLoader: timelineLoader,
+            deploymentTimelineLoader: deploymentLoader,
+            timelineBuilder: GitHubDeliveryTimelineBuilder()
+        )
+    }
+
+    #expect(await deploymentLoader.calls() == 1)
 }
 
 @MainActor
@@ -232,11 +401,16 @@ private struct DetailFixture {
 }
 
 @MainActor
-private func detailFixture(jobStatusCode: Int) async throws -> DetailFixture {
+private func detailFixture(
+    jobStatusCode: Int,
+    deploymentCapability: DetailDeploymentCapabilityFixture = .available
+) async throws -> DetailFixture {
     let profile = try detailProfile()
     let profileStore = DetailProfileStore([profile])
     let credentialStore = DetailCredentialStore(profile: profile)
-    let accessTransport = DetailQueueTransport(detailSessionResponses())
+    let accessTransport = DetailQueueTransport(
+        detailSessionResponses(deploymentCapability: deploymentCapability)
+    )
     let coordinator = GitHubConnectionSessionCoordinator(
         credentialStore: credentialStore,
         accessClient: GitHubAccessClient(transport: accessTransport)
@@ -282,10 +456,31 @@ private func detailProfile() throws -> GitHubConnectionProfile {
     )
 }
 
-private func detailSessionResponses() -> [DetailHTTPResponse] {
+private func detailSessionResponses(
+    deploymentCapability: DetailDeploymentCapabilityFixture
+) -> [DetailHTTPResponse] {
     let user = #"{"id":42,"login":"snow-user","name":"Snow User","avatar_url":null}"#
-    let installation = #"{"total_count":1,"installations":[{"id":10,"account":{"id":100,"login":"snow","type":"Organization","avatar_url":null},"repository_selection":"all","permissions":{"actions":"read","pull_requests":"read"},"suspended_at":null}]}"#
-    let repositories = #"{"total_count":1,"repositories":[{"id":1,"name":"app","full_name":"snow/app","private":true,"owner":{"id":100,"login":"snow","type":"Organization","avatar_url":null},"permissions":{"admin":false,"maintain":false,"push":false,"triage":false,"pull":true}}]}"#
+
+    let permissions: String
+    let repositoryIsPrivate: Bool
+    switch deploymentCapability {
+    case .available:
+        permissions = #"{"actions":"read","pull_requests":"read","deployments":"read"}"#
+        repositoryIsPrivate = true
+    case .unavailable:
+        permissions = #"{"actions":"read","pull_requests":"read"}"#
+        repositoryIsPrivate = true
+    case .unknown:
+        permissions = #"{"actions":"read","pull_requests":"read"}"#
+        repositoryIsPrivate = false
+    }
+
+    let installation = """
+    {"total_count":1,"installations":[{"id":10,"account":{"id":100,"login":"snow","type":"Organization","avatar_url":null},"repository_selection":"all","permissions":\(permissions),"suspended_at":null}]}
+    """
+    let repositories = """
+    {"total_count":1,"repositories":[{"id":1,"name":"app","full_name":"snow/app","private":\(repositoryIsPrivate),"owner":{"id":100,"login":"snow","type":"Organization","avatar_url":null},"permissions":{"admin":false,"maintain":false,"push":false,"triage":false,"pull":true}}]}
+    """
     return [
         DetailHTTPResponse(user),
         DetailHTTPResponse(user),
@@ -333,6 +528,35 @@ private func correlatedDetailEvidence() throws -> GitHubDeliveryTimelineEvidence
             detailRun(id: 801, branch: "main", headSHA: "landed-sha"),
         ],
         associatedPullRequestNumbersByRunID: [801: [47]]
+    )
+}
+
+private func detailDeploymentEvidence() -> GitHubDeploymentTimelineEvidence {
+    GitHubDeploymentTimelineEvidence(
+        exactSHA: "landed-sha",
+        deployments: [
+            GitHubDeploymentEvidence(
+                deployment: GitHubDeployment(
+                    id: 901,
+                    sha: "landed-sha",
+                    environment: "production",
+                    isProductionEnvironment: true,
+                    isTransientEnvironment: false,
+                    createdAt: Date(timeIntervalSince1970: 130),
+                    updatedAt: Date(timeIntervalSince1970: 140)
+                ),
+                latestStatus: GitHubDeploymentStatus(
+                    id: 1_001,
+                    state: .success,
+                    environment: "production",
+                    description: "Deployed",
+                    environmentURL: URL(string: "https://deploy.example.test/production"),
+                    logURL: URL(string: "https://deploy.example.test/logs/1001"),
+                    createdAt: Date(timeIntervalSince1970: 141),
+                    updatedAt: Date(timeIntervalSince1970: 142)
+                )
+            ),
+        ]
     )
 }
 

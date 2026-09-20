@@ -61,7 +61,7 @@ Implemented foundation:
 - fresh capability recomputation from access inventory on session establish/restore, with App-local normalized assessment caching
 - Actions polling preflight that blocks only definitive capability unavailability while keeping unknown/missing evidence requestable
 - separate attempted/blocked Activity accounting so capability blocks do not consume the network polling budget
-- Actions / Reviews / Checks availability surfaced independently in repository management
+- Actions / Reviews / Checks / Deployments availability surfaced independently in repository management
 - same-endpoint/same-account reconnect reconciliation that preserves connection identity, repository selection, monitoring state, and original creation time
 - same-endpoint/different-account coexistence with connection-scoped credential isolation
 - deterministic connection ordering for stable multi-account UI and polling behavior
@@ -73,7 +73,6 @@ Implemented foundation:
 Remaining:
 
 - broader enterprise connection validation before Phase 5
-- extend capability presentation to deployments as that product surface lands
 
 ## Phase 3 — Developer Activity 🚧
 
@@ -126,10 +125,17 @@ Implemented:
 - confidence-aware correlated, evidence-unavailable, and temporarily-unavailable states
 - best-effort timeline composition that preserves successfully loaded Workflow Jobs
 - deterministic Light/Dark Delivery Timeline visual fixtures, including matrix-job detail
+- exact-SHA GitHub Deployment loading after proven base-execution correlation
+- bounded Deployment enrichment with one deployment-list request and at most three latest-status requests
+- full explicit-detail Delivery request ceiling verified at 11 HTTP requests
+- provider-neutral Deployment timeline events with success/running/waiting/failure/neutral state mapping
+- Deployment capability gating that skips definitive unavailability while keeping unknown evidence explicitly requestable
+- best-effort Deployment enrichment that preserves Jobs and the existing PR → merge → execution timeline on absence or technical failure
+- deterministic Light/Dark Deployment Timeline fixtures for production success, staging running, no evidence, unavailable capability, and the three-deployment bound
 
 Next:
 
-- deployments / environments
+- repository Environment inventory and protection-rule presentation
 - explicit repository default-branch discovery
 - standalone delivery history/navigation
 - richer confidence/evidence explanations
@@ -162,10 +168,11 @@ Still required:
 
 ## Current implementation priority
 
-1. Add deployments/environments and recovery states to Phase 4.
+1. Add repository Environment inventory/protection metadata without widening background polling.
 2. Add explicit default-branch discovery and standalone delivery history.
-3. Broaden enterprise validation toward Phase 5 requirements.
-4. Only then broaden system widgets or external provider/plugin scope.
+3. Add recovery notifications and persisted Delivery history.
+4. Broaden enterprise validation toward Phase 5 requirements.
+5. Only then broaden system widgets or external provider/plugin scope.
 
 ## Engineering constraints
 

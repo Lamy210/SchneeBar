@@ -11,6 +11,7 @@ public enum DeliveryTimelineEventKind: String, Codable, CaseIterable, Sendable {
     case pullRequest
     case merge
     case execution
+    case deployment
 }
 
 public enum DeliveryTimelineStatus: String, Codable, CaseIterable, Sendable {

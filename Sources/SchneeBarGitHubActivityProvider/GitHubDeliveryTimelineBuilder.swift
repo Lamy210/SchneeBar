@@ -2,6 +2,19 @@ import Foundation
 import SchneeBarCore
 import SchneeBarGitHub
 
+public struct GitHubDeliveryTimelineBuildResult: Equatable, Sendable {
+    public let timeline: DeliveryTimelineSnapshot
+    public let correlatedBaseRun: GitHubWorkflowRun?
+
+    public init(
+        timeline: DeliveryTimelineSnapshot,
+        correlatedBaseRun: GitHubWorkflowRun?
+    ) {
+        self.timeline = timeline
+        self.correlatedBaseRun = correlatedBaseRun
+    }
+}
+
 public struct GitHubDeliveryTimelineBuilder: Sendable {
     private let correlator: GitHubWorkflowExecutionCorrelator
 
@@ -15,18 +28,28 @@ public struct GitHubDeliveryTimelineBuilder: Sendable {
         repositoryID: Int64,
         evidence: GitHubDeliveryTimelineEvidence
     ) -> DeliveryTimelineSnapshot {
+        buildResult(
+            repositoryID: repositoryID,
+            evidence: evidence
+        ).timeline
+    }
+
+    public func buildResult(
+        repositoryID: Int64,
+        evidence: GitHubDeliveryTimelineEvidence
+    ) -> GitHubDeliveryTimelineBuildResult {
         guard repositoryID > 0,
               let pullRequest = evidence.pullRequest,
               pullRequest.isMerged,
               let mergedAt = pullRequest.mergedAt,
               selectedPullRequestNumber(in: evidence.selectedRun) == pullRequest.number
         else {
-            return unavailable()
+            return unavailableResult()
         }
 
         let baseRef = pullRequest.baseRef.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !baseRef.isEmpty else {
-            return unavailable()
+            return unavailableResult()
         }
 
         for candidate in orderedCandidates(
@@ -62,7 +85,7 @@ public struct GitHubDeliveryTimelineBuilder: Sendable {
                 continue
             }
 
-            return DeliveryTimelineSnapshot(
+            let timeline = DeliveryTimelineSnapshot(
                 status: .correlated,
                 confidence: timelineConfidence(correlation.confidence),
                 events: [
@@ -95,9 +118,70 @@ public struct GitHubDeliveryTimelineBuilder: Sendable {
                     ),
                 ]
             )
+
+            return GitHubDeliveryTimelineBuildResult(
+                timeline: timeline,
+                correlatedBaseRun: candidate
+            )
         }
 
-        return unavailable()
+        return unavailableResult()
+    }
+
+    public func appendDeployments(
+        to timeline: DeliveryTimelineSnapshot,
+        evidence: GitHubDeploymentTimelineEvidence
+    ) -> DeliveryTimelineSnapshot {
+        guard timeline.status == .correlated else {
+            return timeline
+        }
+
+        let exactSHA = normalizedSHA(evidence.exactSHA)
+        guard !exactSHA.isEmpty else {
+            return timeline
+        }
+
+        let deploymentEvents = evidence.deployments.compactMap { item -> DeliveryTimelineEvent? in
+            let deployment = item.deployment
+            guard normalizedSHA(deployment.sha) == exactSHA else {
+                return nil
+            }
+
+            let status = item.latestStatus
+            let environment = normalizedEnvironment(
+                status?.environment,
+                fallback: deployment.environment
+            )
+            let presentation = deploymentStatusPresentation(status?.state)
+            let detail = deploymentDetail(
+                statusLabel: presentation.label,
+                deployment: deployment
+            )
+
+            return DeliveryTimelineEvent(
+                id: "github-delivery-deployment:\(deployment.id)",
+                kind: .deployment,
+                title: "Deployment · \(environment)",
+                detail: detail,
+                state: presentation.state,
+                destinationURL: safeDestinationURL(status?.environmentURL)
+                    ?? safeDestinationURL(status?.logURL),
+                occurredAt: status?.updatedAt
+                    ?? status?.createdAt
+                    ?? deployment.updatedAt
+                    ?? deployment.createdAt
+            )
+        }
+
+        guard !deploymentEvents.isEmpty else {
+            return timeline
+        }
+
+        return DeliveryTimelineSnapshot(
+            status: timeline.status,
+            confidence: timeline.confidence,
+            events: timeline.events + deploymentEvents
+        )
     }
 
     private func selectedPullRequestNumber(in run: GitHubWorkflowRun) -> Int? {
@@ -179,6 +263,88 @@ public struct GitHubDeliveryTimelineBuilder: Sendable {
         case let .unknown(rawValue):
             return rawValue.isEmpty ? "Unknown" : rawValue
         }
+    }
+
+    private func deploymentStatusPresentation(
+        _ state: GitHubDeploymentStatusState?
+    ) -> (label: String, state: ActivityDetailState) {
+        switch state {
+        case .success:
+            return ("Succeeded", .success)
+        case .failure:
+            return ("Failed", .failed)
+        case .error:
+            return ("Error", .failed)
+        case .inProgress:
+            return ("Running", .running)
+        case .pending:
+            return ("Pending", .waiting)
+        case .queued:
+            return ("Queued", .waiting)
+        case .inactive:
+            return ("Inactive", .neutral)
+        case let .unknown(rawValue):
+            let trimmed = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+            return (trimmed.isEmpty ? "Unknown" : trimmed, .neutral)
+        case .none:
+            return ("Status unavailable", .neutral)
+        }
+    }
+
+    private func deploymentDetail(
+        statusLabel: String,
+        deployment: GitHubDeployment
+    ) -> String {
+        var parts = [statusLabel]
+        if deployment.isProductionEnvironment {
+            parts.append("Production")
+        }
+        if deployment.isTransientEnvironment {
+            parts.append("Transient")
+        }
+        return parts.joined(separator: " · ")
+    }
+
+    private func normalizedEnvironment(
+        _ statusEnvironment: String?,
+        fallback deploymentEnvironment: String
+    ) -> String {
+        if let statusEnvironment = nonEmpty(statusEnvironment) {
+            return statusEnvironment
+        }
+        return nonEmpty(deploymentEnvironment) ?? "Unknown environment"
+    }
+
+    private func normalizedSHA(_ value: String) -> String {
+        value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    }
+
+    private func nonEmpty(_ value: String?) -> String? {
+        guard let value else {
+            return nil
+        }
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    private func safeDestinationURL(_ url: URL?) -> URL? {
+        guard let url,
+              url.scheme?.lowercased() == "https",
+              let host = url.host,
+              !host.isEmpty,
+              url.user == nil,
+              url.password == nil
+        else {
+            return nil
+        }
+        return url
+    }
+
+    private func unavailableResult() -> GitHubDeliveryTimelineBuildResult {
+        GitHubDeliveryTimelineBuildResult(
+            timeline: unavailable(),
+            correlatedBaseRun: nil
+        )
     }
 
     private func unavailable() -> DeliveryTimelineSnapshot {

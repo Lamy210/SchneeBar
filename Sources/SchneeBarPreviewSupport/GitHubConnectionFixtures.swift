@@ -99,16 +99,16 @@ public enum GitHubConnectionManagementFixture {
         host: "github.internal.example:8443",
         accountLogin: "lamy",
         repositories: [
-            repository(101, "SchneeOrg/api-gateway", isPrivate: true, actions: .unavailable, reviews: .available, checks: .unverified),
-            repository(102, "SchneeOrg/authentication-platform", isPrivate: true, actions: .available, reviews: .available, checks: .available),
-            repository(103, "SchneeOrg/design-system", isPrivate: false, actions: .unavailable, reviews: .unverified, checks: .unavailable),
-            repository(104, "SchneeOrg/mobile-app", isPrivate: true, actions: .available, reviews: .available, checks: .available),
-            repository(105, "SchneeOrg/notification-hub", isPrivate: true, actions: .unverified, reviews: .unavailable, checks: .available),
-            repository(106, "SchneeOrg/realtime", isPrivate: true, actions: .unverified, reviews: .available, checks: .unverified),
-            repository(107, "SchneeOrg/schneemail", isPrivate: true, actions: .available, reviews: .available, checks: .available),
-            repository(108, "SchneeOrg/software-distribution", isPrivate: false, actions: .available, reviews: .unverified, checks: .available),
-            repository(109, "SchneeOrg/web-console", isPrivate: true, actions: .available, reviews: .available, checks: .unavailable),
-            repository(110, "SchneeOrg/worker-runtime", isPrivate: true, actions: .available, reviews: .available, checks: .available),
+            repository(101, "SchneeOrg/api-gateway", isPrivate: true, actions: .unavailable, reviews: .available, checks: .unverified, deployments: .unavailable),
+            repository(102, "SchneeOrg/authentication-platform", isPrivate: true, actions: .available, reviews: .available, checks: .available, deployments: .available),
+            repository(103, "SchneeOrg/design-system", isPrivate: false, actions: .unavailable, reviews: .unverified, checks: .unavailable, deployments: .unverified),
+            repository(104, "SchneeOrg/mobile-app", isPrivate: true, actions: .available, reviews: .available, checks: .available, deployments: .available),
+            repository(105, "SchneeOrg/notification-hub", isPrivate: true, actions: .unverified, reviews: .unavailable, checks: .available, deployments: .unverified),
+            repository(106, "SchneeOrg/realtime", isPrivate: true, actions: .unverified, reviews: .available, checks: .unverified, deployments: .unavailable),
+            repository(107, "SchneeOrg/schneemail", isPrivate: true, actions: .available, reviews: .available, checks: .available, deployments: .available),
+            repository(108, "SchneeOrg/software-distribution", isPrivate: false, actions: .available, reviews: .unverified, checks: .available, deployments: .unverified),
+            repository(109, "SchneeOrg/web-console", isPrivate: true, actions: .available, reviews: .available, checks: .unavailable, deployments: .unavailable),
+            repository(110, "SchneeOrg/worker-runtime", isPrivate: true, actions: .available, reviews: .available, checks: .available, deployments: .available),
         ]
     )
 
@@ -124,13 +124,32 @@ public enum GitHubConnectionManagementFixture {
                 isPrivate: true,
                 actions: .available,
                 reviews: .unverified,
-                checks: .unavailable
+                checks: .unavailable,
+                deployments: .available
+            ),
+            repository(
+                202,
+                "snow-labs/flurry",
+                isPrivate: true,
+                actions: .available,
+                reviews: .available,
+                checks: .available,
+                deployments: .unverified
+            ),
+            repository(
+                203,
+                "snow-labs/glacier",
+                isPrivate: true,
+                actions: .unverified,
+                reviews: .available,
+                checks: .available,
+                deployments: .unavailable
             ),
         ]
     )
 
     public static let selectedRepositoryIDs: Set<Int64> = [101, 102, 105, 107, 108]
-    public static let mixedCapabilitySelectedRepositoryIDs: Set<Int64> = [201]
+    public static let mixedCapabilitySelectedRepositoryIDs: Set<Int64> = [201, 202, 203]
 
     private static func repository(
         _ id: Int64,
@@ -138,7 +157,8 @@ public enum GitHubConnectionManagementFixture {
         isPrivate: Bool,
         actions: GitHubRepositoryActivityAccessPresentation,
         reviews: GitHubRepositoryActivityAccessPresentation,
-        checks: GitHubRepositoryActivityAccessPresentation
+        checks: GitHubRepositoryActivityAccessPresentation,
+        deployments: GitHubRepositoryActivityAccessPresentation
     ) -> GitHubRepositoryOptionModel {
         GitHubRepositoryOptionModel(
             id: id,
@@ -147,7 +167,8 @@ public enum GitHubConnectionManagementFixture {
             activityAccess: GitHubRepositoryActivityAccessModel(
                 actions: actions,
                 reviewRequests: reviews,
-                checks: checks
+                checks: checks,
+                deployments: deployments
             )
         )
     }

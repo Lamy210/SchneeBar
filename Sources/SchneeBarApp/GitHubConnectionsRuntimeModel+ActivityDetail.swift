@@ -10,6 +10,7 @@ extension GitHubConnectionsRuntimeModel {
         for item: ActivityItem,
         jobService: GitHubWorkflowJobService,
         timelineLoader: any GitHubDeliveryTimelineLoading,
+        deploymentTimelineLoader: any GitHubDeploymentTimelineLoading,
         timelineBuilder: GitHubDeliveryTimelineBuilder = GitHubDeliveryTimelineBuilder(),
         detailMapper: GitHubActivityJobDetailMapper = GitHubActivityJobDetailMapper()
     ) async throws -> ActivityDetailSnapshot {
@@ -55,7 +56,7 @@ extension GitHubConnectionsRuntimeModel {
             )
             let jobDetail = detailMapper.map(item: item, jobs: jobs)
 
-            let deliveryTimeline: DeliveryTimelineSnapshot
+            var deliveryTimeline: DeliveryTimelineSnapshot
             do {
                 let evidence = try await timelineLoader.timelineEvidence(
                     connection: profile.connection,
@@ -64,10 +65,37 @@ extension GitHubConnectionsRuntimeModel {
                     repository: repository,
                     runID: runID
                 )
-                deliveryTimeline = timelineBuilder.build(
+                let buildResult = timelineBuilder.buildResult(
                     repositoryID: repository.id,
                     evidence: evidence
                 )
+                deliveryTimeline = buildResult.timeline
+
+                if let baseRun = buildResult.correlatedBaseRun,
+                   deploymentAccessPresentation(
+                       profileID: profile.id,
+                       repositoryID: repository.id
+                   ) != .unavailable
+                {
+                    do {
+                        let deploymentEvidence = try await deploymentTimelineLoader.deploymentEvidence(
+                            connection: profile.connection,
+                            identity: profile.account,
+                            clientID: profile.clientID,
+                            repository: repository,
+                            exactSHA: baseRun.headSHA
+                        )
+                        deliveryTimeline = timelineBuilder.appendDeployments(
+                            to: deliveryTimeline,
+                            evidence: deploymentEvidence
+                        )
+                    } catch let cancellation as CancellationError {
+                        throw cancellation
+                    } catch {
+                        // Deployment enrichment is best effort. Preserve the
+                        // already-correlated delivery timeline.
+                    }
+                }
             } catch let cancellation as CancellationError {
                 throw cancellation
             } catch {
