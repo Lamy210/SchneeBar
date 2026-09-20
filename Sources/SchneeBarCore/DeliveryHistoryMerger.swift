@@ -37,9 +37,10 @@ public struct DeliveryHistoryMerger: Sendable {
         live: DeliveryHistorySnapshot,
         repository: String
     ) -> DeliveryHistorySnapshot {
-        var entriesByID = Dictionary(
-            uniqueKeysWithValues: (cached?.entries ?? []).map { ($0.id, $0) }
-        )
+        var entriesByID: [String: DeliveryHistoryEntry] = [:]
+        for entry in cached?.entries ?? [] {
+            entriesByID[entry.id] = entry
+        }
         for entry in live.entries {
             entriesByID[entry.id] = entry
         }
