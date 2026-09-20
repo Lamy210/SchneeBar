@@ -282,6 +282,30 @@ func repeatedPaginationPageDoesNotLoopForever() async throws {
     #expect(await transport.recordedRequests().count == 2)
 }
 
+
+@Test
+func preservesAndNormalizesRepositoryDefaultBranchMetadata() async throws {
+    let transport = AccessQueueTransport([
+        AccessStubResponse(
+            #"{\"total_count\":4,\"repositories\":[{\"id\":41,\"name\":\"main-repo\",\"full_name\":\"octocat/main-repo\",\"private\":false,\"owner\":{\"id\":10,\"login\":\"octocat\",\"type\":\"User\"},\"permissions\":{\"pull\":true},\"default_branch\":\" main \"},{\"id\":42,\"name\":\"null-repo\",\"full_name\":\"octocat/null-repo\",\"private\":false,\"owner\":{\"id\":10,\"login\":\"octocat\",\"type\":\"User\"},\"permissions\":{\"pull\":true},\"default_branch\":null},{\"id\":43,\"name\":\"missing-repo\",\"full_name\":\"octocat/missing-repo\",\"private\":false,\"owner\":{\"id\":10,\"login\":\"octocat\",\"type\":\"User\"},\"permissions\":{\"pull\":true}},{\"id\":44,\"name\":\"blank-repo\",\"full_name\":\"octocat/blank-repo\",\"private\":false,\"owner\":{\"id\":10,\"login\":\"octocat\",\"type\":\"User\"},\"permissions\":{\"pull\":true},\"default_branch\":\"  \\n  \"}]}"#
+        )
+    ])
+    let client = GitHubAccessClient(transport: transport)
+
+    let repositories = try await client.repositories(
+        installationID: 99,
+        connection: try githubDotComAccessConnection(),
+        credential: GitHubCredential(accessToken: "ghu_access")
+    )
+
+    #expect(repositories.count == 4)
+    #expect(repositories[0].defaultBranch == "main")
+    #expect(repositories[1].defaultBranch == nil)
+    #expect(repositories[2].defaultBranch == nil)
+    #expect(repositories[3].defaultBranch == nil)
+    #expect(await transport.recordedRequests().count == 1)
+}
+
 private func githubDotComAccessConnection() throws -> GitHubConnection {
     GitHubConnection(
         displayName: "GitHub.com",
