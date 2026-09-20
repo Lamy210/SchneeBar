@@ -89,10 +89,10 @@ GitHubRepositoryAccess.defaultBranch
         GitHubDeliveryTimelineBuilder
                   |
                   +--> PR baseRef exactly equals proven default branch
-                  |       -> "Default branch · <workflow>"
+                  |       -> "Default branch · CI"
                   |
                   +--> otherwise
-                          -> "Base branch · <workflow>"
+                          -> "Base branch · CI"
 ```
 
 No extra network request is introduced.
