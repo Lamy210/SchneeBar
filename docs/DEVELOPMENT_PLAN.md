@@ -155,11 +155,15 @@ Implemented:
 - replay-safe ephemeral recovery events that survive transient polling failures but reset on monitoring removal/connection reset
 - privacy-minimized macOS local recovery notifications using provisional authorization and current notification settings
 - generic system notification copy with no repository, account, branch, Pull Request, workflow, or URL disclosure
+- bounded persisted Delivery history in versioned Application Support JSON with atomic writes
+- deterministic live + cached Delivery history merging up to 200 entries per repository scope
+- cached Delivery history fallback for transient GitHub failure or definitive current Actions unavailability
+- source-scoped persisted history cleanup on explicit connection disconnect
+- zero additional GitHub requests: live standalone history remains exactly one completed-runs request
 
 Next:
 
-- persisted delivery history
-- revisit standalone/paginated Environment browsing and custom protection-rule details only if product usage justifies the extra scope
+- revisit standalone/paginated Environment browsing, local history-row drill-down, and custom protection-rule details only if product usage justifies the extra scope
 
 ## Phase 5 — Enterprise
 
@@ -187,11 +191,9 @@ Still required:
 
 ## Current implementation priority
 
-1. Add richer Delivery confidence/evidence explanations.
-2. Add recovery notifications and persisted Delivery history.
-3. Revisit standalone/paginated Environment browsing, local history-row drill-down, and custom protection-rule details only if product usage justifies the extra scope.
-4. Broaden enterprise validation toward Phase 5 requirements.
-5. Only then broaden system widgets or external provider/plugin scope.
+1. Revisit standalone/paginated Environment browsing, local history-row drill-down, and custom protection-rule details only if product usage justifies the extra scope.
+2. Broaden enterprise validation toward Phase 5 requirements.
+3. Only then broaden system widgets or external provider/plugin scope.
 
 ## Engineering constraints
 
