@@ -101,3 +101,47 @@ func deliveryTimelineSupportsDeploymentEventsWithoutReordering() {
 
     #expect(snapshot.events.map(\.kind) == [.execution, .deployment])
 }
+
+
+@Test
+func deliveryTimelineEvidenceDefaultsToEmpty() {
+    let timeline = DeliveryTimelineSnapshot(
+        status: .correlated,
+        confidence: .exact,
+        events: []
+    )
+
+    #expect(timeline.evidence.isEmpty)
+}
+
+@Test
+func deliveryTimelineEvidencePreservesProviderNeutralChecklist() {
+    let confirmed = DeliveryTimelineEvidenceItem(
+        id: "workflow-pr",
+        title: "Workflow pull request",
+        detail: "Selected workflow is attached to PR #47",
+        state: .confirmed
+    )
+    let missing = DeliveryTimelineEvidenceItem(
+        id: "commit-association",
+        title: "Commit association",
+        detail: "No target-branch execution commit was associated with the pull request",
+        state: .missing
+    )
+    let unavailable = DeliveryTimelineEvidenceItem(
+        id: "delivery-evidence-load",
+        title: "Delivery evidence",
+        detail: "GitHub evidence could not be loaded right now",
+        state: .unavailable
+    )
+
+    let timeline = DeliveryTimelineSnapshot(
+        status: .evidenceUnavailable,
+        confidence: .unknown,
+        events: [],
+        evidence: [confirmed, missing, unavailable]
+    )
+
+    #expect(timeline.evidence == [confirmed, missing, unavailable])
+    #expect(Set(timeline.evidence.map(\.state)) == [.confirmed, .missing, .unavailable])
+}
