@@ -1,6 +1,6 @@
 import Foundation
 
-public struct DeliveryHistoryEntry: Identifiable, Equatable, Sendable {
+public struct DeliveryHistoryEntry: Identifiable, Codable, Equatable, Sendable {
     public let id: String
     public let title: String
     public let detail: String?
@@ -25,7 +25,7 @@ public struct DeliveryHistoryEntry: Identifiable, Equatable, Sendable {
     }
 }
 
-public struct DeliveryHistorySnapshot: Equatable, Sendable {
+public struct DeliveryHistorySnapshot: Codable, Equatable, Sendable {
     public let repository: String
     public let entries: [DeliveryHistoryEntry]
 
@@ -36,4 +36,48 @@ public struct DeliveryHistorySnapshot: Equatable, Sendable {
         self.repository = repository
         self.entries = entries
     }
+}
+
+
+public struct DeliveryHistoryStorageScope: Codable, Equatable, Hashable, Sendable {
+    public let sourceID: String
+    public let repositoryID: String
+
+    public init(
+        sourceID: String,
+        repositoryID: String
+    ) {
+        self.sourceID = sourceID
+        self.repositoryID = repositoryID
+    }
+}
+
+public protocol DeliveryHistoryStoring: Sendable {
+    func load(
+        scope: DeliveryHistoryStorageScope
+    ) async throws -> DeliveryHistorySnapshot?
+
+    func save(
+        _ snapshot: DeliveryHistorySnapshot,
+        scope: DeliveryHistoryStorageScope
+    ) async throws
+
+    func delete(sourceID: String) async throws
+}
+
+public struct NoopDeliveryHistoryStore: DeliveryHistoryStoring, Sendable {
+    public init() {}
+
+    public func load(
+        scope: DeliveryHistoryStorageScope
+    ) async throws -> DeliveryHistorySnapshot? {
+        nil
+    }
+
+    public func save(
+        _ snapshot: DeliveryHistorySnapshot,
+        scope: DeliveryHistoryStorageScope
+    ) async throws {}
+
+    public func delete(sourceID: String) async throws {}
 }
