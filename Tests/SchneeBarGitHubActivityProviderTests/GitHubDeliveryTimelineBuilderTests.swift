@@ -895,3 +895,142 @@ func deliveryTimelineBuilderWithoutEnvironmentCatalogPreservesDeploymentBehavior
 
     #expect(snapshot.events.last?.detail == "Succeeded · Production")
 }
+
+
+@Test
+func deliveryTimelineBuilderExplainsExactCorrelationWithoutRawSHA() throws {
+    let evidence = try deliveryEvidence(
+        baseRuns: [deliveryRun(id: 801, branch: "main", headSHA: "landed-sha")],
+        associations: [801: [47]],
+        repositoryDefaultBranch: "main"
+    )
+
+    let snapshot = GitHubDeliveryTimelineBuilder().build(
+        repositoryID: 42,
+        evidence: evidence
+    )
+
+    #expect(snapshot.status == .correlated)
+    #expect(snapshot.evidence.map(\.state).allSatisfy { $0 == .confirmed })
+    #expect(snapshot.evidence.map(\.title) == [
+        "Workflow pull request",
+        "Merged pull request",
+        "Final pull request revision",
+        "Target branch execution",
+        "Commit association",
+    ])
+    #expect(snapshot.evidence[0].detail == "Selected workflow is attached to PR #47")
+    #expect(snapshot.evidence[1].detail == "PR #47 is merged")
+    #expect(snapshot.evidence[2].detail == "Selected workflow represents the merged pull request's final revision")
+    #expect(snapshot.evidence[3].detail == "Workflow execution found on default branch main")
+    #expect(snapshot.evidence[4].detail == "Target-branch execution is associated with PR #47")
+
+    let explanation = snapshot.evidence
+        .flatMap { [$0.title, $0.detail ?? ""] }
+        .joined(separator: " ")
+    #expect(!explanation.contains("final-head"))
+    #expect(!explanation.contains("landed-sha"))
+}
+
+@Test
+func deliveryTimelineBuilderExplainsMissingCommitAssociation() throws {
+    let snapshot = GitHubDeliveryTimelineBuilder().build(
+        repositoryID: 42,
+        evidence: try deliveryEvidence(
+            baseRuns: [deliveryRun(id: 801, branch: "main", headSHA: "landed-sha")],
+            associations: [:]
+        )
+    )
+
+    #expect(snapshot.status == .evidenceUnavailable)
+    #expect(snapshot.evidence.last?.title == "Commit association")
+    #expect(snapshot.evidence.last?.state == .missing)
+    #expect(
+        snapshot.evidence.last?.detail
+            == "No target-branch execution commit was associated with the pull request"
+    )
+}
+
+@Test
+func deliveryTimelineBuilderExplainsAmbiguousWorkflowPullRequest() throws {
+    let evidence = GitHubDeliveryTimelineEvidence(
+        selectedRun: deliveryRun(
+            id: 700,
+            branch: "feature/timeline",
+            headSHA: "final-head",
+            pullRequestNumbers: [47, 48]
+        ),
+        pullRequest: try deliveryPullRequest(),
+        baseRuns: [deliveryRun(id: 801, branch: "main", headSHA: "landed-sha")],
+        associatedPullRequestNumbersByRunID: [801: [47]]
+    )
+
+    let snapshot = GitHubDeliveryTimelineBuilder().build(
+        repositoryID: 42,
+        evidence: evidence
+    )
+
+    #expect(snapshot.status == .evidenceUnavailable)
+    #expect(snapshot.evidence.count == 1)
+    #expect(snapshot.evidence[0].title == "Workflow pull request")
+    #expect(snapshot.evidence[0].state == .missing)
+    #expect(snapshot.evidence[0].detail == "Workflow does not identify exactly one pull request")
+}
+
+@Test
+func deliveryTimelineBuilderExplainsMissingTargetBranchExecution() throws {
+    let snapshot = GitHubDeliveryTimelineBuilder().build(
+        repositoryID: 42,
+        evidence: try deliveryEvidence(
+            baseRuns: [deliveryRun(id: 801, branch: "release", headSHA: "landed-sha")],
+            associations: [801: [47]]
+        )
+    )
+
+    #expect(snapshot.status == .evidenceUnavailable)
+    #expect(snapshot.evidence.last?.title == "Target branch execution")
+    #expect(snapshot.evidence.last?.state == .missing)
+    #expect(
+        snapshot.evidence.last?.detail
+            == "No eligible workflow execution was found on target branch main"
+    )
+}
+
+@Test
+func deliveryTimelineBuilderAddsDeploymentCommitMatchEvidenceOnce() throws {
+    let builder = GitHubDeliveryTimelineBuilder()
+    let original = builder.build(
+        repositoryID: 42,
+        evidence: try deliveryEvidence(
+            baseRuns: [deliveryRun(id: 801, branch: "main", headSHA: "landed-sha")],
+            associations: [801: [47]]
+        )
+    )
+    let deploymentEvidence = GitHubDeploymentTimelineEvidence(
+        exactSHA: "landed-sha",
+        deployments: [
+            deploymentEvidenceFixture(id: 901, state: .success, environment: "production"),
+            deploymentEvidenceFixture(id: 902, state: .success, environment: "staging"),
+        ]
+    )
+
+    let once = builder.appendDeployments(
+        to: original,
+        evidence: deploymentEvidence
+    )
+    let twice = builder.appendDeployments(
+        to: once,
+        evidence: deploymentEvidence
+    )
+
+    let deploymentExplanation = once.evidence.filter {
+        $0.id == "deployment-commit-match"
+    }
+    #expect(deploymentExplanation.count == 1)
+    #expect(deploymentExplanation[0].state == .confirmed)
+    #expect(
+        deploymentExplanation[0].detail
+            == "2 deployments matched the correlated execution commit"
+    )
+    #expect(twice.evidence.filter { $0.id == "deployment-commit-match" }.count == 1)
+}
