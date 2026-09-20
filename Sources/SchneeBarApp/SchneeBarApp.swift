@@ -70,10 +70,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             reviewRequestLoader: reviewRequestService,
             checkRunLoader: checkRunService
         )
+        let deliveryHistoryStore = ApplicationSupportDeliveryHistoryStore()
         githubRuntimeModel = GitHubConnectionsRuntimeModel(
             profileStore: profileStore,
             sessionCoordinator: sessionCoordinator,
-            activityProvider: activityProvider
+            activityProvider: activityProvider,
+            deliveryHistoryStore: deliveryHistoryStore
         )
         super.init()
     }
