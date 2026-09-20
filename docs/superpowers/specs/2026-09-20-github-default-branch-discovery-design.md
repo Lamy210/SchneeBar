@@ -2,8 +2,7 @@
 
 Date: 2026-09-20  
 Status: Proposed — awaiting written-spec review  
-Stacked base: `feat/github-environment-enrichment@e604c8cb65ef70b5ee51a34736d9ba27039fc192`  
-Dependency: PR #53 (`feat: enrich GitHub deployments with environment protection`)
+Base: current `main` after PR #51, PR #52, and PR #53 integration
 
 ## Context
 
@@ -11,7 +10,7 @@ Phase 4 currently has an evidence-backed explicit Workflow-detail path:
 
 `Pull Request workflow → merge → correlated base-branch execution → exact-SHA deployment → optional Environment protection metadata`
 
-PR #53 completes Environment enrichment while keeping the full explicit-detail feature-network ceiling at twelve HTTP requests.
+Phase 4 now includes the merged Deployment and Environment enrichment slices from PR #51, PR #52, and PR #53 while keeping the full explicit-detail feature-network ceiling at twelve HTTP requests.
 
 The first Delivery Timeline slice intentionally labels a correlated execution as **Base branch** rather than **Default branch** because the repository model does not currently prove the repository's default branch. The GitHub repository payload already exposes `default_branch`, but `GitHubAccessClient.RepositoryPayload` discards it.
 
@@ -568,7 +567,7 @@ Render both new scenarios in Light and Dark.
 
 ## Expected Production Files
 
-Likely changes after written-spec and implementation-plan approval:
+Likely changes after written-spec and implementation-plan approval from the clean `main` base:
 
 - modify `Sources/SchneeBarGitHub/GitHubAccessClient.swift`;
 - modify `Sources/SchneeBarGitHub/GitHubDeliveryTimelineService.swift`;
