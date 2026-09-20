@@ -237,6 +237,39 @@ public enum ActivityDetailFixture {
         ]
     )
 
+    public static let exactDeliveryEvidence: [DeliveryTimelineEvidenceItem] = [
+        DeliveryTimelineEvidenceItem(
+            id: "workflow-pull-request",
+            title: "Workflow pull request",
+            detail: "Selected workflow is attached to PR #49",
+            state: .confirmed
+        ),
+        DeliveryTimelineEvidenceItem(
+            id: "merged-pull-request",
+            title: "Merged pull request",
+            detail: "PR #49 is merged",
+            state: .confirmed
+        ),
+        DeliveryTimelineEvidenceItem(
+            id: "final-pull-request-revision",
+            title: "Final pull request revision",
+            detail: "Selected workflow represents the merged pull request's final revision",
+            state: .confirmed
+        ),
+        DeliveryTimelineEvidenceItem(
+            id: "target-branch-execution",
+            title: "Target branch execution",
+            detail: "Workflow execution found on target branch main",
+            state: .confirmed
+        ),
+        DeliveryTimelineEvidenceItem(
+            id: "commit-association",
+            title: "Commit association",
+            detail: "Target-branch execution is associated with PR #49",
+            state: .confirmed
+        ),
+    ]
+
     public static let exactDeliveryTimeline = DeliveryTimelineSnapshot(
         status: .correlated,
         confidence: .exact,
@@ -268,7 +301,8 @@ public enum ActivityDetailFixture {
                 destinationURL: URL(string: "https://github.com/Lamy210/SchneeBar/actions/runs/601"),
                 occurredAt: Date(timeIntervalSince1970: 1_789_710_180)
             ),
-        ]
+        ],
+        evidence: exactDeliveryEvidence
     )
 
     public static let deliveryExact = ActivityDetailSnapshot(
@@ -382,7 +416,15 @@ public enum ActivityDetailFixture {
         deliveryTimeline: DeliveryTimelineSnapshot(
             status: .evidenceUnavailable,
             confidence: .unknown,
-            events: []
+            events: [],
+            evidence: [
+                DeliveryTimelineEvidenceItem(
+                    id: "commit-association",
+                    title: "Commit association",
+                    detail: "No target-branch execution commit was associated with the pull request",
+                    state: .missing
+                ),
+            ]
         ),
         rows: matrixSuccess.rows
     )
@@ -397,7 +439,15 @@ public enum ActivityDetailFixture {
         deliveryTimeline: DeliveryTimelineSnapshot(
             status: .temporarilyUnavailable,
             confidence: .unknown,
-            events: []
+            events: [],
+            evidence: [
+                DeliveryTimelineEvidenceItem(
+                    id: "delivery-evidence-load",
+                    title: "Delivery evidence",
+                    detail: "GitHub evidence could not be loaded right now",
+                    state: .unavailable
+                ),
+            ]
         ),
         rows: matrixSuccess.rows
     )
@@ -426,6 +476,14 @@ public enum ActivityDetailFixture {
                 state: .success,
                 destinationURL: URL(string: "https://deploy.example.test/production"),
                 occurredAt: Date(timeIntervalSince1970: 1_789_710_240)
+            ),
+        ],
+        evidence: exactDeliveryEvidence + [
+            DeliveryTimelineEvidenceItem(
+                id: "deployment-commit-match",
+                title: "Deployment commit match",
+                detail: "1 deployment matched the correlated execution commit",
+                state: .confirmed
             ),
         ]
     )

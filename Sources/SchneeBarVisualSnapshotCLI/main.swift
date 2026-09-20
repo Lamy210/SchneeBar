@@ -208,6 +208,8 @@ private func activityDetailRoot(
             errorMessage: nil,
             onBack: {},
             onRetry: {},
+            evidenceInitiallyExpanded:
+                scenario.detail.deliveryTimeline?.evidence.isEmpty == false,
             surfaceStyle: .deterministic
         )
         .padding(24)

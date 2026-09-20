@@ -20,6 +20,31 @@ public enum DeliveryTimelineStatus: String, Codable, CaseIterable, Sendable {
     case temporarilyUnavailable
 }
 
+public enum DeliveryTimelineEvidenceState: String, Codable, CaseIterable, Hashable, Sendable {
+    case confirmed
+    case missing
+    case unavailable
+}
+
+public struct DeliveryTimelineEvidenceItem: Identifiable, Equatable, Sendable {
+    public let id: String
+    public let title: String
+    public let detail: String?
+    public let state: DeliveryTimelineEvidenceState
+
+    public init(
+        id: String,
+        title: String,
+        detail: String? = nil,
+        state: DeliveryTimelineEvidenceState
+    ) {
+        self.id = id
+        self.title = title
+        self.detail = detail
+        self.state = state
+    }
+}
+
 public struct DeliveryTimelineEvent: Identifiable, Equatable, Sendable {
     public let id: String
     public let kind: DeliveryTimelineEventKind
@@ -52,14 +77,17 @@ public struct DeliveryTimelineSnapshot: Equatable, Sendable {
     public let status: DeliveryTimelineStatus
     public let confidence: DeliveryTimelineConfidence
     public let events: [DeliveryTimelineEvent]
+    public let evidence: [DeliveryTimelineEvidenceItem]
 
     public init(
         status: DeliveryTimelineStatus,
         confidence: DeliveryTimelineConfidence,
-        events: [DeliveryTimelineEvent]
+        events: [DeliveryTimelineEvent],
+        evidence: [DeliveryTimelineEvidenceItem] = []
     ) {
         self.status = status
         self.confidence = confidence
         self.events = events
+        self.evidence = evidence
     }
 }

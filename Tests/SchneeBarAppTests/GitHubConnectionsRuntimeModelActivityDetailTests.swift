@@ -348,6 +348,14 @@ func activityDetailConvertsTimelineFailureWithoutHidingJobs() async throws {
     #expect(detail.deliveryTimeline?.status == .temporarilyUnavailable)
     #expect(detail.deliveryTimeline?.confidence == .unknown)
     #expect(detail.deliveryTimeline?.events.isEmpty == true)
+    #expect(detail.deliveryTimeline?.evidence == [
+        DeliveryTimelineEvidenceItem(
+            id: "delivery-evidence-load",
+            title: "Delivery evidence",
+            detail: "GitHub evidence could not be loaded right now",
+            state: .unavailable
+        ),
+    ])
     #expect(await timelineLoader.calls() == 1)
     #expect(await deploymentLoader.calls() == 0)
 }
