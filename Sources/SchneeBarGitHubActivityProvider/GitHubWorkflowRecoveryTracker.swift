@@ -1,3 +1,4 @@
+import Foundation
 import SchneeBarCore
 import SchneeBarGitHub
 
