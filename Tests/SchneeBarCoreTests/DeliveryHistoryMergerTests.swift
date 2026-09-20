@@ -102,3 +102,28 @@ private func historyEntry(
         occurredAt: Date(timeIntervalSince1970: occurredAt)
     )
 }
+
+
+@Test
+func deliveryHistoryMergerNormalizesDuplicateCachedIDsWithoutTrapping() {
+    let cached = DeliveryHistorySnapshot(
+        repository: "snow/repo",
+        entries: [
+            historyEntry(id: "same", title: "Older duplicate", occurredAt: 100),
+            historyEntry(id: "same", title: "Later duplicate", occurredAt: 200),
+        ]
+    )
+    let live = DeliveryHistorySnapshot(
+        repository: "snow/repo",
+        entries: []
+    )
+
+    let merged = DeliveryHistoryMerger(maximumEntries: 200).merge(
+        cached: cached,
+        live: live
+    )
+
+    #expect(merged.entries.count == 1)
+    #expect(merged.entries[0].id == "same")
+    #expect(merged.entries[0].title == "Later duplicate")
+}
