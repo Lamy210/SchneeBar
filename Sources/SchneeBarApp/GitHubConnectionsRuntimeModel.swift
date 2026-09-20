@@ -20,6 +20,10 @@ final class GitHubConnectionsRuntimeModel {
     var onActivitySourceChanged: (@MainActor @Sendable () -> Void)?
 
     @ObservationIgnored
+    var onDeliveryRecovery:
+        (@MainActor @Sendable (DeliveryRecoveryEvent) -> Void)?
+
+    @ObservationIgnored
     private let profileStore: any GitHubConnectionProfileStore
 
     @ObservationIgnored
@@ -267,6 +271,10 @@ final class GitHubConnectionsRuntimeModel {
             attemptedTargetCount += result.attemptedTargetCount
             successfulTargetCount += result.successfulTargetCount
             allFailures.append(contentsOf: result.targetFailures)
+
+            for recoveryEvent in result.recoveryEvents {
+                onDeliveryRecovery?(recoveryEvent)
+            }
 
             if result.targetFailures.contains(where: { $0.reason == .authenticationRequired }) {
                 await activityProvider.reset(connectionID: profile.id)
