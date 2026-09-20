@@ -113,6 +113,7 @@ private enum DetailTimelineError: Error {
 private actor DetailTimelineLoader: GitHubDeliveryTimelineLoading {
     private let outcome: DetailTimelineOutcome
     private var callCount = 0
+    private var repositories: [GitHubRepositoryAccess] = []
 
     init(_ outcome: DetailTimelineOutcome) {
         self.outcome = outcome
@@ -126,6 +127,7 @@ private actor DetailTimelineLoader: GitHubDeliveryTimelineLoading {
         runID: Int64
     ) async throws -> GitHubDeliveryTimelineEvidence {
         callCount += 1
+        repositories.append(repository)
         switch outcome {
         case let .evidence(evidence):
             return evidence
@@ -135,6 +137,7 @@ private actor DetailTimelineLoader: GitHubDeliveryTimelineLoading {
     }
 
     func calls() -> Int { callCount }
+    func requestedRepositories() -> [GitHubRepositoryAccess] { repositories }
 }
 
 private enum DetailDeploymentOutcome: Sendable {
@@ -253,6 +256,9 @@ func activityDetailCombinesJobsAndCorrelatedTimeline() async throws {
     #expect(detail.deliveryTimeline?.confidence == .exact)
     #expect(detail.deliveryTimeline?.events.map(\.kind) == [.pullRequest, .merge, .execution])
     #expect(await timelineLoader.calls() == 1)
+    let requestedRepository = try #require(await timelineLoader.requestedRepositories().first)
+    #expect(requestedRepository.fullName == "snow/app")
+    #expect(requestedRepository.defaultBranch == "main")
     #expect(await deploymentLoader.SHAs() == ["landed-sha"])
 }
 
@@ -551,7 +557,7 @@ private func detailSessionResponses(
     {"total_count":1,"installations":[{"id":10,"account":{"id":100,"login":"snow","type":"Organization","avatar_url":null},"repository_selection":"all","permissions":\(permissions),"suspended_at":null}]}
     """
     let repositories = """
-    {"total_count":1,"repositories":[{"id":1,"name":"app","full_name":"snow/app","private":\(repositoryIsPrivate),"owner":{"id":100,"login":"snow","type":"Organization","avatar_url":null},"permissions":{"admin":false,"maintain":false,"push":false,"triage":false,"pull":true}}]}
+    {"total_count":1,"repositories":[{"id":1,"name":"app","full_name":"snow/app","private":\(repositoryIsPrivate),"owner":{"id":100,"login":"snow","type":"Organization","avatar_url":null},"permissions":{"admin":false,"maintain":false,"push":false,"triage":false,"pull":true},"default_branch":"main"}]}
     """
     return [
         DetailHTTPResponse(user),
