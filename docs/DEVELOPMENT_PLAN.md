@@ -147,11 +147,13 @@ Implemented:
 - one-request completed Workflow history loading capped at 20 rows
 - zero-request Back navigation that preserves the loaded Workflow detail
 - deterministic Light/Dark Delivery history fixtures for mixed branches, neutral completions, empty history, and request failure
+- provider-neutral Delivery evidence explanations for exact correlation, missing evidence, and technical unavailability
+- deterministic evidence checklists with raw-SHA minimization and zero additional network requests
+- Deployment exact-commit-match explanation without changing best-effort enrichment semantics
+- expandable Light/Dark Delivery evidence presentation inside Activity detail
 
 Next:
 
-- richer confidence/evidence explanations
-- richer confidence/evidence explanations
 - recovery notifications
 - persisted delivery history
 - revisit standalone/paginated Environment browsing and custom protection-rule details only if product usage justifies the extra scope
