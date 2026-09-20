@@ -12,9 +12,7 @@ actor ApplicationSupportDeliveryHistoryStore: DeliveryHistoryStoring {
     private let fileURL: URL
     private let fileManager: FileManager
     private let now: @Sendable () -> Date
-    private let merger = DeliveryHistoryMerger(
-        maximumEntries: Self.maximumEntriesPerScope
-    )
+    private let merger: DeliveryHistoryMerger
 
     init(
         fileURL: URL? = nil,
@@ -24,6 +22,9 @@ actor ApplicationSupportDeliveryHistoryStore: DeliveryHistoryStoring {
         self.fileManager = fileManager
         self.fileURL = fileURL ?? Self.defaultFileURL(fileManager: fileManager)
         self.now = now
+        merger = DeliveryHistoryMerger(
+            maximumEntries: ApplicationSupportDeliveryHistoryStore.maximumEntriesPerScope
+        )
     }
 
     func load(
