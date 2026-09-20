@@ -98,3 +98,33 @@ func deliveryTimelineEventUsesExistingActivityDetailStateIconLanguage() {
     #expect(deliveryTimelineEventIconName(failed) == "xmark.octagon.fill")
     #expect(deliveryTimelineEventIconName(waiting) == "clock.fill")
 }
+
+
+@Test
+func deliveryHistoryActionRequiresLoadedDetailAndHandler() {
+    let detail = ActivityDetailSnapshot(
+        id: "run",
+        repository: "snow/repo",
+        title: "CI",
+        summary: "1 job",
+        state: .success,
+        rows: []
+    )
+
+    #expect(deliveryHistoryActionIsAvailable(detail: detail, hasHandler: true))
+    #expect(!deliveryHistoryActionIsAvailable(detail: nil, hasHandler: true))
+    #expect(!deliveryHistoryActionIsAvailable(detail: detail, hasHandler: false))
+}
+
+@Test
+func deliveryHistoryEntriesUseActivityDetailStateIconLanguage() {
+    let entry = DeliveryHistoryEntry(
+        id: "run",
+        title: "CI",
+        detail: "Succeeded · Default branch · Run #1",
+        state: .success,
+        occurredAt: Date(timeIntervalSince1970: 1)
+    )
+
+    #expect(deliveryHistoryEntryIconName(entry) == "checkmark.circle.fill")
+}
