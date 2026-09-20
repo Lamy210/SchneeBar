@@ -128,3 +128,60 @@ func deliveryHistoryEntriesUseActivityDetailStateIconLanguage() {
 
     #expect(deliveryHistoryEntryIconName(entry) == "checkmark.circle.fill")
 }
+
+
+@Test
+func deliveryTimelineEvidenceDisclosureLabelsExplainStatus() {
+    #expect(
+        deliveryTimelineEvidenceDisclosureLabel(for: .correlated)
+            == "Why this correlation"
+    )
+    #expect(
+        deliveryTimelineEvidenceDisclosureLabel(for: .evidenceUnavailable)
+            == "Why correlation is unavailable"
+    )
+    #expect(
+        deliveryTimelineEvidenceDisclosureLabel(for: .temporarilyUnavailable)
+            == "Why evidence could not be checked"
+    )
+}
+
+@Test
+func deliveryTimelineEvidenceUsesDistinctStateIcons() {
+    #expect(
+        deliveryTimelineEvidenceIconName(.confirmed)
+            == "checkmark.circle.fill"
+    )
+    #expect(
+        deliveryTimelineEvidenceIconName(.missing)
+            == "questionmark.circle.fill"
+    )
+    #expect(
+        deliveryTimelineEvidenceIconName(.unavailable)
+            == "exclamationmark.triangle.fill"
+    )
+}
+
+@Test
+func deliveryTimelineEvidenceDisclosureRequiresEvidence() {
+    let empty = DeliveryTimelineSnapshot(
+        status: .correlated,
+        confidence: .exact,
+        events: []
+    )
+    let explained = DeliveryTimelineSnapshot(
+        status: .correlated,
+        confidence: .exact,
+        events: [],
+        evidence: [
+            DeliveryTimelineEvidenceItem(
+                id: "workflow-pr",
+                title: "Workflow pull request",
+                state: .confirmed
+            ),
+        ]
+    )
+
+    #expect(!deliveryTimelineShouldShowEvidence(empty))
+    #expect(deliveryTimelineShouldShowEvidence(explained))
+}
