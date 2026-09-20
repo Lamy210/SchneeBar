@@ -97,6 +97,12 @@ private actor RecordingHistoryWorkflowLoader: GitHubWorkflowRunLoading {
     func recordedRequests() -> [Request] { requests }
 }
 
+private enum HistoryActionsCapabilityFixture {
+    case available
+    case unavailable
+    case unknown
+}
+
 private struct EmptyHistoryReviewLoader: GitHubReviewRequestLoading {
     func reviewRequests(
         connection: GitHubConnection,
@@ -118,7 +124,7 @@ private struct EmptyHistoryCheckLoader: GitHubCheckRunLoading {
 
 @Test @MainActor
 func deliveryHistoryUsesRuntimeRepositoryAndCompletedTwentyQuery() async throws {
-    let fixture = try await historyFixture(actionsAvailable: true)
+    let fixture = try await historyFixture(actionsCapability: .available)
     let loader = RecordingHistoryWorkflowLoader(
         runs: [historyRun(id: 900, branch: "main", conclusion: .success)]
     )
@@ -141,7 +147,41 @@ func deliveryHistoryUsesRuntimeRepositoryAndCompletedTwentyQuery() async throws 
 
 @Test @MainActor
 func deliveryHistorySkipsFeatureRequestWhenActionsCapabilityIsUnavailable() async throws {
-    let fixture = try await historyFixture(actionsAvailable: false)
+    let fixture = try await historyFixture(actionsCapability: .unavailable)
+    let loader = RecordingHistoryWorkflowLoader(runs: [])
+
+    await #expect(throws: (any Error).self) {
+        _ = try await fixture.model.loadDeliveryHistory(
+            for: historyActivityItem(),
+            workflowRunLoader: loader
+        )
+    }
+
+    #expect(await loader.recordedRequests().isEmpty)
+}
+
+@Test @MainActor
+func deliveryHistoryAllowsExplicitRequestWhenActionsCapabilityIsUnknown() async throws {
+    let fixture = try await historyFixture(actionsCapability: .unknown)
+    let loader = RecordingHistoryWorkflowLoader(
+        runs: [historyRun(id: 901, branch: "main", conclusion: .success)]
+    )
+
+    let history = try await fixture.model.loadDeliveryHistory(
+        for: historyActivityItem(),
+        workflowRunLoader: loader
+    )
+
+    #expect(history.entries.map(\.id) == ["github-actions:1:901"])
+    #expect(await loader.recordedRequests().count == 1)
+}
+
+@Test @MainActor
+func deliveryHistoryRejectsAmbiguousRuntimeRepositoryMatch() async throws {
+    let fixture = try await historyFixture(
+        actionsCapability: .available,
+        duplicateRepositoryFullName: true
+    )
     let loader = RecordingHistoryWorkflowLoader(runs: [])
 
     await #expect(throws: (any Error).self) {
@@ -156,7 +196,7 @@ func deliveryHistorySkipsFeatureRequestWhenActionsCapabilityIsUnavailable() asyn
 
 @Test @MainActor
 func deliveryHistoryRejectsRepositoryOutsideRuntimeInventory() async throws {
-    let fixture = try await historyFixture(actionsAvailable: true)
+    let fixture = try await historyFixture(actionsCapability: .available)
     let loader = RecordingHistoryWorkflowLoader(runs: [])
     var item = historyActivityItem()
     item = ActivityItem(
@@ -187,13 +227,17 @@ private struct HistoryFixture {
 
 @MainActor
 private func historyFixture(
-    actionsAvailable: Bool
+    actionsCapability: HistoryActionsCapabilityFixture,
+    duplicateRepositoryFullName: Bool = false
 ) async throws -> HistoryFixture {
     let profile = try historyProfile()
     let profileStore = HistoryProfileStore([profile])
     let credentialStore = HistoryCredentialStore(profile: profile)
     let accessTransport = HistoryQueueTransport(
-        historySessionResponses(actionsAvailable: actionsAvailable)
+        historySessionResponses(
+            actionsCapability: actionsCapability,
+            duplicateRepositoryFullName: duplicateRepositoryFullName
+        )
     )
     let coordinator = GitHubConnectionSessionCoordinator(
         credentialStore: credentialStore,
@@ -231,15 +275,35 @@ private func historyProfile() throws -> GitHubConnectionProfile {
 }
 
 private func historySessionResponses(
-    actionsAvailable: Bool
+    actionsCapability: HistoryActionsCapabilityFixture,
+    duplicateRepositoryFullName: Bool
 ) -> [HistoryHTTPResponse] {
     let user = #"{"id":42,"login":"snow-user","name":"Snow User","avatar_url":null}"#
-    let actionsPermission = actionsAvailable ? #","actions":"read""# : ""
+    let actionsPermission: String
+    let repositoryIsPrivate: Bool
+    switch actionsCapability {
+    case .available:
+        actionsPermission = #","actions":"read""#
+        repositoryIsPrivate = true
+    case .unavailable:
+        actionsPermission = ""
+        repositoryIsPrivate = true
+    case .unknown:
+        actionsPermission = ""
+        repositoryIsPrivate = false
+    }
+
     let installation = """
     {"total_count":1,"installations":[{"id":10,"account":{"id":100,"login":"snow","type":"Organization","avatar_url":null},"repository_selection":"all","permissions":{"pull_requests":"read"\(actionsPermission)},"suspended_at":null}]}
     """
+    let duplicateRepository = duplicateRepositoryFullName
+        ? """
+        ,{"id":2,"name":"app-shadow","full_name":"snow/app","private":\(repositoryIsPrivate),"owner":{"id":100,"login":"snow","type":"Organization","avatar_url":null},"permissions":{"admin":false,"maintain":false,"push":false,"triage":false,"pull":true},"default_branch":"main"}
+        """
+        : ""
+    let repositoryCount = duplicateRepositoryFullName ? 2 : 1
     let repositories = """
-    {"total_count":1,"repositories":[{"id":1,"name":"app","full_name":"snow/app","private":true,"owner":{"id":100,"login":"snow","type":"Organization","avatar_url":null},"permissions":{"admin":false,"maintain":false,"push":false,"triage":false,"pull":true},"default_branch":"main"}]}
+    {"total_count":\(repositoryCount),"repositories":[{"id":1,"name":"app","full_name":"snow/app","private":\(repositoryIsPrivate),"owner":{"id":100,"login":"snow","type":"Organization","avatar_url":null},"permissions":{"admin":false,"maintain":false,"push":false,"triage":false,"pull":true},"default_branch":"main"}\(duplicateRepository)]}
     """
     return [
         HistoryHTTPResponse(user),
