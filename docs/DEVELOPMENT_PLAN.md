@@ -151,10 +151,13 @@ Implemented:
 - deterministic evidence checklists with raw-SHA minimization and zero additional network requests
 - Deployment exact-commit-match explanation without changing best-effort enrichment semantics
 - expandable Light/Dark Delivery evidence presentation inside Activity detail
+- zero-request PR-scoped Workflow failure → success recovery detection from existing polling evidence
+- replay-safe ephemeral recovery events that survive transient polling failures but reset on monitoring removal/connection reset
+- privacy-minimized macOS local recovery notifications using provisional authorization and current notification settings
+- generic system notification copy with no repository, account, branch, Pull Request, workflow, or URL disclosure
 
 Next:
 
-- recovery notifications
 - persisted delivery history
 - revisit standalone/paginated Environment browsing and custom protection-rule details only if product usage justifies the extra scope
 

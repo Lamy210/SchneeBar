@@ -27,6 +27,7 @@ public actor GitHubActivityProvider {
     private var reviewPollState: [RepositoryPollKey: RepositoryPollState] = [:]
     private var cachedWorkflowActivities: [RepositoryPollKey: [GitHubWorkflowActivity]] = [:]
     private var workflowEvidence: [RepositoryPollKey: [GitHubWorkflowEvidence]] = [:]
+    private var workflowRecoveryTrackers: [RepositoryPollKey: GitHubWorkflowRecoveryTracker] = [:]
     private var cachedReviewRequests: [RepositoryPollKey: [GitHubReviewRequest]] = [:]
     private var cachedCheckActivities: [CheckPollKey: [ActivityItem]] = [:]
     private var loadsInProgress: Set<UUID> = []
@@ -183,15 +184,30 @@ public actor GitHubActivityProvider {
         var reviewFailures = blockedFailures(surface: .reviewRequests, repositories: reviewBlocked)
         var successfulWorkflowCount = 0
         var successfulReviewCount = 0
+        var recoveryEvents: [DeliveryRecoveryEvent] = []
 
         for outcome in workflowOutcomes {
             switch outcome {
-            case let .success(repositoryID, activities, evidence):
+            case let .success(repository, activities, evidence, runs):
                 successfulWorkflowCount += 1
-                let key = RepositoryPollKey(connectionID: profile.id, repositoryID: repositoryID)
+                let key = RepositoryPollKey(
+                    connectionID: profile.id,
+                    repositoryID: repository.id
+                )
                 cachedWorkflowActivities[key] = activities
                 workflowEvidence[key] = evidence
                 workflowPollState[key, default: RepositoryPollState()].isHot = !activities.isEmpty
+
+                var tracker = workflowRecoveryTrackers[key]
+                    ?? GitHubWorkflowRecoveryTracker()
+                recoveryEvents.append(
+                    contentsOf: tracker.observe(
+                        runs: runs,
+                        repository: repository
+                    )
+                )
+                workflowRecoveryTrackers[key] = tracker
+
             case let .failure(failure):
                 workflowFailures.append(failure)
             }
@@ -309,8 +325,11 @@ public actor GitHubActivityProvider {
             ),
         ]
 
-        let result = GitHubActivityLoadResult(surfaces: surfaces)
-        lastResultByConnectionID[profile.id] = result
+        let result = GitHubActivityLoadResult(
+            surfaces: surfaces,
+            recoveryEvents: recoveryEvents
+        )
+        lastResultByConnectionID[profile.id] = result.droppingRecoveryEvents()
         return result
     }
 
@@ -320,6 +339,9 @@ public actor GitHubActivityProvider {
         reviewPollState = reviewPollState.filter { $0.key.connectionID != connectionID }
         cachedWorkflowActivities = cachedWorkflowActivities.filter { $0.key.connectionID != connectionID }
         workflowEvidence = workflowEvidence.filter { $0.key.connectionID != connectionID }
+        workflowRecoveryTrackers = workflowRecoveryTrackers.filter {
+            $0.key.connectionID != connectionID
+        }
         cachedReviewRequests = cachedReviewRequests.filter { $0.key.connectionID != connectionID }
         cachedCheckActivities = cachedCheckActivities.filter { $0.key.connectionID != connectionID }
         lastResultByConnectionID.removeValue(forKey: connectionID)
@@ -480,6 +502,9 @@ public actor GitHubActivityProvider {
         workflowEvidence = workflowEvidence.filter { key, _ in
             key.connectionID != connectionID || validRepositoryIDs.contains(key.repositoryID)
         }
+        workflowRecoveryTrackers = workflowRecoveryTrackers.filter { key, _ in
+            key.connectionID != connectionID || validRepositoryIDs.contains(key.repositoryID)
+        }
         cachedReviewRequests = cachedReviewRequests.filter { key, _ in
             key.connectionID != connectionID || validRepositoryIDs.contains(key.repositoryID)
         }
@@ -572,9 +597,10 @@ public actor GitHubActivityProvider {
                     )
                 }
                 return .success(
-                    repositoryID: repository.id,
+                    repository: repository,
                     activities: activities,
-                    evidence: evidence
+                    evidence: evidence,
+                    runs: currentRuns
                 )
             } catch {
                 return .failure(
@@ -849,9 +875,10 @@ private struct CheckLoadTarget: Sendable {
 
 private enum WorkflowLoadOutcome: Sendable {
     case success(
-        repositoryID: Int64,
+        repository: GitHubRepositoryAccess,
         activities: [GitHubWorkflowActivity],
-        evidence: [GitHubWorkflowEvidence]
+        evidence: [GitHubWorkflowEvidence],
+        runs: [GitHubWorkflowRun]
     )
     case failure(GitHubActivityTargetFailure)
 }
