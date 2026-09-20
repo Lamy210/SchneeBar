@@ -15,8 +15,8 @@ func applicationSupportDeliveryHistoryStoreRoundTripsAcrossInstances() async thr
     let snapshot = deliveryStoreSnapshot(
         repository: "snow/repo",
         entries: [
-            deliveryStoreEntry(id: "run-1", occurredAt: 100),
             deliveryStoreEntry(id: "run-2", occurredAt: 200),
+            deliveryStoreEntry(id: "run-1", occurredAt: 100),
         ]
     )
 
