@@ -123,7 +123,15 @@ extension GitHubConnectionsRuntimeModel {
                 deliveryTimeline = DeliveryTimelineSnapshot(
                     status: .temporarilyUnavailable,
                     confidence: .unknown,
-                    events: []
+                    events: [],
+                    evidence: [
+                        DeliveryTimelineEvidenceItem(
+                            id: "delivery-evidence-load",
+                            title: "Delivery evidence",
+                            detail: "GitHub evidence could not be loaded right now",
+                            state: .unavailable
+                        ),
+                    ]
                 )
             }
 
