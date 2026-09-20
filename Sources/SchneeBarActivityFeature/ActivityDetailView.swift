@@ -48,6 +48,38 @@ func deliveryTimelineEventIconName(
     activityDetailIconName(for: event.state)
 }
 
+func deliveryTimelineEvidenceDisclosureLabel(
+    for status: DeliveryTimelineStatus
+) -> String {
+    switch status {
+    case .correlated:
+        "Why this correlation"
+    case .evidenceUnavailable:
+        "Why correlation is unavailable"
+    case .temporarilyUnavailable:
+        "Why evidence could not be checked"
+    }
+}
+
+func deliveryTimelineEvidenceIconName(
+    _ state: DeliveryTimelineEvidenceState
+) -> String {
+    switch state {
+    case .confirmed:
+        "checkmark.circle.fill"
+    case .missing:
+        "questionmark.circle.fill"
+    case .unavailable:
+        "exclamationmark.triangle.fill"
+    }
+}
+
+func deliveryTimelineShouldShowEvidence(
+    _ timeline: DeliveryTimelineSnapshot
+) -> Bool {
+    !timeline.evidence.isEmpty
+}
+
 func deliveryHistoryActionIsAvailable(
     detail: ActivityDetailSnapshot?,
     hasHandler: Bool
@@ -74,6 +106,7 @@ public struct ActivityDetailView: View {
     private let onRetry: () -> Void
     private let onShowHistory: (() -> Void)?
     private let surfaceStyle: SchneeSurfaceStyle
+    @State private var isEvidenceExpanded: Bool
 
     public init(
         item: ActivityItem,
@@ -83,6 +116,7 @@ public struct ActivityDetailView: View {
         onBack: @escaping () -> Void,
         onRetry: @escaping () -> Void,
         onShowHistory: (() -> Void)? = nil,
+        evidenceInitiallyExpanded: Bool = false,
         surfaceStyle: SchneeSurfaceStyle = .adaptive
     ) {
         self.item = item
@@ -93,6 +127,7 @@ public struct ActivityDetailView: View {
         self.onRetry = onRetry
         self.onShowHistory = onShowHistory
         self.surfaceStyle = surfaceStyle
+        _isEvidenceExpanded = State(initialValue: evidenceInitiallyExpanded)
     }
 
     public var body: some View {
@@ -258,7 +293,56 @@ public struct ActivityDetailView: View {
                     }
                 }
             }
+
+            if deliveryTimelineShouldShowEvidence(timeline) {
+                deliveryEvidenceDisclosure(timeline)
+            }
         }
+    }
+
+    private func deliveryEvidenceDisclosure(
+        _ timeline: DeliveryTimelineSnapshot
+    ) -> some View {
+        DisclosureGroup(isExpanded: $isEvidenceExpanded) {
+            VStack(spacing: 2) {
+                ForEach(timeline.evidence) { item in
+                    deliveryEvidenceRow(item)
+                }
+            }
+            .padding(.top, 4)
+        } label: {
+            Text(deliveryTimelineEvidenceDisclosureLabel(for: timeline.status))
+                .font(.caption.weight(.medium))
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private func deliveryEvidenceRow(
+        _ item: DeliveryTimelineEvidenceItem
+    ) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: deliveryTimelineEvidenceIconName(item.state))
+                .foregroundStyle(evidenceColor(for: item.state))
+                .frame(width: 16)
+                .padding(.top, 1)
+
+            VStack(alignment: .leading, spacing: 1) {
+                Text(item.title)
+                    .font(.caption.weight(.medium))
+                    .lineLimit(2)
+
+                if let detail = item.detail {
+                    Text(detail)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(3)
+                }
+            }
+
+            Spacer(minLength: 4)
+        }
+        .padding(.vertical, 4)
+        .padding(.horizontal, 6)
     }
 
     @ViewBuilder
@@ -388,6 +472,16 @@ public struct ActivityDetailView: View {
         .padding(.vertical, 7)
         .padding(.horizontal, 8)
         .contentShape(Rectangle())
+    }
+
+    private func evidenceColor(
+        for state: DeliveryTimelineEvidenceState
+    ) -> Color {
+        switch state {
+        case .confirmed: .green
+        case .missing: .secondary
+        case .unavailable: .orange
+        }
     }
 
     private func iconColor(for state: ActivityDetailState) -> Color {
