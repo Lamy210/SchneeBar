@@ -139,10 +139,13 @@ Implemented:
 - Actions-capability-gated Environment detail loading with no background Environment polling
 - reviewer-identity and provider-Environment-URL minimization at normalization boundaries
 - deterministic Light/Dark Environment protection and fallback fixtures
+- zero-request GitHub repository default-branch discovery from existing access inventory
+- authoritative Activity-detail repository resolution from runtime inventory instead of UI-model reconstruction
+- exact, case-sensitive default-branch presentation that keeps non-default Pull Request targets fully correlatable
+- deterministic Light/Dark proven-default and proven-non-default Delivery Timeline fixtures
 
 Next:
 
-- explicit repository default-branch discovery
 - standalone delivery history/navigation
 - richer confidence/evidence explanations
 - recovery notifications
@@ -175,7 +178,7 @@ Still required:
 
 ## Current implementation priority
 
-1. Add explicit repository default-branch discovery and standalone Delivery history.
+1. Add standalone Delivery history/navigation.
 2. Add recovery notifications and persisted Delivery history.
 3. Revisit standalone/paginated Environment browsing and custom protection-rule details only if product usage justifies the extra scope.
 4. Broaden enterprise validation toward Phase 5 requirements.
