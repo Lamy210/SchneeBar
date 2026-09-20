@@ -33,6 +33,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let deliveryTimelineService: GitHubDeliveryTimelineService
     private let deploymentTimelineService: GitHubDeploymentTimelineService
     private let environmentCatalogService: GitHubEnvironmentCatalogService
+    private let deliveryRecoveryNotifier: any DeliveryRecoveryNotifying
 
     private var menuBarController: MenuBarController?
 
@@ -63,6 +64,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         environmentCatalogService = GitHubEnvironmentCatalogService(
             sessionCoordinator: sessionCoordinator
         )
+        deliveryRecoveryNotifier = DeliveryRecoveryNotifier()
         let activityProvider = GitHubActivityProvider(
             workflowRunLoader: workflowRunService,
             reviewRequestLoader: reviewRequestService,
@@ -86,6 +88,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let deliveryTimelineService = deliveryTimelineService
         let deploymentTimelineService = deploymentTimelineService
         let environmentCatalogService = environmentCatalogService
+        let deliveryRecoveryNotifier = deliveryRecoveryNotifier
 
         activityRuntimeModel.configureDetailLoader { item in
             try await githubRuntimeModel.loadActivityDetail(
@@ -116,6 +119,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         githubRuntimeModel.onActivitySourceChanged = { [weak self] in
             self?.menuBarController?.refreshActivityNow()
+        }
+
+        githubRuntimeModel.onDeliveryRecovery = { event in
+            Task {
+                await deliveryRecoveryNotifier.deliver(event)
+            }
+        }
+
+        Task {
+            await deliveryRecoveryNotifier.prepareAuthorization()
         }
 
         Task { @MainActor [weak self] in
