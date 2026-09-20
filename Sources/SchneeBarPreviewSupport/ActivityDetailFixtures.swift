@@ -6,6 +6,8 @@ public enum ActivityDetailFixtureScenario: String, CaseIterable, Identifiable {
     case matrixSuccess = "matrix-success"
     case matrixFailure = "matrix-failure"
     case deliveryExact = "delivery-exact"
+    case deliveryDefaultBranch = "delivery-default-branch"
+    case deliveryNonDefaultBranch = "delivery-non-default-branch"
     case deliveryEvidenceUnavailable = "delivery-evidence-unavailable"
     case deliveryTemporarilyUnavailable = "delivery-temporarily-unavailable"
     case deliveryMatrixFailure = "delivery-matrix-failure"
@@ -29,6 +31,8 @@ public enum ActivityDetailFixtureScenario: String, CaseIterable, Identifiable {
         case .matrixSuccess: "Matrix success"
         case .matrixFailure: "Matrix failure"
         case .deliveryExact: "Delivery exact"
+        case .deliveryDefaultBranch: "Delivery default branch"
+        case .deliveryNonDefaultBranch: "Delivery non-default branch"
         case .deliveryEvidenceUnavailable: "Delivery evidence unavailable"
         case .deliveryTemporarilyUnavailable: "Delivery temporarily unavailable"
         case .deliveryMatrixFailure: "Delivery + matrix failure"
@@ -56,6 +60,8 @@ public enum ActivityDetailFixtureScenario: String, CaseIterable, Identifiable {
         case .matrixSuccess: ActivityDetailFixture.matrixSuccess
         case .matrixFailure: ActivityDetailFixture.matrixFailure
         case .deliveryExact: ActivityDetailFixture.deliveryExact
+        case .deliveryDefaultBranch: ActivityDetailFixture.deliveryDefaultBranch
+        case .deliveryNonDefaultBranch: ActivityDetailFixture.deliveryNonDefaultBranch
         case .deliveryEvidenceUnavailable: ActivityDetailFixture.deliveryEvidenceUnavailable
         case .deliveryTemporarilyUnavailable: ActivityDetailFixture.deliveryTemporarilyUnavailable
         case .deliveryMatrixFailure: ActivityDetailFixture.deliveryMatrixFailure
@@ -273,6 +279,96 @@ public enum ActivityDetailFixture {
         state: .success,
         destinationURL: item.destinationURL,
         deliveryTimeline: exactDeliveryTimeline,
+        rows: matrixSuccess.rows
+    )
+
+    public static let defaultBranchDeliveryTimeline = DeliveryTimelineSnapshot(
+        status: .correlated,
+        confidence: .exact,
+        events: [
+            DeliveryTimelineEvent(
+                id: "github-delivery-pr:49",
+                kind: .pullRequest,
+                title: "PR #49 workflow",
+                detail: "feat/delivery-timeline-first-slice → main",
+                state: .success,
+                destinationURL: URL(string: "https://github.com/Lamy210/SchneeBar/actions/runs/501"),
+                occurredAt: Date(timeIntervalSince1970: 1_789_710_000)
+            ),
+            DeliveryTimelineEvent(
+                id: "github-delivery-merge:49",
+                kind: .merge,
+                title: "Merged",
+                detail: "into main",
+                state: .success,
+                destinationURL: URL(string: "https://github.com/Lamy210/SchneeBar/pull/49"),
+                occurredAt: Date(timeIntervalSince1970: 1_789_710_120)
+            ),
+            DeliveryTimelineEvent(
+                id: "github-delivery-execution:601",
+                kind: .execution,
+                title: "Default branch · CI",
+                detail: "Succeeded",
+                state: .success,
+                destinationURL: URL(string: "https://github.com/Lamy210/SchneeBar/actions/runs/601"),
+                occurredAt: Date(timeIntervalSince1970: 1_789_710_180)
+            ),
+        ]
+    )
+
+    public static let nonDefaultBranchDeliveryTimeline = DeliveryTimelineSnapshot(
+        status: .correlated,
+        confidence: .exact,
+        events: [
+            DeliveryTimelineEvent(
+                id: "github-delivery-pr:49",
+                kind: .pullRequest,
+                title: "PR #49 workflow",
+                detail: "feat/release-fix → release/1.x",
+                state: .success,
+                destinationURL: URL(string: "https://github.com/Lamy210/SchneeBar/actions/runs/501"),
+                occurredAt: Date(timeIntervalSince1970: 1_789_710_000)
+            ),
+            DeliveryTimelineEvent(
+                id: "github-delivery-merge:49",
+                kind: .merge,
+                title: "Merged",
+                detail: "into release/1.x",
+                state: .success,
+                destinationURL: URL(string: "https://github.com/Lamy210/SchneeBar/pull/49"),
+                occurredAt: Date(timeIntervalSince1970: 1_789_710_120)
+            ),
+            DeliveryTimelineEvent(
+                id: "github-delivery-execution:601",
+                kind: .execution,
+                title: "Base branch · CI",
+                detail: "Succeeded",
+                state: .success,
+                destinationURL: URL(string: "https://github.com/Lamy210/SchneeBar/actions/runs/601"),
+                occurredAt: Date(timeIntervalSince1970: 1_789_710_180)
+            ),
+        ]
+    )
+
+    public static let deliveryDefaultBranch = ActivityDetailSnapshot(
+        id: "github-actions:42:501:delivery-default-branch",
+        repository: item.repository,
+        title: item.context,
+        summary: matrixSuccess.summary,
+        state: .success,
+        destinationURL: item.destinationURL,
+        deliveryTimeline: defaultBranchDeliveryTimeline,
+        rows: matrixSuccess.rows
+    )
+
+    public static let deliveryNonDefaultBranch = ActivityDetailSnapshot(
+        id: "github-actions:42:501:delivery-non-default-branch",
+        repository: item.repository,
+        title: item.context,
+        summary: matrixSuccess.summary,
+        state: .success,
+        destinationURL: item.destinationURL,
+        deliveryTimeline: nonDefaultBranchDeliveryTimeline,
         rows: matrixSuccess.rows
     )
 
