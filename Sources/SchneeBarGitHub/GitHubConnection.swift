@@ -11,6 +11,8 @@ public struct GitHubConnection: Identifiable, Codable, Equatable, Sendable {
     public var displayName: String
     public let deploymentKind: GitHubDeploymentKind
     public let webBaseURL: URL
+    /// Latest GHES version discovered by the provider boundary.
+    /// Use `applyDiscoveredServerVersion` so derived API-version policy stays in sync.
     public private(set) var serverVersion: String?
     public var apiVersion: String?
 
