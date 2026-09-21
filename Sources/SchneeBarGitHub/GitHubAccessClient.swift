@@ -147,12 +147,63 @@ public struct GitHubAccessInventory: Equatable, Sendable {
     }
 }
 
+public enum GitHubSSOResponseSignal: Equatable, Sendable {
+    case required
+    case partialResults
+    case other
+
+    fileprivate init(headerValue: String) {
+        let directive = headerValue
+            .split(separator: ";", maxSplits: 1, omittingEmptySubsequences: true)
+            .first?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+
+        switch directive {
+        case "required":
+            self = .required
+        case "partial-results":
+            self = .partialResults
+        default:
+            self = .other
+        }
+    }
+}
+
+public struct GitHubHTTPResponseEvidence: Equatable, Sendable {
+    public let statusCode: Int
+    public let ssoSignal: GitHubSSOResponseSignal
+
+    public init(
+        statusCode: Int,
+        ssoSignal: GitHubSSOResponseSignal
+    ) {
+        self.statusCode = statusCode
+        self.ssoSignal = ssoSignal
+    }
+}
+
 public enum GitHubAccessClientError: Error, Equatable, Sendable {
     case invalidCredential
     case httpStatus(Int)
+    case httpResponse(GitHubHTTPResponseEvidence)
     case invalidResponse
     case invalidInstallationID
     case paginationLimitExceeded
+
+    public var statusCode: Int? {
+        switch self {
+        case let .httpStatus(statusCode):
+            return statusCode
+        case let .httpResponse(evidence):
+            return evidence.statusCode
+        case .invalidCredential,
+             .invalidResponse,
+             .invalidInstallationID,
+             .paginationLimitExceeded:
+            return nil
+        }
+    }
 }
 
 public struct GitHubAccessClient: Sendable {
@@ -338,10 +389,12 @@ public struct GitHubAccessClient: Sendable {
                     )
                 )
             } catch let error as GitHubAccessClientError {
-                switch error {
-                case .httpStatus(401):
+                if error.statusCode == 401 {
                     throw error
-                case .httpStatus(403):
+                }
+
+                switch error.statusCode {
+                case 403:
                     installationAccess.append(
                         GitHubInstallationAccess(
                             installation: installation,
@@ -349,7 +402,7 @@ public struct GitHubAccessClient: Sendable {
                             status: .forbidden
                         )
                     )
-                case .httpStatus(404):
+                case 404:
                     installationAccess.append(
                         GitHubInstallationAccess(
                             installation: installation,
@@ -404,6 +457,18 @@ public struct GitHubAccessClient: Sendable {
 
         let (data, response) = try await transport.data(for: request)
         guard (200 ... 299).contains(response.statusCode) else {
+            if let headerValue = response.value(
+                forHTTPHeaderField: "X-GitHub-SSO"
+            ) {
+                throw GitHubAccessClientError.httpResponse(
+                    GitHubHTTPResponseEvidence(
+                        statusCode: response.statusCode,
+                        ssoSignal: GitHubSSOResponseSignal(
+                            headerValue: headerValue
+                        )
+                    )
+                )
+            }
             throw GitHubAccessClientError.httpStatus(response.statusCode)
         }
 
