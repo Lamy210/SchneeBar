@@ -5,10 +5,16 @@ import Testing
 private struct AccessStubResponse: Sendable {
     let json: String
     let statusCode: Int
+    let headers: [String: String]
 
-    init(_ json: String, statusCode: Int = 200) {
+    init(
+        _ json: String,
+        statusCode: Int = 200,
+        headers: [String: String] = [:]
+    ) {
         self.json = json
         self.statusCode = statusCode
+        self.headers = headers
     }
 }
 
@@ -30,7 +36,7 @@ private actor AccessQueueTransport: GitHubHTTPTransport {
                 url: request.url!,
                 statusCode: response.statusCode,
                 httpVersion: "HTTP/1.1",
-                headerFields: nil
+                headerFields: response.headers
             )
         )
         return (Data(response.json.utf8), httpResponse)
@@ -262,6 +268,91 @@ func mapsHTTPAuthenticationFailure() async throws {
             credential: GitHubCredential(accessToken: "expired")
         )
     }
+}
+
+@Test
+func preservesSafeSSORequiredResponseEvidenceWithoutRawURL() async throws {
+    let transport = AccessQueueTransport([
+        AccessStubResponse(
+            #"{\"message\":\"SSO required\"}"#,
+            statusCode: 403,
+            headers: [
+                "X-GitHub-SSO":
+                    "required; url=https://github.com/orgs/acme/sso?authorization_request=sensitive"
+            ]
+        )
+    ])
+    let client = GitHubAccessClient(transport: transport)
+
+    await #expect(
+        throws: GitHubAccessClientError.httpResponse(
+            GitHubHTTPResponseEvidence(
+                statusCode: 403,
+                ssoSignal: .required
+            )
+        )
+    ) {
+        try await client.authenticatedAccount(
+            connection: try githubDotComAccessConnection(),
+            credential: GitHubCredential(accessToken: "ghu_access")
+        )
+    }
+}
+
+@Test
+func preservesSafeSSOPartialResultsEvidenceWithoutOrganizationIDs() async throws {
+    let transport = AccessQueueTransport([
+        AccessStubResponse(
+            #"{\"message\":\"partial results\"}"#,
+            statusCode: 403,
+            headers: [
+                "X-GitHub-SSO":
+                    "partial-results; organizations=21955855,20582480"
+            ]
+        )
+    ])
+    let client = GitHubAccessClient(transport: transport)
+
+    await #expect(
+        throws: GitHubAccessClientError.httpResponse(
+            GitHubHTTPResponseEvidence(
+                statusCode: 403,
+                ssoSignal: .partialResults
+            )
+        )
+    ) {
+        try await client.authenticatedAccount(
+            connection: try githubDotComAccessConnection(),
+            credential: GitHubCredential(accessToken: "ghu_access")
+        )
+    }
+}
+
+@Test
+func inventoryKeepsSSOEvidenceBacked403AsForbiddenInstallation() async throws {
+    let transport = AccessQueueTransport([
+        AccessStubResponse(#"{\"id\":1,\"login\":\"octocat\",\"name\":null,\"avatar_url\":null}"#),
+        AccessStubResponse(
+            #"{\"total_count\":1,\"installations\":[{\"id\":5,\"account\":{\"id\":10,\"login\":\"acme\",\"type\":\"Organization\"},\"repository_selection\":\"selected\",\"permissions\":{\"actions\":\"read\"},\"suspended_at\":null}]}"#
+        ),
+        AccessStubResponse(
+            #"{\"message\":\"Forbidden\"}"#,
+            statusCode: 403,
+            headers: [
+                "X-GitHub-SSO":
+                    "required; url=https://github.com/orgs/acme/sso?authorization_request=sensitive"
+            ]
+        ),
+    ])
+    let client = GitHubAccessClient(transport: transport)
+
+    let inventory = try await client.inventory(
+        connection: try githubDotComAccessConnection(),
+        credential: GitHubCredential(accessToken: "ghu_access")
+    )
+
+    #expect(inventory.installations[0].status == .forbidden)
+    #expect(inventory.installations[0].repositories.isEmpty)
 }
 
 @Test
