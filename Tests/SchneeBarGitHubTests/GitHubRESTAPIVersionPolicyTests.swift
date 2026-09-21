@@ -50,7 +50,7 @@ func connectionDerivesEnterpriseAPIVersionWhenServerVersionArrives() throws {
 
     #expect(connection.apiVersion == nil)
 
-    connection.serverVersion = "3.20.8"
+    connection.applyDiscoveredServerVersion("3.20.8")
     #expect(connection.apiVersion == "2022-11-28")
 
     var newerConnection = GitHubConnection(
@@ -58,7 +58,7 @@ func connectionDerivesEnterpriseAPIVersionWhenServerVersionArrives() throws {
         deploymentKind: .enterpriseServer,
         webBaseURL: try #require(URL(string: "https://github.internal.example"))
     )
-    newerConnection.serverVersion = "3.22.0"
+    newerConnection.applyDiscoveredServerVersion("3.22.0")
     #expect(newerConnection.apiVersion == "2026-03-10")
 }
 
@@ -71,7 +71,7 @@ func explicitEnterpriseAPIVersionIsNotOverwrittenByDiscovery() throws {
         apiVersion: "custom-version"
     )
 
-    connection.serverVersion = "3.22.0"
+    connection.applyDiscoveredServerVersion("3.22.0")
     #expect(connection.apiVersion == "custom-version")
 }
 
