@@ -59,6 +59,7 @@ public struct GitHubConnectionProfile: Identifiable, Codable, Equatable, Sendabl
     public var isEnabled: Bool
     public var createdAt: Date
     public var lastConnectedAt: Date?
+    public var lastEnterpriseMetadataCheckAt: Date?
 
     public init(
         connection: GitHubConnection,
@@ -68,7 +69,8 @@ public struct GitHubConnectionProfile: Identifiable, Codable, Equatable, Sendabl
         repositorySelection: GitHubRepositoryMonitoringSelection = .allAccessible,
         isEnabled: Bool = true,
         createdAt: Date = .now,
-        lastConnectedAt: Date? = nil
+        lastConnectedAt: Date? = nil,
+        lastEnterpriseMetadataCheckAt: Date? = nil
     ) {
         self.connection = connection
         self.account = account
@@ -78,6 +80,7 @@ public struct GitHubConnectionProfile: Identifiable, Codable, Equatable, Sendabl
         self.isEnabled = isEnabled
         self.createdAt = createdAt
         self.lastConnectedAt = lastConnectedAt
+        self.lastEnterpriseMetadataCheckAt = lastEnterpriseMetadataCheckAt
     }
 
     public var credentialKey: GitHubCredentialKey {
