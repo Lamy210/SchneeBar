@@ -94,11 +94,12 @@ private let runtimeNow = Date(timeIntervalSince1970: 40_000)
 
 @Test @MainActor
 func successfulRecoveryPreservesProfileConfiguration() async throws {
-    let original = try runtimeProfile(
+    var original = try runtimeProfile(
         login: "old-login",
         selectedRepositoryIDs: [11, 22],
         isEnabled: true
     )
+    original.lastEnterpriseMetadataCheckAt = Date(timeIntervalSince1970: 35_000)
     let fixture = runtimeFixture(
         profiles: [original],
         responses: successfulRecoveryResponses(id: 42, login: "renamed-user")
@@ -121,6 +122,10 @@ func successfulRecoveryPreservesProfileConfiguration() async throws {
     #expect(updated.authenticationMethod == original.authenticationMethod)
     #expect(updated.clientID == original.clientID)
     #expect(updated.lastConnectedAt != original.lastConnectedAt)
+    #expect(
+        updated.lastEnterpriseMetadataCheckAt
+            == original.lastEnterpriseMetadataCheckAt
+    )
     #expect(fixture.model.statusByConnectionID[original.id] == .connected(repositoryCount: 0))
 }
 
