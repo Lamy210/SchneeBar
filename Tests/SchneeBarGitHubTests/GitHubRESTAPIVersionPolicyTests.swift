@@ -41,7 +41,7 @@ func unknownEnterpriseVersionDoesNotInventAPIVersion() {
 }
 
 @Test
-func connectionDerivesEnterpriseAPIVersionWhenServerVersionArrives() throws {
+func connectionDerivesEnterpriseAPIVersionWhenDiscoveredVersionArrives() throws {
     var connection = GitHubConnection(
         displayName: "Internal GitHub",
         deploymentKind: .enterpriseServer,
@@ -110,7 +110,6 @@ func discoveredEnterpriseVersionPreservesExplicitAPIVersionOverride() throws {
     #expect(connection.serverVersion == "3.22.0")
     #expect(connection.apiVersion == "custom-version")
 }
-
 
 @Test
 func hostedConnectionIgnoresEnterpriseServerDiscoveryMutation() throws {
