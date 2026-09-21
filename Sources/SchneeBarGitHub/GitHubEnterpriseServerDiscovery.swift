@@ -160,6 +160,8 @@ public struct GitHubEnterpriseServerDiscoveryClient: Sendable {
         var request = URLRequest(url: metaURL)
         request.httpMethod = "GET"
         request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
+        // Version discovery is the bootstrap for choosing an API version.
+        // Do not send X-GitHub-Api-Version before the server version is known.
 
         let (data, response) = try await transport.data(for: request)
         guard (200 ... 299).contains(response.statusCode) else {
