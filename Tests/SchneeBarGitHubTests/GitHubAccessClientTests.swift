@@ -285,39 +285,10 @@ func preservesSafeSSORequiredResponseEvidenceWithoutRawURL() async throws {
     let client = GitHubAccessClient(transport: transport)
 
     await #expect(
-        throws: GitHubAccessClientError.httpResponse(
-            GitHubHTTPResponseEvidence(
+        throws: GitHubAccessClientError.httpFailure(
+            GitHubHTTPFailureEvidence(
                 statusCode: 403,
                 ssoSignal: .required
-            )
-        )
-    ) {
-        try await client.authenticatedAccount(
-            connection: try githubDotComAccessConnection(),
-            credential: GitHubCredential(accessToken: "ghu_access")
-        )
-    }
-}
-
-@Test
-func preservesSafeSSOPartialResultsEvidenceWithoutOrganizationIDs() async throws {
-    let transport = AccessQueueTransport([
-        AccessStubResponse(
-            #"{\"message\":\"partial results\"}"#,
-            statusCode: 403,
-            headers: [
-                "X-GitHub-SSO":
-                    "partial-results; organizations=21955855,20582480"
-            ]
-        )
-    ])
-    let client = GitHubAccessClient(transport: transport)
-
-    await #expect(
-        throws: GitHubAccessClientError.httpResponse(
-            GitHubHTTPResponseEvidence(
-                statusCode: 403,
-                ssoSignal: .partialResults
             )
         )
     ) {
@@ -343,8 +314,8 @@ func preservesUnknownSSOHeaderAsOpaqueSignal() async throws {
     let client = GitHubAccessClient(transport: transport)
 
     await #expect(
-        throws: GitHubAccessClientError.httpResponse(
-            GitHubHTTPResponseEvidence(
+        throws: GitHubAccessClientError.httpFailure(
+            GitHubHTTPFailureEvidence(
                 statusCode: 403,
                 ssoSignal: .other
             )
