@@ -48,6 +48,12 @@ final class GitHubConnectionsRuntimeModel {
     private let enterpriseCompatibilityPolicy: GitHubEnterpriseCompatibilityPolicy
 
     @ObservationIgnored
+    private let enterpriseMetadataRefreshPolicy: GitHubEnterpriseMetadataRefreshPolicy
+
+    @ObservationIgnored
+    private let now: @Sendable () -> Date
+
+    @ObservationIgnored
     private var inventoryByConnectionID: [UUID: GitHubAccessInventory] = [:]
 
     @ObservationIgnored
@@ -70,7 +76,9 @@ final class GitHubConnectionsRuntimeModel {
         deviceFlowClient: GitHubDeviceFlowClient = GitHubDeviceFlowClient(),
         authorizationWaiter: GitHubDeviceAuthorizationWaiter = GitHubDeviceAuthorizationWaiter(),
         enterpriseDiscovery: GitHubEnterpriseServerDiscoveryClient = GitHubEnterpriseServerDiscoveryClient(),
-        enterpriseCompatibilityPolicy: GitHubEnterpriseCompatibilityPolicy = .init()
+        enterpriseCompatibilityPolicy: GitHubEnterpriseCompatibilityPolicy = .init(),
+        enterpriseMetadataRefreshPolicy: GitHubEnterpriseMetadataRefreshPolicy = .init(),
+        now: @escaping @Sendable () -> Date = { .now }
     ) {
         self.profileStore = profileStore
         self.sessionCoordinator = sessionCoordinator
@@ -80,6 +88,8 @@ final class GitHubConnectionsRuntimeModel {
         self.authorizationWaiter = authorizationWaiter
         self.enterpriseDiscovery = enterpriseDiscovery
         self.enterpriseCompatibilityPolicy = enterpriseCompatibilityPolicy
+        self.enterpriseMetadataRefreshPolicy = enterpriseMetadataRefreshPolicy
+        self.now = now
     }
 
     var onboardingIsActive: Bool {
@@ -467,7 +477,7 @@ final class GitHubConnectionsRuntimeModel {
 
     func refresh(profileID: UUID) async {
         guard !(recoveringConnectionID == profileID && recoveryIsActive) else { return }
-        guard let profile = profiles.first(where: { $0.id == profileID }) else { return }
+        guard var profile = profiles.first(where: { $0.id == profileID }) else { return }
         let generation = advanceOperationGeneration(for: profileID)
 
         guard profile.isEnabled else {
@@ -485,6 +495,14 @@ final class GitHubConnectionsRuntimeModel {
 
         statusByConnectionID[profileID] = .syncing
         do {
+            profile = try await refreshEnterpriseMetadataIfDue(
+                profile,
+                at: now()
+            )
+            guard isCurrentOperationGeneration(generation, for: profileID) else {
+                return
+            }
+
             let session = try await sessionCoordinator.restore(
                 connection: profile.connection,
                 identity: profile.account,
@@ -508,6 +526,8 @@ final class GitHubConnectionsRuntimeModel {
             )
             upsert(updated)
             onActivitySourceChanged?()
+        } catch is CancellationError {
+            return
         } catch GitHubConnectionSessionError.credentialNotFound,
                 GitHubConnectionSessionError.reauthenticationRequired,
                 GitHubConnectionSessionError.accountMismatch(_, _) {
@@ -874,6 +894,36 @@ final class GitHubConnectionsRuntimeModel {
         }
     }
 
+    private func refreshEnterpriseMetadataIfDue(
+        _ profile: GitHubConnectionProfile,
+        at checkTime: Date
+    ) async throws -> GitHubConnectionProfile {
+        guard enterpriseMetadataRefreshPolicy.shouldRefresh(
+            connection: profile.connection,
+            lastCheckedAt: profile.lastEnterpriseMetadataCheckAt,
+            now: checkTime
+        ) else {
+            return profile
+        }
+
+        var updated = profile
+        updated.lastEnterpriseMetadataCheckAt = checkTime
+
+        do {
+            let discovery = try await enterpriseDiscovery.discover(
+                connection: profile.connection
+            )
+            try Task.checkCancellation()
+            updated.connection.applyDiscoveredServerVersion(
+                discovery.installedVersion
+            )
+        } catch {
+            try Task.checkCancellation()
+        }
+
+        return updated
+    }
+
     private func makeConnection(from draft: GitHubConnectionDraft) async throws -> GitHubConnection {
         let displayName = draft.displayName.trimmingCharacters(in: .whitespacesAndNewlines)
         let rawURL: String
@@ -900,8 +950,12 @@ final class GitHubConnectionsRuntimeModel {
         )
 
         if draft.deploymentKind == .enterpriseServer {
-            let discovery = try await enterpriseDiscovery.discover(connection: connection)
-            connection.serverVersion = discovery.installedVersion
+            let discovery = try await enterpriseDiscovery.discover(
+                connection: connection
+            )
+            connection.applyDiscoveredServerVersion(
+                discovery.installedVersion
+            )
         }
 
         return connection
