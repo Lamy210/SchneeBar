@@ -59,6 +59,9 @@ public struct GitHubConnectionProfile: Identifiable, Codable, Equatable, Sendabl
     public var isEnabled: Bool
     public var createdAt: Date
     public var lastConnectedAt: Date?
+    /// Last bounded GHES metadata check attempt. This is intentionally an
+    /// attempt timestamp, not a successful-discovery timestamp, so a temporary
+    /// metadata failure cannot add a `/meta` request to every healthy refresh.
     public var lastEnterpriseMetadataCheckAt: Date?
 
     public init(
