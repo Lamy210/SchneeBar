@@ -160,3 +160,27 @@ private func makeLifecycleProfile(
         authenticationMethod: .deviceFlow
     )
 }
+
+
+@Test
+func profileReconcilerRecordsEnterpriseMetadataCheckTime() throws {
+    let incoming = GitHubConnection(
+        displayName: "Internal GitHub",
+        deploymentKind: .enterpriseServer,
+        webBaseURL: try #require(
+            URL(string: "https://github.internal.example")
+        ),
+        serverVersion: "3.22.0"
+    )
+
+    let profile = GitHubConnectionProfileReconciler().reconcile(
+        existingProfiles: [],
+        authenticatedConnection: incoming,
+        account: GitHubAccountIdentity(id: "42", login: "octocat"),
+        authenticationMethod: .deviceFlow,
+        clientID: "client",
+        now: lifecycleNow
+    )
+
+    #expect(profile.lastEnterpriseMetadataCheckAt == lifecycleNow)
+}
