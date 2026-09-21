@@ -101,7 +101,9 @@ public struct GitHubEnterpriseMetadataRefreshPolicy: Sendable {
         guard let lastCheckedAt else {
             return true
         }
-        return now.timeIntervalSince(lastCheckedAt) >= minimumInterval
+
+        let elapsed = now.timeIntervalSince(lastCheckedAt)
+        return elapsed < 0 || elapsed >= minimumInterval
     }
 }
 
