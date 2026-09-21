@@ -182,6 +182,13 @@ func enterpriseMetadataRefreshPolicyOnlyChecksEnterpriseServersWhenDue() throws 
         )
     )
     #expect(
+        policy.shouldRefresh(
+            connection: enterprise,
+            lastCheckedAt: now.addingTimeInterval(60),
+            now: now
+        )
+    )
+    #expect(
         !policy.shouldRefresh(
             connection: hosted,
             lastCheckedAt: nil,
