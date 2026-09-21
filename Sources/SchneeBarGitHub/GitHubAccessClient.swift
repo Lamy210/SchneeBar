@@ -147,9 +147,8 @@ public struct GitHubAccessInventory: Equatable, Sendable {
     }
 }
 
-public enum GitHubSSOResponseSignal: Equatable, Sendable {
+public enum GitHubSSOFailureSignal: Equatable, Sendable {
     case required
-    case partialResults
     case other
 
     fileprivate init(headerValue: String) {
@@ -160,24 +159,17 @@ public enum GitHubSSOResponseSignal: Equatable, Sendable {
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased()
 
-        switch directive {
-        case "required":
-            self = .required
-        case "partial-results":
-            self = .partialResults
-        default:
-            self = .other
-        }
+        self = directive == "required" ? .required : .other
     }
 }
 
-public struct GitHubHTTPResponseEvidence: Equatable, Sendable {
+public struct GitHubHTTPFailureEvidence: Equatable, Sendable {
     public let statusCode: Int
-    public let ssoSignal: GitHubSSOResponseSignal
+    public let ssoSignal: GitHubSSOFailureSignal
 
     public init(
         statusCode: Int,
-        ssoSignal: GitHubSSOResponseSignal
+        ssoSignal: GitHubSSOFailureSignal
     ) {
         self.statusCode = statusCode
         self.ssoSignal = ssoSignal
@@ -187,7 +179,7 @@ public struct GitHubHTTPResponseEvidence: Equatable, Sendable {
 public enum GitHubAccessClientError: Error, Equatable, Sendable {
     case invalidCredential
     case httpStatus(Int)
-    case httpResponse(GitHubHTTPResponseEvidence)
+    case httpFailure(GitHubHTTPFailureEvidence)
     case invalidResponse
     case invalidInstallationID
     case paginationLimitExceeded
@@ -196,7 +188,7 @@ public enum GitHubAccessClientError: Error, Equatable, Sendable {
         switch self {
         case let .httpStatus(statusCode):
             return statusCode
-        case let .httpResponse(evidence):
+        case let .httpFailure(evidence):
             return evidence.statusCode
         case .invalidCredential,
              .invalidResponse,
@@ -460,10 +452,10 @@ public struct GitHubAccessClient: Sendable {
             if let headerValue = response.value(
                 forHTTPHeaderField: "X-GitHub-SSO"
             ) {
-                throw GitHubAccessClientError.httpResponse(
-                    GitHubHTTPResponseEvidence(
+                throw GitHubAccessClientError.httpFailure(
+                    GitHubHTTPFailureEvidence(
                         statusCode: response.statusCode,
-                        ssoSignal: GitHubSSOResponseSignal(
+                        ssoSignal: GitHubSSOFailureSignal(
                             headerValue: headerValue
                         )
                     )
