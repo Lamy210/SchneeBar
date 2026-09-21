@@ -96,20 +96,26 @@ private actor EnterpriseMetadataSessionTransport: GitHubHTTPTransport {
 private actor EnterpriseMetadataDiscoveryTransport: GitHubHTTPTransport {
     private let json: String
     private let statusCode: Int
+    private let throwsCancellation: Bool
     private var calls = 0
 
     init(
         installedVersion: String = "3.22.0",
-        statusCode: Int = 200
+        statusCode: Int = 200,
+        throwsCancellation: Bool = false
     ) {
         json = "{\"installed_version\":\"\(installedVersion)\"}"
         self.statusCode = statusCode
+        self.throwsCancellation = throwsCancellation
     }
 
     func data(
         for request: URLRequest
     ) async throws -> (Data, HTTPURLResponse) {
         calls += 1
+        if throwsCancellation {
+            throw CancellationError()
+        }
         let response = try #require(
             HTTPURLResponse(
                 url: request.url!,
@@ -192,6 +198,29 @@ func rediscoverySurfacesNewUntestedEnterpriseVersion() async throws {
 }
 
 @Test @MainActor
+func metadataCancellationDoesNotAdvanceRefreshCadence() async throws {
+    let now = Date(timeIntervalSince1970: 275_000)
+    let profile = try enterpriseMetadataProfile(
+        serverVersion: "3.20.8",
+        lastCheckAt: nil
+    )
+    let fixture = enterpriseMetadataFixture(
+        profile: profile,
+        now: now,
+        refreshCount: 1,
+        discoveryThrowsCancellation: true
+    )
+    fixture.model.profiles = [profile]
+
+    await fixture.model.refresh(profileID: profile.id)
+
+    let unchanged = try #require(fixture.model.profiles.first)
+    #expect(unchanged.lastEnterpriseMetadataCheckAt == nil)
+    #expect(await fixture.discoveryTransport.callCount() == 1)
+    #expect(await fixture.sessionTransport.recordedAPIVersions().isEmpty)
+}
+
+@Test @MainActor
 func failedEnterpriseRediscoveryDoesNotHideHealthySessionAndIsBounded() async throws {
     let now = Date(timeIntervalSince1970: 300_000)
     let profile = try enterpriseMetadataProfile(
@@ -265,6 +294,7 @@ private func enterpriseMetadataFixture(
     refreshCount: Int,
     discoveredVersion: String = "3.22.0",
     discoveryStatusCode: Int = 200,
+    discoveryThrowsCancellation: Bool = false,
     sessionStatusCode: Int = 200
 ) -> EnterpriseMetadataFixture {
     let profileStore = EnterpriseMetadataProfileStore(profile: profile)
@@ -275,7 +305,8 @@ private func enterpriseMetadataFixture(
     )
     let discoveryTransport = EnterpriseMetadataDiscoveryTransport(
         installedVersion: discoveredVersion,
-        statusCode: discoveryStatusCode
+        statusCode: discoveryStatusCode,
+        throwsCancellation: discoveryThrowsCancellation
     )
     let sessionCoordinator = GitHubConnectionSessionCoordinator(
         credentialStore: credentialStore,
