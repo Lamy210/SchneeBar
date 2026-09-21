@@ -11,16 +11,7 @@ public struct GitHubConnection: Identifiable, Codable, Equatable, Sendable {
     public var displayName: String
     public let deploymentKind: GitHubDeploymentKind
     public let webBaseURL: URL
-    public var serverVersion: String? {
-        didSet {
-            guard deploymentKind == .enterpriseServer,
-                  apiVersion == nil
-            else {
-                return
-            }
-            apiVersion = Self.preferredEnterpriseAPIVersion(for: serverVersion)
-        }
-    }
+    public private(set) var serverVersion: String?
     public var apiVersion: String?
 
     public init(
