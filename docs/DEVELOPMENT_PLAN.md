@@ -55,6 +55,7 @@ Implemented foundation:
 - endpoint resolution without hard-coding `api.github.com`
 - GHES endpoint discovery foundation
 - discovered GHES version compatibility surfaced in connection health without masking operational failures
+- bounded GHES metadata rediscovery during existing refreshes, capped at one `/meta` request when the persisted 24-hour check cadence is due, with no background polling and best-effort fallback to the last known server version
 - REST API version policy
 - GitHub.com / enterprise-aware request construction boundaries
 - session-scoped, repository-aware capability assessment for Actions, Pull Requests, Checks, and Deployments
