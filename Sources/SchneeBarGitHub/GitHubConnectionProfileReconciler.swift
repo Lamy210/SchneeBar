@@ -24,7 +24,11 @@ public struct GitHubConnectionProfileReconciler: Sendable {
                 repositorySelection: .allAccessible,
                 isEnabled: true,
                 createdAt: now,
-                lastConnectedAt: now
+                lastConnectedAt: now,
+                lastEnterpriseMetadataCheckAt: enterpriseMetadataCheckTime(
+                    for: authenticatedConnection,
+                    now: now
+                )
             )
         }
 
@@ -45,8 +49,19 @@ public struct GitHubConnectionProfileReconciler: Sendable {
             repositorySelection: existing.repositorySelection,
             isEnabled: existing.isEnabled,
             createdAt: existing.createdAt,
-            lastConnectedAt: now
+            lastConnectedAt: now,
+            lastEnterpriseMetadataCheckAt: enterpriseMetadataCheckTime(
+                for: authenticatedConnection,
+                now: now
+            )
         )
+    }
+
+    private func enterpriseMetadataCheckTime(
+        for connection: GitHubConnection,
+        now: Date
+    ) -> Date? {
+        connection.deploymentKind == .enterpriseServer ? now : nil
     }
 
     private func matchingProfile(
