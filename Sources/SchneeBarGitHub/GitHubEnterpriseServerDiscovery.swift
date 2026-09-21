@@ -81,6 +81,30 @@ public struct GitHubEnterpriseCompatibilityPolicy: Sendable {
     }
 }
 
+public struct GitHubEnterpriseMetadataRefreshPolicy: Sendable {
+    public let minimumInterval: TimeInterval
+
+    public init(
+        minimumInterval: TimeInterval = 24 * 60 * 60
+    ) {
+        self.minimumInterval = max(0, minimumInterval)
+    }
+
+    public func shouldRefresh(
+        connection: GitHubConnection,
+        lastCheckedAt: Date?,
+        now: Date
+    ) -> Bool {
+        guard connection.deploymentKind == .enterpriseServer else {
+            return false
+        }
+        guard let lastCheckedAt else {
+            return true
+        }
+        return now.timeIntervalSince(lastCheckedAt) >= minimumInterval
+    }
+}
+
 public struct GitHubEnterpriseServerDiscoveryResult: Equatable, Sendable {
     public let installedVersion: String
     public let parsedVersion: GitHubEnterpriseServerVersion?
