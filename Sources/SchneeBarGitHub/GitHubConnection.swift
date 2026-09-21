@@ -45,6 +45,28 @@ public struct GitHubConnection: Identifiable, Codable, Equatable, Sendable {
         }
     }
 
+    public mutating func applyDiscoveredServerVersion(
+        _ discoveredVersion: String?
+    ) {
+        guard deploymentKind == .enterpriseServer else {
+            return
+        }
+
+        let previouslyDerivedVersion = Self.preferredEnterpriseAPIVersion(
+            for: serverVersion
+        )
+        let shouldRefreshDerivedVersion = apiVersion == nil
+            || apiVersion == previouslyDerivedVersion
+
+        serverVersion = discoveredVersion
+
+        if shouldRefreshDerivedVersion {
+            apiVersion = Self.preferredEnterpriseAPIVersion(
+                for: discoveredVersion
+            )
+        }
+    }
+
     private static func preferredEnterpriseAPIVersion(
         for serverVersion: String?
     ) -> String? {
