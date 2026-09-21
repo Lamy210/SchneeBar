@@ -11,16 +11,9 @@ public struct GitHubConnection: Identifiable, Codable, Equatable, Sendable {
     public var displayName: String
     public let deploymentKind: GitHubDeploymentKind
     public let webBaseURL: URL
-    public var serverVersion: String? {
-        didSet {
-            guard deploymentKind == .enterpriseServer,
-                  apiVersion == nil
-            else {
-                return
-            }
-            apiVersion = Self.preferredEnterpriseAPIVersion(for: serverVersion)
-        }
-    }
+    /// Latest GHES version discovered by the provider boundary.
+    /// Use `applyDiscoveredServerVersion` so derived API-version policy stays in sync.
+    public private(set) var serverVersion: String?
     public var apiVersion: String?
 
     public init(
@@ -42,6 +35,28 @@ public struct GitHubConnection: Identifiable, Codable, Equatable, Sendable {
             self.apiVersion = Self.preferredEnterpriseAPIVersion(for: serverVersion)
         } else {
             self.apiVersion = nil
+        }
+    }
+
+    public mutating func applyDiscoveredServerVersion(
+        _ discoveredVersion: String?
+    ) {
+        guard deploymentKind == .enterpriseServer else {
+            return
+        }
+
+        let previouslyDerivedVersion = Self.preferredEnterpriseAPIVersion(
+            for: serverVersion
+        )
+        let shouldRefreshDerivedVersion = apiVersion == nil
+            || apiVersion == previouslyDerivedVersion
+
+        serverVersion = discoveredVersion
+
+        if shouldRefreshDerivedVersion {
+            apiVersion = Self.preferredEnterpriseAPIVersion(
+                for: discoveredVersion
+            )
         }
     }
 

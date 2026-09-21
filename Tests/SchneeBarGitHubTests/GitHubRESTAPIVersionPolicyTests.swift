@@ -41,7 +41,7 @@ func unknownEnterpriseVersionDoesNotInventAPIVersion() {
 }
 
 @Test
-func connectionDerivesEnterpriseAPIVersionWhenServerVersionArrives() throws {
+func connectionDerivesEnterpriseAPIVersionWhenDiscoveredVersionArrives() throws {
     var connection = GitHubConnection(
         displayName: "Internal GitHub",
         deploymentKind: .enterpriseServer,
@@ -50,7 +50,7 @@ func connectionDerivesEnterpriseAPIVersionWhenServerVersionArrives() throws {
 
     #expect(connection.apiVersion == nil)
 
-    connection.serverVersion = "3.20.8"
+    connection.applyDiscoveredServerVersion("3.20.8")
     #expect(connection.apiVersion == "2022-11-28")
 
     var newerConnection = GitHubConnection(
@@ -58,7 +58,7 @@ func connectionDerivesEnterpriseAPIVersionWhenServerVersionArrives() throws {
         deploymentKind: .enterpriseServer,
         webBaseURL: try #require(URL(string: "https://github.internal.example"))
     )
-    newerConnection.serverVersion = "3.22.0"
+    newerConnection.applyDiscoveredServerVersion("3.22.0")
     #expect(newerConnection.apiVersion == "2026-03-10")
 }
 
@@ -71,6 +71,57 @@ func explicitEnterpriseAPIVersionIsNotOverwrittenByDiscovery() throws {
         apiVersion: "custom-version"
     )
 
-    connection.serverVersion = "3.22.0"
+    connection.applyDiscoveredServerVersion("3.22.0")
     #expect(connection.apiVersion == "custom-version")
+}
+
+@Test
+func discoveredEnterpriseVersionRecomputesAutomaticallyDerivedAPIVersion() throws {
+    var connection = GitHubConnection(
+        displayName: "Internal GitHub",
+        deploymentKind: .enterpriseServer,
+        webBaseURL: try #require(URL(string: "https://github.internal.example")),
+        serverVersion: "3.20.8"
+    )
+
+    #expect(connection.apiVersion == "2022-11-28")
+
+    connection.applyDiscoveredServerVersion("3.22.0")
+    #expect(connection.serverVersion == "3.22.0")
+    #expect(connection.apiVersion == "2026-03-10")
+
+    connection.applyDiscoveredServerVersion("3.20.9")
+    #expect(connection.serverVersion == "3.20.9")
+    #expect(connection.apiVersion == "2022-11-28")
+}
+
+@Test
+func discoveredEnterpriseVersionPreservesExplicitAPIVersionOverride() throws {
+    var connection = GitHubConnection(
+        displayName: "Internal GitHub",
+        deploymentKind: .enterpriseServer,
+        webBaseURL: try #require(URL(string: "https://github.internal.example")),
+        serverVersion: "3.20.8",
+        apiVersion: "custom-version"
+    )
+
+    connection.applyDiscoveredServerVersion("3.22.0")
+
+    #expect(connection.serverVersion == "3.22.0")
+    #expect(connection.apiVersion == "custom-version")
+}
+
+@Test
+func hostedConnectionIgnoresEnterpriseServerDiscoveryMutation() throws {
+    var connection = GitHubConnection(
+        displayName: "GitHub.com",
+        deploymentKind: .githubDotCom,
+        webBaseURL: try #require(URL(string: "https://github.com")),
+        apiVersion: "2026-03-10"
+    )
+
+    connection.applyDiscoveredServerVersion("3.22.0")
+
+    #expect(connection.serverVersion == nil)
+    #expect(connection.apiVersion == "2026-03-10")
 }
