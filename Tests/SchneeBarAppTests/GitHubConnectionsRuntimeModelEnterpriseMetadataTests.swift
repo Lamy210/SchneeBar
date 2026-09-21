@@ -52,13 +52,18 @@ private actor EnterpriseMetadataCredentialStore: GitHubCredentialStore {
 
 private actor EnterpriseMetadataSessionTransport: GitHubHTTPTransport {
     private var responses: [String]
+    private let statusCode: Int
     private var apiVersions: [String?] = []
 
-    init(refreshCount: Int) {
+    init(
+        refreshCount: Int,
+        statusCode: Int = 200
+    ) {
         responses = Array(
             repeating: enterpriseMetadataSessionResponses(),
             count: refreshCount
         ).flatMap { $0 }
+        self.statusCode = statusCode
     }
 
     func data(
@@ -71,7 +76,7 @@ private actor EnterpriseMetadataSessionTransport: GitHubHTTPTransport {
         let response = try #require(
             HTTPURLResponse(
                 url: request.url!,
-                statusCode: 200,
+                statusCode: statusCode,
                 httpVersion: "HTTP/1.1",
                 headerFields: nil
             )
@@ -211,6 +216,34 @@ func failedEnterpriseRediscoveryDoesNotHideHealthySessionAndIsBounded() async th
     #expect(await fixture.discoveryTransport.callCount() == 1)
 }
 
+@Test @MainActor
+func failedMetadataAndSessionStillBoundMetadataRetryCadence() async throws {
+    let now = Date(timeIntervalSince1970: 350_000)
+    let profile = try enterpriseMetadataProfile(
+        serverVersion: "3.20.8",
+        lastCheckAt: nil
+    )
+    let fixture = enterpriseMetadataFixture(
+        profile: profile,
+        now: now,
+        refreshCount: 2,
+        discoveryStatusCode: 503,
+        sessionStatusCode: 503
+    )
+    fixture.model.profiles = [profile]
+
+    await fixture.model.refresh(profileID: profile.id)
+    await fixture.model.refresh(profileID: profile.id)
+
+    let updated = try #require(fixture.model.profiles.first)
+    #expect(updated.lastEnterpriseMetadataCheckAt == now)
+    #expect(
+        fixture.model.statusByConnectionID[profile.id]
+            == .unavailable
+    )
+    #expect(await fixture.discoveryTransport.callCount() == 1)
+}
+
 @MainActor
 private struct EnterpriseMetadataFixture {
     let model: GitHubConnectionsRuntimeModel
@@ -224,12 +257,14 @@ private func enterpriseMetadataFixture(
     now: Date,
     refreshCount: Int,
     discoveredVersion: String = "3.22.0",
-    discoveryStatusCode: Int = 200
+    discoveryStatusCode: Int = 200,
+    sessionStatusCode: Int = 200
 ) -> EnterpriseMetadataFixture {
     let profileStore = EnterpriseMetadataProfileStore(profile: profile)
     let credentialStore = EnterpriseMetadataCredentialStore(profile: profile)
     let sessionTransport = EnterpriseMetadataSessionTransport(
-        refreshCount: refreshCount
+        refreshCount: refreshCount,
+        statusCode: sessionStatusCode
     )
     let discoveryTransport = EnterpriseMetadataDiscoveryTransport(
         installedVersion: discoveredVersion,
