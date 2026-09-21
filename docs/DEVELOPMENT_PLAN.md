@@ -54,6 +54,7 @@ Implemented foundation:
 - repository access and monitored-repository selection
 - endpoint resolution without hard-coding `api.github.com`
 - GHES endpoint discovery foundation
+- discovered GHES version compatibility surfaced in connection health without masking operational failures
 - REST API version policy
 - GitHub.com / enterprise-aware request construction boundaries
 - session-scoped, repository-aware capability assessment for Actions, Pull Requests, Checks, and Deployments
@@ -191,8 +192,8 @@ Still required:
 
 ## Current implementation priority
 
-1. Revisit standalone/paginated Environment browsing, local history-row drill-down, and custom protection-rule details only if product usage justifies the extra scope.
-2. Broaden enterprise validation toward Phase 5 requirements.
+1. Broaden enterprise validation toward Phase 5 requirements.
+2. Revisit standalone/paginated Environment browsing, local history-row drill-down, and custom protection-rule details only if product usage justifies the extra scope.
 3. Only then broaden system widgets or external provider/plugin scope.
 
 ## Engineering constraints
