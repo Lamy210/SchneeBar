@@ -506,6 +506,7 @@ final class GitHubConnectionsRuntimeModel {
 
             if profile != profileBeforeMetadataRefresh {
                 try? await profileStore.save(profile)
+                try Task.checkCancellation()
                 guard isCurrentOperationGeneration(generation, for: profileID) else {
                     await repairProfileStoreAfterStaleWrite(profileID: profileID)
                     return
@@ -928,6 +929,8 @@ final class GitHubConnectionsRuntimeModel {
             updated.connection.applyDiscoveredServerVersion(
                 discovery.installedVersion
             )
+        } catch is CancellationError {
+            throw CancellationError()
         } catch {
             try Task.checkCancellation()
         }
