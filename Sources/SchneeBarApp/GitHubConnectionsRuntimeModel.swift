@@ -45,6 +45,9 @@ final class GitHubConnectionsRuntimeModel {
     private let enterpriseDiscovery: GitHubEnterpriseServerDiscoveryClient
 
     @ObservationIgnored
+    private let enterpriseCompatibilityPolicy: GitHubEnterpriseCompatibilityPolicy
+
+    @ObservationIgnored
     private var inventoryByConnectionID: [UUID: GitHubAccessInventory] = [:]
 
     @ObservationIgnored
@@ -66,7 +69,8 @@ final class GitHubConnectionsRuntimeModel {
         deliveryHistoryStore: any DeliveryHistoryStoring = NoopDeliveryHistoryStore(),
         deviceFlowClient: GitHubDeviceFlowClient = GitHubDeviceFlowClient(),
         authorizationWaiter: GitHubDeviceAuthorizationWaiter = GitHubDeviceAuthorizationWaiter(),
-        enterpriseDiscovery: GitHubEnterpriseServerDiscoveryClient = GitHubEnterpriseServerDiscoveryClient()
+        enterpriseDiscovery: GitHubEnterpriseServerDiscoveryClient = GitHubEnterpriseServerDiscoveryClient(),
+        enterpriseCompatibilityPolicy: GitHubEnterpriseCompatibilityPolicy = .init()
     ) {
         self.profileStore = profileStore
         self.sessionCoordinator = sessionCoordinator
@@ -75,6 +79,7 @@ final class GitHubConnectionsRuntimeModel {
         self.deviceFlowClient = deviceFlowClient
         self.authorizationWaiter = authorizationWaiter
         self.enterpriseDiscovery = enterpriseDiscovery
+        self.enterpriseCompatibilityPolicy = enterpriseCompatibilityPolicy
     }
 
     var onboardingIsActive: Bool {
@@ -291,7 +296,8 @@ final class GitHubConnectionsRuntimeModel {
             applyActivityStatus(
                 result,
                 profileID: profile.id,
-                inventory: inventory
+                inventory: inventory,
+                connection: profile.connection
             )
         }
 
@@ -416,7 +422,8 @@ final class GitHubConnectionsRuntimeModel {
                     inventoryByConnectionID[profile.id] = finalizedSession.inventory
                     capabilitiesByConnectionID[profile.id] = finalizedSession.capabilities
                     statusByConnectionID[profile.id] = presentationStatus(
-                        for: finalizedSession.inventory
+                        for: finalizedSession.inventory,
+                        connection: profile.connection
                     )
                 } else {
                     inventoryByConnectionID.removeValue(forKey: profile.id)
@@ -495,7 +502,10 @@ final class GitHubConnectionsRuntimeModel {
 
             inventoryByConnectionID[profileID] = session.inventory
             capabilitiesByConnectionID[profileID] = session.capabilities
-            statusByConnectionID[profileID] = presentationStatus(for: session.inventory)
+            statusByConnectionID[profileID] = presentationStatus(
+                for: session.inventory,
+                connection: updated.connection
+            )
             upsert(updated)
             onActivitySourceChanged?()
         } catch GitHubConnectionSessionError.credentialNotFound,
@@ -683,7 +693,10 @@ final class GitHubConnectionsRuntimeModel {
                 inventoryByConnectionID[updated.id] = session.inventory
                 capabilitiesByConnectionID[updated.id] = session.capabilities
                 statusByConnectionID[updated.id] = updated.isEnabled
-                    ? presentationStatus(for: session.inventory)
+                    ? presentationStatus(
+                        for: session.inventory,
+                        connection: updated.connection
+                    )
                     : .disabled
                 onActivitySourceChanged?()
                 recoveryTask = nil
@@ -824,15 +837,22 @@ final class GitHubConnectionsRuntimeModel {
     private func applyActivityStatus(
         _ result: GitHubActivityLoadResult,
         profileID: UUID,
-        inventory: GitHubAccessInventory
+        inventory: GitHubAccessInventory,
+        connection: GitHubConnection
     ) {
         if result.attemptedTargetCount == 0 {
-            statusByConnectionID[profileID] = presentationStatus(for: inventory)
+            statusByConnectionID[profileID] = presentationStatus(
+                for: inventory,
+                connection: connection
+            )
             return
         }
 
         if result.successfulTargetCount > 0 {
-            statusByConnectionID[profileID] = presentationStatus(for: inventory)
+            statusByConnectionID[profileID] = presentationStatus(
+                for: inventory,
+                connection: connection
+            )
             return
         }
 
@@ -840,7 +860,10 @@ final class GitHubConnectionsRuntimeModel {
             $0.reason != .capabilityUnavailable
         }
         guard !operationalFailures.isEmpty else {
-            statusByConnectionID[profileID] = presentationStatus(for: inventory)
+            statusByConnectionID[profileID] = presentationStatus(
+                for: inventory,
+                connection: connection
+            )
             return
         }
 
@@ -885,18 +908,37 @@ final class GitHubConnectionsRuntimeModel {
     }
 
     private func presentationStatus(
-        for inventory: GitHubAccessInventory
+        for inventory: GitHubAccessInventory,
+        connection: GitHubConnection
     ) -> GitHubConnectionPresentationStatus {
         let available = inventory.installations.filter { $0.status == .available }
         let repositoryIDs = Set(available.flatMap { $0.repositories.map(\.id) })
 
+        let operationalStatus: GitHubConnectionPresentationStatus
         if !available.isEmpty || inventory.installations.isEmpty {
-            return .connected(repositoryCount: repositoryIDs.count)
+            operationalStatus = .connected(repositoryCount: repositoryIDs.count)
+        } else if inventory.installations.allSatisfy({ $0.status == .suspended }) {
+            operationalStatus = .suspended
+        } else {
+            operationalStatus = .unavailable
         }
-        if inventory.installations.allSatisfy({ $0.status == .suspended }) {
-            return .suspended
+
+        guard case .connected = operationalStatus,
+              connection.deploymentKind == .enterpriseServer,
+              let rawVersion = connection.serverVersion?
+                .trimmingCharacters(in: .whitespacesAndNewlines),
+              !rawVersion.isEmpty
+        else {
+            return operationalStatus
         }
-        return .unavailable
+
+        let parsedVersion = GitHubEnterpriseServerVersion(parsing: rawVersion)
+        switch enterpriseCompatibilityPolicy.compatibility(for: parsedVersion) {
+        case .tested:
+            return operationalStatus
+        case .olderUntested, .newerUntested, .unknownVersion:
+            return .untestedServer(version: rawVersion)
+        }
     }
 
     private func displayHost(for connection: GitHubConnection) -> String {
