@@ -682,7 +682,8 @@ final class GitHubConnectionsRuntimeModel {
                     repositorySelection: current.repositorySelection,
                     isEnabled: current.isEnabled,
                     createdAt: current.createdAt,
-                    lastConnectedAt: .now
+                    lastConnectedAt: .now,
+                    lastEnterpriseMetadataCheckAt: current.lastEnterpriseMetadataCheckAt
                 )
 
                 do {
