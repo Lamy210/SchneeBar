@@ -83,7 +83,8 @@ public struct GitHubEnterpriseCompatibilityPolicy: Sendable {
 
 /// Bounds public GHES metadata discovery when App-level connection refreshes
 /// occur. This policy schedules no work by itself and creates no background
-/// polling.
+/// polling. Callers persist the check-attempt time whether discovery succeeds
+/// or fails so transient metadata outages cannot turn into refresh-time polling.
 public struct GitHubEnterpriseMetadataRefreshPolicy: Sendable {
     public let minimumInterval: TimeInterval
 
