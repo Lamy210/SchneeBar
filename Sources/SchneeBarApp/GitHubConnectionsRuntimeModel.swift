@@ -33,6 +33,9 @@ final class GitHubConnectionsRuntimeModel {
     private let activityProvider: GitHubActivityProvider
 
     @ObservationIgnored
+    let deliveryHistoryStore: any DeliveryHistoryStoring
+
+    @ObservationIgnored
     private let deviceFlowClient: GitHubDeviceFlowClient
 
     @ObservationIgnored
@@ -60,6 +63,7 @@ final class GitHubConnectionsRuntimeModel {
         profileStore: any GitHubConnectionProfileStore,
         sessionCoordinator: GitHubConnectionSessionCoordinator,
         activityProvider: GitHubActivityProvider,
+        deliveryHistoryStore: any DeliveryHistoryStoring = NoopDeliveryHistoryStore(),
         deviceFlowClient: GitHubDeviceFlowClient = GitHubDeviceFlowClient(),
         authorizationWaiter: GitHubDeviceAuthorizationWaiter = GitHubDeviceAuthorizationWaiter(),
         enterpriseDiscovery: GitHubEnterpriseServerDiscoveryClient = GitHubEnterpriseServerDiscoveryClient()
@@ -67,6 +71,7 @@ final class GitHubConnectionsRuntimeModel {
         self.profileStore = profileStore
         self.sessionCoordinator = sessionCoordinator
         self.activityProvider = activityProvider
+        self.deliveryHistoryStore = deliveryHistoryStore
         self.deviceFlowClient = deviceFlowClient
         self.authorizationWaiter = authorizationWaiter
         self.enterpriseDiscovery = enterpriseDiscovery
@@ -561,6 +566,9 @@ final class GitHubConnectionsRuntimeModel {
                 identity: profile.account
             )
             try await profileStore.delete(id: profileID)
+            try? await deliveryHistoryStore.delete(
+                sourceID: profileID.uuidString
+            )
             profiles.removeAll(where: { $0.id == profileID })
             inventoryByConnectionID.removeValue(forKey: profileID)
             capabilitiesByConnectionID.removeValue(forKey: profileID)

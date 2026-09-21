@@ -47,3 +47,65 @@ func deliveryHistoryEntryAllowsMissingOptionalPresentationData() {
     #expect(entry.detail == nil)
     #expect(entry.destinationURL == nil)
 }
+
+
+@Test
+func deliveryHistoryCodableRoundTrips() throws {
+    let original = DeliveryHistorySnapshot(
+        repository: "snow/repo",
+        entries: [
+            DeliveryHistoryEntry(
+                id: "github-actions:42:900",
+                title: "CI",
+                detail: "Succeeded · Default branch · Run #900",
+                state: .success,
+                destinationURL: try #require(
+                    URL(string: "https://github.com/snow/repo/actions/runs/900")
+                ),
+                occurredAt: Date(timeIntervalSince1970: 300)
+            ),
+        ]
+    )
+    let encoder = JSONEncoder()
+    encoder.dateEncodingStrategy = .iso8601
+    let data = try encoder.encode(original)
+    let decoder = JSONDecoder()
+    decoder.dateDecodingStrategy = .iso8601
+
+    #expect(try decoder.decode(DeliveryHistorySnapshot.self, from: data) == original)
+}
+
+@Test
+func deliveryHistoryStorageScopeIsStableAndHashable() {
+    let first = DeliveryHistoryStorageScope(
+        sourceID: "connection-1",
+        repositoryID: "42"
+    )
+    let same = DeliveryHistoryStorageScope(
+        sourceID: "connection-1",
+        repositoryID: "42"
+    )
+    let other = DeliveryHistoryStorageScope(
+        sourceID: "connection-2",
+        repositoryID: "42"
+    )
+
+    #expect(first == same)
+    #expect(first != other)
+    #expect(Set([first, same, other]).count == 2)
+}
+
+@Test
+func noopDeliveryHistoryStoreNeverPersists() async throws {
+    let store = NoopDeliveryHistoryStore()
+    let scope = DeliveryHistoryStorageScope(
+        sourceID: "source",
+        repositoryID: "repo"
+    )
+    let snapshot = DeliveryHistorySnapshot(repository: "snow/repo", entries: [])
+
+    #expect(try await store.load(scope: scope) == nil)
+    try await store.save(snapshot, scope: scope)
+    try await store.delete(sourceID: "source")
+    #expect(try await store.load(scope: scope) == nil)
+}
