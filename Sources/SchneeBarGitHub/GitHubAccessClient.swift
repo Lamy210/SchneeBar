@@ -393,8 +393,7 @@ public struct GitHubAccessClient: Sendable {
                     throw error
                 }
 
-                switch error.statusCode {
-                case 403:
+                if error.statusCode == 403 {
                     installationAccess.append(
                         GitHubInstallationAccess(
                             installation: installation,
@@ -402,7 +401,7 @@ public struct GitHubAccessClient: Sendable {
                             status: .forbidden
                         )
                     )
-                case 404:
+                } else if error.statusCode == 404 {
                     installationAccess.append(
                         GitHubInstallationAccess(
                             installation: installation,
@@ -410,7 +409,7 @@ public struct GitHubAccessClient: Sendable {
                             status: .notFound
                         )
                     )
-                default:
+                } else {
                     installationAccess.append(
                         GitHubInstallationAccess(
                             installation: installation,
