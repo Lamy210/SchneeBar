@@ -495,12 +495,22 @@ final class GitHubConnectionsRuntimeModel {
 
         statusByConnectionID[profileID] = .syncing
         do {
+            let profileBeforeMetadataRefresh = profile
             profile = try await refreshEnterpriseMetadataIfDue(
                 profile,
                 at: now()
             )
             guard isCurrentOperationGeneration(generation, for: profileID) else {
                 return
+            }
+
+            if profile != profileBeforeMetadataRefresh {
+                try? await profileStore.save(profile)
+                guard isCurrentOperationGeneration(generation, for: profileID) else {
+                    await repairProfileStoreAfterStaleWrite(profileID: profileID)
+                    return
+                }
+                upsert(profile)
             }
 
             let session = try await sessionCoordinator.restore(
