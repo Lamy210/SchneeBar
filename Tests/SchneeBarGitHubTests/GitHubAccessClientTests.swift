@@ -329,6 +329,35 @@ func preservesSafeSSOPartialResultsEvidenceWithoutOrganizationIDs() async throws
 }
 
 @Test
+func preservesUnknownSSOHeaderAsOpaqueSignal() async throws {
+    let transport = AccessQueueTransport([
+        AccessStubResponse(
+            #"{\"message\":\"SSO policy\"}"#,
+            statusCode: 403,
+            headers: [
+                "X-GitHub-SSO":
+                    "future-directive; sensitive-field=must-not-be-retained"
+            ]
+        )
+    ])
+    let client = GitHubAccessClient(transport: transport)
+
+    await #expect(
+        throws: GitHubAccessClientError.httpResponse(
+            GitHubHTTPResponseEvidence(
+                statusCode: 403,
+                ssoSignal: .other
+            )
+        )
+    ) {
+        try await client.authenticatedAccount(
+            connection: try githubDotComAccessConnection(),
+            credential: GitHubCredential(accessToken: "ghu_access")
+        )
+    }
+}
+
+@Test
 func inventoryKeepsSSOEvidenceBacked403AsForbiddenInstallation() async throws {
     let transport = AccessQueueTransport([
         AccessStubResponse(#"{\"id\":1,\"login\":\"octocat\",\"name\":null,\"avatar_url\":null}"#),
