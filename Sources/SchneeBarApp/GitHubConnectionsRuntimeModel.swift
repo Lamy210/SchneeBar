@@ -901,7 +901,9 @@ final class GitHubConnectionsRuntimeModel {
 
         if draft.deploymentKind == .enterpriseServer {
             let discovery = try await enterpriseDiscovery.discover(connection: connection)
-            connection.serverVersion = discovery.installedVersion
+            connection.applyDiscoveredServerVersion(
+                discovery.installedVersion
+            )
         }
 
         return connection
