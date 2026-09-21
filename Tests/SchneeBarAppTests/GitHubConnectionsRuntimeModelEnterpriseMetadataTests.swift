@@ -157,6 +157,32 @@ func refreshRediscoveryUpdatesEnterpriseVersionBeforeSessionRestore() async thro
 }
 
 @Test @MainActor
+func rediscoverySurfacesNewUntestedEnterpriseVersion() async throws {
+    let now = Date(timeIntervalSince1970: 250_000)
+    let profile = try enterpriseMetadataProfile(
+        serverVersion: "3.22.0",
+        lastCheckAt: now.addingTimeInterval(-(25 * 60 * 60))
+    )
+    let fixture = enterpriseMetadataFixture(
+        profile: profile,
+        now: now,
+        refreshCount: 1,
+        discoveredVersion: "3.23.0"
+    )
+    fixture.model.profiles = [profile]
+
+    await fixture.model.refresh(profileID: profile.id)
+
+    let updated = try #require(fixture.model.profiles.first)
+    #expect(updated.connection.serverVersion == "3.23.0")
+    #expect(
+        fixture.model.statusByConnectionID[profile.id]
+            == .untestedServer(version: "3.23.0")
+    )
+    #expect(await fixture.discoveryTransport.callCount() == 1)
+}
+
+@Test @MainActor
 func failedEnterpriseRediscoveryDoesNotHideHealthySessionAndIsBounded() async throws {
     let now = Date(timeIntervalSince1970: 300_000)
     let profile = try enterpriseMetadataProfile(
@@ -197,6 +223,7 @@ private func enterpriseMetadataFixture(
     profile: GitHubConnectionProfile,
     now: Date,
     refreshCount: Int,
+    discoveredVersion: String = "3.22.0",
     discoveryStatusCode: Int = 200
 ) -> EnterpriseMetadataFixture {
     let profileStore = EnterpriseMetadataProfileStore(profile: profile)
@@ -205,6 +232,7 @@ private func enterpriseMetadataFixture(
         refreshCount: refreshCount
     )
     let discoveryTransport = EnterpriseMetadataDiscoveryTransport(
+        installedVersion: discoveredVersion,
         statusCode: discoveryStatusCode
     )
     let sessionCoordinator = GitHubConnectionSessionCoordinator(
