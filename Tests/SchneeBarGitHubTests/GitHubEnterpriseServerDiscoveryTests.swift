@@ -49,6 +49,10 @@ func discoversSupportedEnterpriseServerVersionFromMetaEndpoint() async throws {
     #expect(result.compatibility == .tested)
     #expect(await transport.lastRequest()?.url?.absoluteString == "https://github.internal.example/api/v3/meta")
     #expect(await transport.lastRequest()?.value(forHTTPHeaderField: "Accept") == "application/vnd.github+json")
+    #expect(
+        await transport.lastRequest()?
+            .value(forHTTPHeaderField: "X-GitHub-Api-Version") == nil
+    )
 }
 
 @Test
