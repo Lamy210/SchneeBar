@@ -23,10 +23,6 @@ private actor EnterpriseMetadataProfileStore: GitHubConnectionProfileStore {
     }
 
     func delete(id: UUID) async throws {}
-
-    func current() -> GitHubConnectionProfile {
-        profile
-    }
 }
 
 private actor EnterpriseMetadataCredentialStore: GitHubCredentialStore {
@@ -265,9 +261,9 @@ private func enterpriseMetadataProfile(
 
 private func enterpriseMetadataSessionResponses() -> [String] {
     [
-        #"{\"id\":42,\"login\":\"snow-user\",\"name\":\"Snow User\",\"avatar_url\":null}"#,
-        #"{\"id\":42,\"login\":\"snow-user\",\"name\":\"Snow User\",\"avatar_url\":null}"#,
-        #"{\"total_count\":1,\"installations\":[{\"id\":10,\"account\":{\"id\":100,\"login\":\"snow\",\"type\":\"Organization\",\"avatar_url\":null},\"repository_selection\":\"all\",\"permissions\":{\"actions\":\"read\"},\"suspended_at\":null}]}"#,
-        #"{\"total_count\":1,\"repositories\":[{\"id\":1,\"name\":\"app\",\"full_name\":\"snow/app\",\"private\":true,\"owner\":{\"id\":100,\"login\":\"snow\",\"type\":\"Organization\",\"avatar_url\":null},\"permissions\":{\"admin\":false,\"maintain\":false,\"push\":false,\"triage\":false,\"pull\":true}}]}"#,
+        #"{"id":42,"login":"snow-user","name":"Snow User","avatar_url":null}"#,
+        #"{"id":42,"login":"snow-user","name":"Snow User","avatar_url":null}"#,
+        #"{"total_count":1,"installations":[{"id":10,"account":{"id":100,"login":"snow","type":"Organization","avatar_url":null},"repository_selection":"all","permissions":{"actions":"read"},"suspended_at":null}]}"#,
+        #"{"total_count":1,"repositories":[{"id":1,"name":"app","full_name":"snow/app","private":true,"owner":{"id":100,"login":"snow","type":"Organization","avatar_url":null},"permissions":{"admin":false,"maintain":false,"push":false,"triage":false,"pull":true}}]}"#,
     ]
 }
