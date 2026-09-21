@@ -81,6 +81,36 @@ public struct GitHubEnterpriseCompatibilityPolicy: Sendable {
     }
 }
 
+/// Bounds public GHES metadata discovery when App-level connection refreshes
+/// occur. This policy schedules no work by itself and creates no background
+/// polling. Callers persist the check-attempt time whether discovery succeeds
+/// or fails so transient metadata outages cannot turn into refresh-time polling.
+public struct GitHubEnterpriseMetadataRefreshPolicy: Sendable {
+    public let minimumInterval: TimeInterval
+
+    public init(
+        minimumInterval: TimeInterval = 24 * 60 * 60
+    ) {
+        self.minimumInterval = max(0, minimumInterval)
+    }
+
+    public func shouldRefresh(
+        connection: GitHubConnection,
+        lastCheckedAt: Date?,
+        now: Date
+    ) -> Bool {
+        guard connection.deploymentKind == .enterpriseServer else {
+            return false
+        }
+        guard let lastCheckedAt else {
+            return true
+        }
+
+        let elapsed = now.timeIntervalSince(lastCheckedAt)
+        return elapsed < 0 || elapsed >= minimumInterval
+    }
+}
+
 public struct GitHubEnterpriseServerDiscoveryResult: Equatable, Sendable {
     public let installedVersion: String
     public let parsedVersion: GitHubEnterpriseServerVersion?
@@ -130,6 +160,8 @@ public struct GitHubEnterpriseServerDiscoveryClient: Sendable {
         var request = URLRequest(url: metaURL)
         request.httpMethod = "GET"
         request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
+        // Version discovery is the bootstrap for choosing an API version.
+        // Do not send X-GitHub-Api-Version before the server version is known.
 
         let (data, response) = try await transport.data(for: request)
         guard (200 ... 299).contains(response.statusCode) else {
