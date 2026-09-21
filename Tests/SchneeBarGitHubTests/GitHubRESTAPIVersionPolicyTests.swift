@@ -110,3 +110,19 @@ func discoveredEnterpriseVersionPreservesExplicitAPIVersionOverride() throws {
     #expect(connection.serverVersion == "3.22.0")
     #expect(connection.apiVersion == "custom-version")
 }
+
+
+@Test
+func hostedConnectionIgnoresEnterpriseServerDiscoveryMutation() throws {
+    var connection = GitHubConnection(
+        displayName: "GitHub.com",
+        deploymentKind: .githubDotCom,
+        webBaseURL: try #require(URL(string: "https://github.com")),
+        apiVersion: "2026-03-10"
+    )
+
+    connection.applyDiscoveredServerVersion("3.22.0")
+
+    #expect(connection.serverVersion == nil)
+    #expect(connection.apiVersion == "2026-03-10")
+}
