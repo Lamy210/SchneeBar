@@ -23,6 +23,10 @@ private actor EnterpriseMetadataProfileStore: GitHubConnectionProfileStore {
     }
 
     func delete(id: UUID) async throws {}
+
+    func current() -> GitHubConnectionProfile {
+        profile
+    }
 }
 
 private actor EnterpriseMetadataCredentialStore: GitHubCredentialStore {
@@ -237,6 +241,8 @@ func failedMetadataAndSessionStillBoundMetadataRetryCadence() async throws {
 
     let updated = try #require(fixture.model.profiles.first)
     #expect(updated.lastEnterpriseMetadataCheckAt == now)
+    let persisted = await fixture.profileStore.current()
+    #expect(persisted.lastEnterpriseMetadataCheckAt == now)
     #expect(
         fixture.model.statusByConnectionID[profile.id]
             == .unavailable
@@ -247,6 +253,7 @@ func failedMetadataAndSessionStillBoundMetadataRetryCadence() async throws {
 @MainActor
 private struct EnterpriseMetadataFixture {
     let model: GitHubConnectionsRuntimeModel
+    let profileStore: EnterpriseMetadataProfileStore
     let sessionTransport: EnterpriseMetadataSessionTransport
     let discoveryTransport: EnterpriseMetadataDiscoveryTransport
 }
@@ -291,6 +298,7 @@ private func enterpriseMetadataFixture(
 
     return EnterpriseMetadataFixture(
         model: model,
+        profileStore: profileStore,
         sessionTransport: sessionTransport,
         discoveryTransport: discoveryTransport
     )
