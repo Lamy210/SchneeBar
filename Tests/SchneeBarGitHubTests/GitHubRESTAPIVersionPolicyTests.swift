@@ -74,3 +74,39 @@ func explicitEnterpriseAPIVersionIsNotOverwrittenByDiscovery() throws {
     connection.serverVersion = "3.22.0"
     #expect(connection.apiVersion == "custom-version")
 }
+
+@Test
+func discoveredEnterpriseVersionRecomputesAutomaticallyDerivedAPIVersion() throws {
+    var connection = GitHubConnection(
+        displayName: "Internal GitHub",
+        deploymentKind: .enterpriseServer,
+        webBaseURL: try #require(URL(string: "https://github.internal.example")),
+        serverVersion: "3.20.8"
+    )
+
+    #expect(connection.apiVersion == "2022-11-28")
+
+    connection.applyDiscoveredServerVersion("3.22.0")
+    #expect(connection.serverVersion == "3.22.0")
+    #expect(connection.apiVersion == "2026-03-10")
+
+    connection.applyDiscoveredServerVersion("3.20.9")
+    #expect(connection.serverVersion == "3.20.9")
+    #expect(connection.apiVersion == "2022-11-28")
+}
+
+@Test
+func discoveredEnterpriseVersionPreservesExplicitAPIVersionOverride() throws {
+    var connection = GitHubConnection(
+        displayName: "Internal GitHub",
+        deploymentKind: .enterpriseServer,
+        webBaseURL: try #require(URL(string: "https://github.internal.example")),
+        serverVersion: "3.20.8",
+        apiVersion: "custom-version"
+    )
+
+    connection.applyDiscoveredServerVersion("3.22.0")
+
+    #expect(connection.serverVersion == "3.22.0")
+    #expect(connection.apiVersion == "custom-version")
+}
