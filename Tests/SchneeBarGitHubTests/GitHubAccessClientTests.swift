@@ -217,7 +217,7 @@ func inventoryKeepsForbiddenInstallationWithoutFailingWholeConnection() async th
         credential: GitHubCredential(accessToken: "ghu_access")
     )
 
-    #expect(inventory.installations[0].status == .forbidden)
+    #expect(inventory.installations[0].status == .ssoRequired)
     #expect(inventory.installations[0].repositories.isEmpty)
 }
 
@@ -329,7 +329,7 @@ func preservesUnknownSSOHeaderAsOpaqueSignal() async throws {
 }
 
 @Test
-func inventoryKeepsSSOEvidenceBacked403AsForbiddenInstallation() async throws {
+func inventoryMarksExplicitSSORequired403Separately() async throws {
     let transport = AccessQueueTransport([
         AccessStubResponse(#"{"id":1,"login":"octocat","name":null,"avatar_url":null}"#),
         AccessStubResponse(
