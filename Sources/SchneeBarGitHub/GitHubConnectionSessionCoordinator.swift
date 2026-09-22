@@ -82,7 +82,7 @@ public actor GitHubConnectionSessionCoordinator {
                 inventory: inventory,
                 capabilities: capabilities
             )
-        } catch GitHubAccessClientError.httpStatus(401) {
+        } catch let error as GitHubAccessClientError where error.statusCode == 401 {
             try? await credentialStore.delete(for: key)
             throw GitHubConnectionSessionError.reauthenticationRequired
         }
@@ -99,7 +99,7 @@ public actor GitHubConnectionSessionCoordinator {
                 connection: connection,
                 credential: credential
             )
-        } catch GitHubAccessClientError.httpStatus(401) {
+        } catch let error as GitHubAccessClientError where error.statusCode == 401 {
             throw GitHubConnectionSessionError.reauthenticationRequired
         }
 
@@ -116,7 +116,7 @@ public actor GitHubConnectionSessionCoordinator {
                 connection: connection,
                 credential: credential
             )
-        } catch GitHubAccessClientError.httpStatus(401) {
+        } catch let error as GitHubAccessClientError where error.statusCode == 401 {
             throw GitHubConnectionSessionError.reauthenticationRequired
         }
 
@@ -226,7 +226,7 @@ public actor GitHubConnectionSessionCoordinator {
                 connection: connection,
                 credential: credential
             )
-        } catch GitHubAccessClientError.httpStatus(401) {
+        } catch let error as GitHubAccessClientError where error.statusCode == 401 {
             throw GitHubConnectionSessionError.reauthenticationRequired
         }
 
@@ -243,7 +243,7 @@ public actor GitHubConnectionSessionCoordinator {
                 connection: connection,
                 credential: credential
             )
-        } catch GitHubAccessClientError.httpStatus(401) {
+        } catch let error as GitHubAccessClientError where error.statusCode == 401 {
             throw GitHubConnectionSessionError.reauthenticationRequired
         }
 
