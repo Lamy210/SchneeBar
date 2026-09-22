@@ -75,6 +75,7 @@ Implemented foundation:
 Remaining:
 
 - broader enterprise connection validation before Phase 5
+- evidence-backed SSO-required installation/connection health from explicit GitHub failure signals only; no inference from empty or forbidden resource sets
 
 ## Phase 3 — Developer Activity 🚧
 
