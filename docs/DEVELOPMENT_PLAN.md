@@ -175,6 +175,7 @@ Foundation already available from earlier phases:
 - GHES discovery primitives
 - REST API version policy
 - connection profiles that do not assume GitHub.com-only hosts
+- GHE.com dedicated tenant web-host validation with derived `api.SUBDOMAIN.ghe.com` endpoints
 
 Still required:
 
