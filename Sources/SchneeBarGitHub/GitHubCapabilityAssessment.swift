@@ -34,6 +34,7 @@ public struct GitHubRepositoryCapabilityAssessment: Equatable, Sendable {
 
 public enum GitHubInstallationCapabilityIssueReason: Equatable, Sendable {
     case suspended
+    case ssoRequired
     case forbidden
     case notFound
     case unavailable
@@ -261,6 +262,8 @@ public struct GitHubCapabilityEvaluator: Sendable {
             return .unavailable
         case .suspended:
             return .suspended
+        case .ssoRequired:
+            return .ssoRequired
         case .forbidden:
             return .forbidden
         case .notFound:
@@ -286,6 +289,7 @@ public struct GitHubCapabilityEvaluator: Sendable {
         case .forbidden: 1
         case .notFound: 2
         case .unavailable: 3
+        case .ssoRequired: 4
         }
     }
 }
