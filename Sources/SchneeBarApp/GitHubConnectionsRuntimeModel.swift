@@ -987,6 +987,8 @@ final class GitHubConnectionsRuntimeModel {
             operationalStatus = .connected(repositoryCount: repositoryIDs.count)
         } else if inventory.installations.allSatisfy({ $0.status == .suspended }) {
             operationalStatus = .suspended
+        } else if inventory.installations.contains(where: { $0.status == .ssoRequired }) {
+            operationalStatus = .ssoRequired
         } else {
             operationalStatus = .unavailable
         }
