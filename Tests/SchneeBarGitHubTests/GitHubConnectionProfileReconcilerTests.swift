@@ -49,6 +49,7 @@ func profileReconcilerReusesSameEndpointAndAccountWhilePreservingUserSettings() 
     #expect(profile.isEnabled == false)
     #expect(profile.createdAt == createdAt)
     #expect(profile.lastConnectedAt == lifecycleNow)
+    #expect(profile.lastEnterpriseMetadataCheckAt == nil)
 }
 
 @Test
@@ -116,6 +117,48 @@ func profileReconcilerDoesNotReuseSameAccountAcrossDifferentEnterpriseHosts() th
 }
 
 @Test
+func profileReconcilerRefreshesEnterpriseMetadataCheckTimeOnReconnect() throws {
+    let existingID = UUID(
+        uuidString: "00000000-0000-0000-0000-000000000333"
+    )!
+    let existing = GitHubConnectionProfile(
+        connection: GitHubConnection(
+            id: existingID,
+            displayName: "Internal GitHub",
+            deploymentKind: .enterpriseServer,
+            webBaseURL: try #require(
+                URL(string: "https://github.internal.example")
+            ),
+            serverVersion: "3.20.8"
+        ),
+        account: GitHubAccountIdentity(id: "42", login: "octocat"),
+        authenticationMethod: .deviceFlow,
+        lastEnterpriseMetadataCheckAt: Date(timeIntervalSince1970: 1_000)
+    )
+    let incoming = GitHubConnection(
+        displayName: "Internal GitHub",
+        deploymentKind: .enterpriseServer,
+        webBaseURL: try #require(
+            URL(string: "https://github.internal.example")
+        ),
+        serverVersion: "3.22.0"
+    )
+
+    let profile = GitHubConnectionProfileReconciler().reconcile(
+        existingProfiles: [existing],
+        authenticatedConnection: incoming,
+        account: GitHubAccountIdentity(id: "42", login: "octocat"),
+        authenticationMethod: .deviceFlow,
+        clientID: "client",
+        now: lifecycleNow
+    )
+
+    #expect(profile.id == existingID)
+    #expect(profile.connection.serverVersion == "3.22.0")
+    #expect(profile.lastEnterpriseMetadataCheckAt == lifecycleNow)
+}
+
+@Test
 func profileOrderingIsDeterministicAcrossInputOrder() throws {
     let alphaA = makeLifecycleProfile(
         id: UUID(uuidString: "00000000-0000-0000-0000-000000000001")!,
@@ -159,4 +202,28 @@ private func makeLifecycleProfile(
         account: GitHubAccountIdentity(id: accountID, login: login),
         authenticationMethod: .deviceFlow
     )
+}
+
+
+@Test
+func profileReconcilerRecordsEnterpriseMetadataCheckTime() throws {
+    let incoming = GitHubConnection(
+        displayName: "Internal GitHub",
+        deploymentKind: .enterpriseServer,
+        webBaseURL: try #require(
+            URL(string: "https://github.internal.example")
+        ),
+        serverVersion: "3.22.0"
+    )
+
+    let profile = GitHubConnectionProfileReconciler().reconcile(
+        existingProfiles: [],
+        authenticatedConnection: incoming,
+        account: GitHubAccountIdentity(id: "42", login: "octocat"),
+        authenticationMethod: .deviceFlow,
+        clientID: "client",
+        now: lifecycleNow
+    )
+
+    #expect(profile.lastEnterpriseMetadataCheckAt == lifecycleNow)
 }

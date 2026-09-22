@@ -27,8 +27,26 @@ func profileStoreRoundTripsNonSecretConnectionMetadata() async throws {
     let raw = try String(contentsOf: context.fileURL, encoding: .utf8)
     #expect(raw.contains("github.com"))
     #expect(raw.contains("Iv1.public-client"))
+    #expect(!raw.contains("lastEnterpriseMetadataCheckAt"))
     #expect(!raw.contains("access_token"))
     #expect(!raw.contains("refresh_token"))
+}
+
+@Test
+func profileStoreRoundTripsEnterpriseMetadataCheckTime() async throws {
+    let context = try temporaryProfileStore()
+    defer { try? FileManager.default.removeItem(at: context.directory) }
+    var expected = try makeProfile()
+    let checkTime = Date(timeIntervalSince1970: 1_750)
+    expected.lastEnterpriseMetadataCheckAt = checkTime
+
+    try await context.store.save(expected)
+
+    let loaded = try #require(await context.store.load(id: expected.id))
+    #expect(loaded.lastEnterpriseMetadataCheckAt == checkTime)
+
+    let raw = try String(contentsOf: context.fileURL, encoding: .utf8)
+    #expect(raw.contains("lastEnterpriseMetadataCheckAt"))
 }
 
 @Test

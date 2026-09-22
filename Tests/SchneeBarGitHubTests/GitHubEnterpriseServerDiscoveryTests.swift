@@ -49,6 +49,10 @@ func discoversSupportedEnterpriseServerVersionFromMetaEndpoint() async throws {
     #expect(result.compatibility == .tested)
     #expect(await transport.lastRequest()?.url?.absoluteString == "https://github.internal.example/api/v3/meta")
     #expect(await transport.lastRequest()?.value(forHTTPHeaderField: "Accept") == "application/vnd.github+json")
+    #expect(
+        await transport.lastRequest()?
+            .value(forHTTPHeaderField: "X-GitHub-Api-Version") == nil
+    )
 }
 
 @Test
@@ -137,4 +141,62 @@ func reportsInvalidMetaPayload() async throws {
     await #expect(throws: GitHubEnterpriseServerDiscoveryError.invalidPayload) {
         try await client.discover(connection: connection)
     }
+}
+
+
+@Test
+func enterpriseMetadataRefreshPolicyOnlyChecksEnterpriseServersWhenDue() throws {
+    let policy = GitHubEnterpriseMetadataRefreshPolicy(
+        minimumInterval: 60 * 60
+    )
+    let now = Date(timeIntervalSince1970: 100_000)
+    let enterprise = GitHubConnection(
+        displayName: "Internal GitHub",
+        deploymentKind: .enterpriseServer,
+        webBaseURL: try #require(
+            URL(string: "https://github.internal.example")
+        ),
+        serverVersion: "3.22.0"
+    )
+    let hosted = GitHubConnection(
+        displayName: "GitHub.com",
+        deploymentKind: .githubDotCom,
+        webBaseURL: try #require(URL(string: "https://github.com"))
+    )
+
+    #expect(
+        policy.shouldRefresh(
+            connection: enterprise,
+            lastCheckedAt: nil,
+            now: now
+        )
+    )
+    #expect(
+        !policy.shouldRefresh(
+            connection: enterprise,
+            lastCheckedAt: now.addingTimeInterval(-(60 * 60) + 1),
+            now: now
+        )
+    )
+    #expect(
+        policy.shouldRefresh(
+            connection: enterprise,
+            lastCheckedAt: now.addingTimeInterval(-(60 * 60)),
+            now: now
+        )
+    )
+    #expect(
+        policy.shouldRefresh(
+            connection: enterprise,
+            lastCheckedAt: now.addingTimeInterval(60),
+            now: now
+        )
+    )
+    #expect(
+        !policy.shouldRefresh(
+            connection: hosted,
+            lastCheckedAt: nil,
+            now: now
+        )
+    )
 }
