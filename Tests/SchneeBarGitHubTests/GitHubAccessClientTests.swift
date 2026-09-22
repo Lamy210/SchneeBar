@@ -217,7 +217,7 @@ func inventoryKeepsForbiddenInstallationWithoutFailingWholeConnection() async th
         credential: GitHubCredential(accessToken: "ghu_access")
     )
 
-    #expect(inventory.installations[0].status == .ssoRequired)
+    #expect(inventory.installations[0].status == .forbidden)
     #expect(inventory.installations[0].repositories.isEmpty)
 }
 
@@ -351,7 +351,7 @@ func inventoryMarksExplicitSSORequired403Separately() async throws {
         credential: GitHubCredential(accessToken: "ghu_access")
     )
 
-    #expect(inventory.installations[0].status == .forbidden)
+    #expect(inventory.installations[0].status == .ssoRequired)
     #expect(inventory.installations[0].repositories.isEmpty)
 }
 
