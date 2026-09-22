@@ -50,6 +50,7 @@ private enum SnapshotAppearance: String, CaseIterable {
 private enum GitHubOnboardingSnapshotScenario: String, CaseIterable {
     case configuration
     case waiting
+    case invalidGHE = "invalid-ghe"
     case failure
 
     var draft: GitHubConnectionDraft {
@@ -60,6 +61,13 @@ private enum GitHubOnboardingSnapshotScenario: String, CaseIterable {
                 displayName: "GitHub.com",
                 serverURL: "https://github.com",
                 clientID: "Iv1.public-client-id"
+            )
+        case .invalidGHE:
+            GitHubConnectionDraft(
+                deploymentKind: .gheDotCom,
+                displayName: "Company GitHub",
+                serverURL: "https://api.company.ghe.com",
+                clientID: "Iv1.enterprise-client"
             )
         case .failure:
             GitHubConnectionDraft(
@@ -73,7 +81,7 @@ private enum GitHubOnboardingSnapshotScenario: String, CaseIterable {
 
     var phase: GitHubConnectionOnboardingPhase {
         switch self {
-        case .configuration:
+        case .configuration, .invalidGHE:
             return .configuration
         case .waiting:
             return .waitingForAuthorization(
