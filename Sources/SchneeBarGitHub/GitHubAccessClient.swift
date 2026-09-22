@@ -113,6 +113,7 @@ public struct GitHubRepositoryAccess: Equatable, Sendable, Identifiable {
 public enum GitHubInstallationAccessStatus: String, Equatable, Sendable {
     case available
     case suspended
+    case ssoRequired
     case forbidden
     case notFound
     case unavailable
@@ -386,7 +387,18 @@ public struct GitHubAccessClient: Sendable {
                     throw error
                 }
 
-                if error.statusCode == 403 {
+                if case let .httpFailure(evidence) = error,
+                   evidence.statusCode == 403,
+                   evidence.ssoSignal == .required
+                {
+                    installationAccess.append(
+                        GitHubInstallationAccess(
+                            installation: installation,
+                            repositories: [],
+                            status: .ssoRequired
+                        )
+                    )
+                } else if error.statusCode == 403 {
                     installationAccess.append(
                         GitHubInstallationAccess(
                             installation: installation,

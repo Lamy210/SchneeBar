@@ -25,6 +25,7 @@ public struct GitHubConnectionSession: Equatable, Sendable {
 public enum GitHubConnectionSessionError: Error, Equatable, Sendable {
     case credentialNotFound
     case reauthenticationRequired
+    case ssoRequired
     case accountMismatch(expectedID: String, actualID: String)
     case connectionEndpointMismatch
 }
@@ -58,10 +59,17 @@ public actor GitHubConnectionSessionCoordinator {
         connection: GitHubConnection,
         credential: GitHubCredential
     ) async throws -> GitHubConnectionSession {
-        let account = try await accessClient.authenticatedAccount(
-            connection: connection,
-            credential: credential
-        )
+        let account: GitHubAuthenticatedAccount
+        do {
+            account = try await accessClient.authenticatedAccount(
+                connection: connection,
+                credential: credential
+            )
+        } catch let error as GitHubAccessClientError
+            where isSSORequired(error)
+        {
+            throw GitHubConnectionSessionError.ssoRequired
+        }
         let key = credentialKey(connection: connection, identity: account.identity)
 
         try await credentialStore.save(credential, for: key)
@@ -85,6 +93,10 @@ public actor GitHubConnectionSessionCoordinator {
         } catch let error as GitHubAccessClientError where error.statusCode == 401 {
             try? await credentialStore.delete(for: key)
             throw GitHubConnectionSessionError.reauthenticationRequired
+        } catch let error as GitHubAccessClientError
+            where isSSORequired(error)
+        {
+            throw GitHubConnectionSessionError.ssoRequired
         }
     }
 
@@ -101,6 +113,10 @@ public actor GitHubConnectionSessionCoordinator {
             )
         } catch let error as GitHubAccessClientError where error.statusCode == 401 {
             throw GitHubConnectionSessionError.reauthenticationRequired
+        } catch let error as GitHubAccessClientError
+            where isSSORequired(error)
+        {
+            throw GitHubConnectionSessionError.ssoRequired
         }
 
         guard account.identity.id == expectedIdentity.id else {
@@ -118,6 +134,10 @@ public actor GitHubConnectionSessionCoordinator {
             )
         } catch let error as GitHubAccessClientError where error.statusCode == 401 {
             throw GitHubConnectionSessionError.reauthenticationRequired
+        } catch let error as GitHubAccessClientError
+            where isSSORequired(error)
+        {
+            throw GitHubConnectionSessionError.ssoRequired
         }
 
         let capabilities = capabilityEvaluator.evaluate(
@@ -228,6 +248,10 @@ public actor GitHubConnectionSessionCoordinator {
             )
         } catch let error as GitHubAccessClientError where error.statusCode == 401 {
             throw GitHubConnectionSessionError.reauthenticationRequired
+        } catch let error as GitHubAccessClientError
+            where isSSORequired(error)
+        {
+            throw GitHubConnectionSessionError.ssoRequired
         }
 
         guard account.identity.id == identity.id else {
@@ -245,6 +269,10 @@ public actor GitHubConnectionSessionCoordinator {
             )
         } catch let error as GitHubAccessClientError where error.statusCode == 401 {
             throw GitHubConnectionSessionError.reauthenticationRequired
+        } catch let error as GitHubAccessClientError
+            where isSSORequired(error)
+        {
+            throw GitHubConnectionSessionError.ssoRequired
         }
 
         let capabilities = capabilityEvaluator.evaluate(
@@ -325,6 +353,16 @@ public actor GitHubConnectionSessionCoordinator {
             refreshTasks[key] = nil
             throw error
         }
+    }
+
+    private func isSSORequired(
+        _ error: GitHubAccessClientError
+    ) -> Bool {
+        guard case let .httpFailure(evidence) = error else {
+            return false
+        }
+        return evidence.statusCode == 403
+            && evidence.ssoSignal == .required
     }
 
     private func cancelAndDrainRefreshTask(for key: GitHubCredentialKey) async {

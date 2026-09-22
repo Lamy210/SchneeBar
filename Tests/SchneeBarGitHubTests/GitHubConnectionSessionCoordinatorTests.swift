@@ -160,6 +160,43 @@ func restoreMapsHeaderBacked401ToReauthenticationRequired() async throws {
 }
 
 @Test
+func restoreMapsExplicitSSOInventoryFailureToSessionState() async throws {
+    let transport = SessionQueueTransport([
+        SessionStubResponse(userJSON(id: 42, login: "octocat")),
+        SessionStubResponse(userJSON(id: 42, login: "octocat")),
+        SessionStubResponse(
+            #"{"message":"SSO required"}"#,
+            statusCode: 403,
+            headers: [
+                "X-GitHub-SSO":
+                    "required; url=https://github.com/orgs/acme/sso?authorization_request=sensitive"
+            ]
+        ),
+    ])
+    let store = MemoryGitHubCredentialStore()
+    let connection = try sessionConnection()
+    let identity = GitHubAccountIdentity(id: "42", login: "octocat")
+    let key = GitHubCredentialKey(
+        connectionID: connection.id,
+        accountID: identity.id
+    )
+    try await store.save(
+        GitHubCredential(accessToken: "ghu_access"),
+        for: key
+    )
+    let coordinator = makeCoordinator(transport: transport, store: store)
+
+    await #expect(
+        throws: GitHubConnectionSessionError.ssoRequired
+    ) {
+        try await coordinator.restore(
+            connection: connection,
+            identity: identity
+        )
+    }
+}
+
+@Test
 func restoreUsesNonExpiringStoredCredentialWithoutRefresh() async throws {
     let transport = SessionQueueTransport([
         SessionStubResponse(userJSON(id: 42, login: "octocat")),

@@ -539,6 +539,16 @@ final class GitHubConnectionsRuntimeModel {
             onActivitySourceChanged?()
         } catch is CancellationError {
             return
+        } catch GitHubConnectionSessionError.ssoRequired {
+            guard isCurrentOperationGeneration(generation, for: profileID) else { return }
+            let hadInventory = inventoryByConnectionID.removeValue(forKey: profileID) != nil
+            capabilitiesByConnectionID.removeValue(forKey: profileID)
+            await activityProvider.reset(connectionID: profileID)
+            guard isCurrentOperationGeneration(generation, for: profileID) else { return }
+            statusByConnectionID[profileID] = .ssoRequired
+            if hadInventory {
+                onActivitySourceChanged?()
+            }
         } catch GitHubConnectionSessionError.credentialNotFound,
                 GitHubConnectionSessionError.reauthenticationRequired,
                 GitHubConnectionSessionError.accountMismatch(_, _) {
@@ -776,6 +786,8 @@ final class GitHubConnectionsRuntimeModel {
         switch sessionError {
         case .credentialNotFound, .reauthenticationRequired, .accountMismatch:
             statusByConnectionID[profileID] = .authenticationRequired
+        case .ssoRequired:
+            statusByConnectionID[profileID] = .ssoRequired
         case .connectionEndpointMismatch:
             statusByConnectionID[profileID] = .unavailable
         }
@@ -790,6 +802,9 @@ final class GitHubConnectionsRuntimeModel {
         }
         if case GitHubConnectionSessionError.reauthenticationRequired = error {
             return "GitHub rejected the new credential. Request a new authorization code and try again."
+        }
+        if case GitHubConnectionSessionError.ssoRequired = error {
+            return "GitHub requires an active SSO session. Sign in through your organization and try again."
         }
         return errorMessage(for: error)
     }
@@ -987,6 +1002,8 @@ final class GitHubConnectionsRuntimeModel {
             operationalStatus = .connected(repositoryCount: repositoryIDs.count)
         } else if inventory.installations.allSatisfy({ $0.status == .suspended }) {
             operationalStatus = .suspended
+        } else if inventory.installations.contains(where: { $0.status == .ssoRequired }) {
+            operationalStatus = .ssoRequired
         } else {
             operationalStatus = .unavailable
         }
@@ -1079,6 +1096,8 @@ final class GitHubConnectionsRuntimeModel {
             return "The GitHub server URL is invalid or unsupported."
         case let GitHubEnterpriseServerDiscoveryError.httpStatus(status):
             return "GitHub Enterprise Server discovery failed with HTTP \(status)."
+        case GitHubConnectionSessionError.ssoRequired:
+            return "GitHub requires an active SSO session for this organization. Sign in with SSO and try again."
         default:
             return "Could not connect to GitHub. Check the server, network, and GitHub App configuration."
         }

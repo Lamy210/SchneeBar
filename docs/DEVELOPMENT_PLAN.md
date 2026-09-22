@@ -71,6 +71,7 @@ Implemented foundation:
 - same-account binding enforcement during recovery
 - validate-before-Keychain replacement semantics
 - stale refresh / recovery race protection
+- evidence-backed SSO-required installation/connection health from explicit GitHub failure signals only; no inference from empty or forbidden resource sets
 
 Remaining:
 
