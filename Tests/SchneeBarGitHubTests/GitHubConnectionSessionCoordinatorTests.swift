@@ -37,10 +37,16 @@ private actor MemoryGitHubCredentialStore: GitHubCredentialStore {
 private struct SessionStubResponse: Sendable {
     let json: String
     let statusCode: Int
+    let headers: [String: String]
 
-    init(_ json: String, statusCode: Int = 200) {
+    init(
+        _ json: String,
+        statusCode: Int = 200,
+        headers: [String: String] = [:]
+    ) {
         self.json = json
         self.statusCode = statusCode
+        self.headers = headers
     }
 }
 
@@ -62,7 +68,7 @@ private actor SessionQueueTransport: GitHubHTTPTransport {
                 url: request.url!,
                 statusCode: response.statusCode,
                 httpVersion: "HTTP/1.1",
-                headerFields: nil
+                headerFields: response.headers
             )
         )
         return (Data(response.json.utf8), httpResponse)
@@ -116,6 +122,41 @@ func establishDoesNotPersistCredentialWhenIdentityValidationFails() async throws
     }
 
     #expect(await store.saves() == 0)
+}
+
+@Test
+func restoreMapsHeaderBacked401ToReauthenticationRequired() async throws {
+    let transport = SessionQueueTransport([
+        SessionStubResponse(
+            #"{\"message\":\"Authentication required\"}"#,
+            statusCode: 401,
+            headers: [
+                "X-GitHub-SSO":
+                    "required; url=https://github.com/orgs/acme/sso?authorization_request=sensitive"
+            ]
+        )
+    ])
+    let store = MemoryGitHubCredentialStore()
+    let connection = try sessionConnection()
+    let identity = GitHubAccountIdentity(id: "42", login: "octocat")
+    let key = GitHubCredentialKey(
+        connectionID: connection.id,
+        accountID: identity.id
+    )
+    try await store.save(
+        GitHubCredential(accessToken: "ghu_access"),
+        for: key
+    )
+    let coordinator = makeCoordinator(transport: transport, store: store)
+
+    await #expect(
+        throws: GitHubConnectionSessionError.reauthenticationRequired
+    ) {
+        try await coordinator.restore(
+            connection: connection,
+            identity: identity
+        )
+    }
 }
 
 @Test
