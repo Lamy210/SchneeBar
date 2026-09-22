@@ -331,9 +331,9 @@ func preservesUnknownSSOHeaderAsOpaqueSignal() async throws {
 @Test
 func inventoryKeepsSSOEvidenceBacked403AsForbiddenInstallation() async throws {
     let transport = AccessQueueTransport([
-        AccessStubResponse(#"{\"id\":1,\"login\":\"octocat\",\"name\":null,\"avatar_url\":null}"#),
+        AccessStubResponse(#"{"id":1,"login":"octocat","name":null,"avatar_url":null}"#),
         AccessStubResponse(
-            #"{\"total_count\":1,\"installations\":[{\"id\":5,\"account\":{\"id\":10,\"login\":\"acme\",\"type\":\"Organization\"},\"repository_selection\":\"selected\",\"permissions\":{\"actions\":\"read\"},\"suspended_at\":null}]}"#
+            #"{"total_count":1,"installations":[{"id":5,"account":{"id":10,"login":"acme","type":"Organization"},"repository_selection":"selected","permissions":{"actions":"read"},"suspended_at":null}]}"#
         ),
         AccessStubResponse(
             #"{\"message\":\"Forbidden\"}"#,
