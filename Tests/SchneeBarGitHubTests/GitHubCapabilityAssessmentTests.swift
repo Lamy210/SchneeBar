@@ -245,6 +245,7 @@ func duplicateConflictingEvidenceBecomesUnknown() throws {
 func installationFailuresAreNormalizedWithoutInventingRepositoryAssociations() throws {
     let inventory = capabilityInventory(
         installations: [
+            capabilityInstallationAccess(id: 5, status: .ssoRequired),
             capabilityInstallationAccess(id: 4, status: .unavailable),
             capabilityInstallationAccess(id: 2, status: .forbidden),
             capabilityInstallationAccess(id: 1, status: .suspended),
@@ -264,6 +265,7 @@ func installationFailuresAreNormalizedWithoutInventingRepositoryAssociations() t
             GitHubInstallationCapabilityIssue(installationID: 2, reason: .forbidden),
             GitHubInstallationCapabilityIssue(installationID: 3, reason: .notFound),
             GitHubInstallationCapabilityIssue(installationID: 4, reason: .unavailable),
+            GitHubInstallationCapabilityIssue(installationID: 5, reason: .ssoRequired),
         ]
     )
 }
