@@ -29,6 +29,17 @@ func resolvesGHEDataResidencyEndpoints() throws {
 }
 
 @Test
+func normalizesCaseForDedicatedGHEWebHost() throws {
+    let endpoints = try GitHubEndpointResolver.resolve(
+        deploymentKind: .gheDotCom,
+        webBaseURL: #require(URL(string: "https://Acme.GHE.com/"))
+    )
+
+    #expect(endpoints.webBaseURL.absoluteString == "https://acme.ghe.com")
+    #expect(endpoints.restBaseURL.absoluteString == "https://api.acme.ghe.com")
+}
+
+@Test
 func resolvesEnterpriseServerEndpoints() throws {
     let endpoints = try GitHubEndpointResolver.resolve(
         deploymentKind: .enterpriseServer,
