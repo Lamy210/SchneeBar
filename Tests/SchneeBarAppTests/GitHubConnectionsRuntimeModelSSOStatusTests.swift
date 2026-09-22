@@ -119,6 +119,35 @@ func refreshSurfacesSSORequiredOnlyFromExplicitFailureEvidence() async throws {
 }
 
 @Test @MainActor
+func topLevelInventorySSOFailureSurfacesSSORequired() async throws {
+    let profile = try ssoStatusProfile()
+    let model = ssoStatusModel(
+        profile: profile,
+        responses: [
+            SSOStatusResponse(
+                #"{"id":42,"login":"snow-user","name":null,"avatar_url":null}"#
+            ),
+            SSOStatusResponse(
+                #"{"id":42,"login":"snow-user","name":null,"avatar_url":null}"#
+            ),
+            SSOStatusResponse(
+                #"{"message":"SSO required"}"#,
+                statusCode: 403,
+                headers: [
+                    "X-GitHub-SSO":
+                        "required; url=https://github.com/orgs/acme/sso?authorization_request=sensitive"
+                ]
+            ),
+        ]
+    )
+    model.profiles = [profile]
+
+    await model.refresh(profileID: profile.id)
+
+    #expect(model.connectionCards.first?.status == .ssoRequired)
+}
+
+@Test @MainActor
 func ordinaryRepository403RemainsUnavailable() async throws {
     let profile = try ssoStatusProfile()
     let model = ssoStatusModel(
