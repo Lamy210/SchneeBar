@@ -185,3 +185,57 @@ func deliveryTimelineEvidenceDisclosureRequiresEvidence() {
     #expect(!deliveryTimelineShouldShowEvidence(empty))
     #expect(deliveryTimelineShouldShowEvidence(explained))
 }
+
+
+@Test
+func workflowDetailActionLabelsRemainExplicit() {
+    #expect(activityDetailActionLabel(.rerunWorkflow) == "Re-run workflow")
+    #expect(activityDetailActionLabel(.cancelWorkflow) == "Cancel workflow")
+}
+
+@Test
+func workflowDetailActionConfirmationCopyNamesMutation() {
+    #expect(
+        activityDetailActionConfirmationTitle(.rerunWorkflow)
+            == "Re-run this workflow?"
+    )
+    #expect(
+        activityDetailActionConfirmationTitle(.cancelWorkflow)
+            == "Cancel this workflow?"
+    )
+}
+
+@Test
+func workflowDetailActionsRequireLoadedActionHandlerAndIdleState() {
+    let detail = ActivityDetailSnapshot(
+        id: "run",
+        repository: "snow/app",
+        title: "CI",
+        summary: "Failed",
+        state: .failed,
+        actions: [.rerunWorkflow],
+        rows: []
+    )
+
+    #expect(
+        activityDetailActionsAreAvailable(
+            detail: detail,
+            hasHandler: true,
+            isRunning: false
+        )
+    )
+    #expect(
+        !activityDetailActionsAreAvailable(
+            detail: detail,
+            hasHandler: false,
+            isRunning: false
+        )
+    )
+    #expect(
+        !activityDetailActionsAreAvailable(
+            detail: detail,
+            hasHandler: true,
+            isRunning: true
+        )
+    )
+}
