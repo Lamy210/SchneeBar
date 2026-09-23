@@ -447,6 +447,54 @@ func workflowMutationMissingCredentialUpdatesConnectionHealth() async throws {
     #expect(refreshCount == 1)
 }
 
+private struct DetailSSORequiredMutationService: GitHubWorkflowRunMutating {
+    func rerun(
+        connection: GitHubConnection,
+        identity: GitHubAccountIdentity,
+        clientID: String?,
+        repository: GitHubRepositoryAccess,
+        runID: Int64
+    ) async throws {
+        throw GitHubConnectionSessionError.ssoRequired
+    }
+
+    func cancel(
+        connection: GitHubConnection,
+        identity: GitHubAccountIdentity,
+        clientID: String?,
+        repository: GitHubRepositoryAccess,
+        runID: Int64
+    ) async throws {
+        throw GitHubConnectionSessionError.ssoRequired
+    }
+}
+
+@Test @MainActor
+func workflowMutationSSOFailureUpdatesConnectionHealth() async throws {
+    let fixture = try await detailFixture(
+        jobStatusCode: 200,
+        workflowWriteAvailable: true
+    )
+    var refreshCount = 0
+    fixture.model.onActivitySourceChanged = {
+        refreshCount += 1
+    }
+
+    await #expect(throws: GitHubConnectionSessionError.ssoRequired) {
+        try await fixture.model.performWorkflowRunAction(
+            .rerunWorkflow,
+            for: detailActivityItem(state: .failed),
+            mutationService: DetailSSORequiredMutationService()
+        )
+    }
+
+    #expect(
+        fixture.model.connectionCards.first?.status
+            == .ssoRequired
+    )
+    #expect(refreshCount == 1)
+}
+
 @Test @MainActor
 func workflowMutationCannotBypassUnavailableWriteCapability() async throws {
     let fixture = try await detailFixture(jobStatusCode: 200)
