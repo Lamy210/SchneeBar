@@ -366,6 +366,16 @@ public struct GitHubConnectionOnboardingView: View {
                 .textSelection(.enabled)
                 .lineLimit(2)
 
+            Label(
+                githubDeviceFlowAntiPhishingMessage(
+                    verificationURI: presentation.verificationURI
+                ),
+                systemImage: "shield.checkered"
+            )
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+
             Text("SchneeBar polls only at GitHub's requested interval and backs off when GitHub asks it to slow down.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
