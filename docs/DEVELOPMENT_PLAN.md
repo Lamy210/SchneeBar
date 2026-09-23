@@ -198,7 +198,7 @@ Evidence-bound / deferred pending upstream support:
 ## Phase 6 — Interaction and extensibility
 
 - opt-in workflow re-run/cancel actions (Actions-write capability gate, provider mutations, explicit confirmation, action-state handling, and post-mutation refresh implemented)
-- provider/plugin contracts
+- provider/plugin contracts (provider-neutral Developer Activity source contract and deterministic multi-source aggregator implemented; external plugin surface pending)
 - declarative external widgets
 - additional CI providers after GitHub architecture proves stable
 

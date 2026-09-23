@@ -345,6 +345,28 @@ final class GitHubConnectionsRuntimeModel {
         return items.sorted(by: ActivityInboxOrdering().areInIncreasingOrder)
     }
 
+    func loadActivitySourceSnapshot() async throws -> ActivitySourceSnapshot {
+        do {
+            let items = try await loadActivityItems()
+            try Task.checkCancellation()
+            return ActivitySourceSnapshot(
+                items: items,
+                status: .available
+            )
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch RuntimeError.activityAuthenticationRequired {
+            try Task.checkCancellation()
+            return ActivitySourceSnapshot(
+                items: [],
+                status: .authenticationRequired
+            )
+        } catch {
+            try Task.checkCancellation()
+            return .unavailable
+        }
+    }
+
     func beginOnboarding(defaultClientID: String? = nil) {
         cancelRecovery()
         onboardingTask?.cancel()
