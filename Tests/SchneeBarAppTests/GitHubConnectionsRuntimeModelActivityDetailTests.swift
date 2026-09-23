@@ -101,6 +101,39 @@ private struct DetailCheckLoader: GitHubCheckRunLoading {
     }
 }
 
+private actor DetailMutationRecorder: GitHubWorkflowRunMutating {
+    private var rerunIDs: [Int64] = []
+    private var cancelIDs: [Int64] = []
+
+    func rerun(
+        connection: GitHubConnection,
+        identity: GitHubAccountIdentity,
+        clientID: String?,
+        repository: GitHubRepositoryAccess,
+        runID: Int64
+    ) async throws {
+        rerunIDs.append(runID)
+    }
+
+    func cancel(
+        connection: GitHubConnection,
+        identity: GitHubAccountIdentity,
+        clientID: String?,
+        repository: GitHubRepositoryAccess,
+        runID: Int64
+    ) async throws {
+        cancelIDs.append(runID)
+    }
+
+    func reruns() -> [Int64] {
+        rerunIDs
+    }
+
+    func cancellations() -> [Int64] {
+        cancelIDs
+    }
+}
+
 private enum DetailTimelineOutcome: Sendable {
     case evidence(GitHubDeliveryTimelineEvidence)
     case failure
@@ -291,6 +324,41 @@ func activityDetailActionsUseLatestJobStateAndConfirmedWriteCapability() async t
 
     #expect(detail.state == .success)
     #expect(detail.actions == [.rerunWorkflow])
+}
+
+@Test @MainActor
+func workflowMutationExecutesOnlyWithConfirmedWriteCapability() async throws {
+    let fixture = try await detailFixture(
+        jobStatusCode: 200,
+        workflowWriteAvailable: true
+    )
+    let recorder = DetailMutationRecorder()
+
+    try await fixture.model.performWorkflowRunAction(
+        .rerunWorkflow,
+        for: detailActivityItem(state: .failed),
+        mutationService: recorder
+    )
+
+    #expect(await recorder.reruns() == [700])
+    #expect(await recorder.cancellations().isEmpty)
+}
+
+@Test @MainActor
+func workflowMutationCannotBypassUnavailableWriteCapability() async throws {
+    let fixture = try await detailFixture(jobStatusCode: 200)
+    let recorder = DetailMutationRecorder()
+
+    await #expect(throws: WorkflowRunActionError.unavailable) {
+        try await fixture.model.performWorkflowRunAction(
+            .rerunWorkflow,
+            for: detailActivityItem(state: .failed),
+            mutationService: recorder
+        )
+    }
+
+    #expect(await recorder.reruns().isEmpty)
+    #expect(await recorder.cancellations().isEmpty)
 }
 
 @Test @MainActor
