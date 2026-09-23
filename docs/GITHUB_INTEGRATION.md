@@ -64,3 +64,21 @@ GHES support requires per-instance app registration; a GitHub.com App cannot sim
 Connection setup must detect server/version/capabilities and expose meaningful states such as SSO required, approval pending, VPN required, permission missing, unsupported version, and rate limited.
 
 TLS verification is mandatory. SchneeBar will not provide an 'ignore certificate errors' switch.
+
+
+### Enterprise Managed Users
+
+SchneeBar does not currently classify an authenticated account as an Enterprise Managed User (EMU).
+
+The normal GitHub App user-access-token identity contract used by SchneeBar does not expose a documented EMU discriminator on the authenticated-user REST response. GitHub GraphQL documents `viewer` as `User!`; enterprise-administration objects such as `EnterpriseUserAccount` are not treated as a normal-viewer EMU type signal.
+
+Therefore SchneeBar must not infer EMU from:
+
+- username format or suffix;
+- GitHub.com versus GHE.com hosting;
+- private/internal repository visibility;
+- 403 or 404 responses;
+- SAML/SSO-required state;
+- missing GitHub features or collaboration restrictions.
+
+Observable access restrictions continue to flow through the existing normalized capability, SSO, authentication, and availability states. If GitHub later documents a stable EMU signal available to a normal GitHub App user access token, support can be added at the provider boundary without changing stable account identity semantics.
