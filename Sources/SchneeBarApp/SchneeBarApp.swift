@@ -96,6 +96,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let deploymentTimelineService = deploymentTimelineService
         let environmentCatalogService = environmentCatalogService
         let deliveryRecoveryNotifier = deliveryRecoveryNotifier
+        let activityAggregator = ActivitySourceAggregator(
+            sources: [
+                ClosureActivitySource(id: "github") {
+                    await githubRuntimeModel.loadActivitySourceSnapshot()
+                },
+            ]
+        )
 
         activityRuntimeModel.configureDetailLoader { item in
             try await githubRuntimeModel.loadActivityDetail(
@@ -126,9 +133,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             runtimeModel: runtimeModel,
             activityRuntimeModel: activityRuntimeModel,
             loadActivityItems: {
-                let items = try await githubRuntimeModel.loadActivityItems()
-                await activityRuntimeModel.replace(with: items)
-                return items
+                let snapshot = try await activityAggregator.load()
+                await activityRuntimeModel.replace(with: snapshot.items)
+                return snapshot.items
             }
         )
 
