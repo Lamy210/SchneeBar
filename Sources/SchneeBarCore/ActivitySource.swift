@@ -161,9 +161,12 @@ public struct ActivitySourceAggregator: Sendable {
             for source in sources {
                 group.addTask {
                     do {
+                        try Task.checkCancellation()
+                        let snapshot = try await source.snapshot()
+                        try Task.checkCancellation()
                         return LoadedActivitySource(
                             id: source.id,
-                            snapshot: try await source.snapshot()
+                            snapshot: snapshot
                         )
                     } catch is CancellationError {
                         throw CancellationError()
@@ -181,6 +184,7 @@ public struct ActivitySourceAggregator: Sendable {
             for try await result in group {
                 results.append(result)
             }
+            try Task.checkCancellation()
             return results.sorted {
                 $0.id.rawValue < $1.id.rawValue
             }
