@@ -3,22 +3,35 @@ import SchneeBarCore
 import SchneeBarGitHub
 import Testing
 
-@Test(arguments: [
-    (ActivityState.success, ActivityDetailAction.rerunWorkflow),
-    (.failed, .rerunWorkflow),
-    (.running, .cancelWorkflow),
-    (.waiting, .cancelWorkflow),
-])
-func workflowWriteCapabilityExposesStateAppropriateAction(
-    state: ActivityState,
-    expected: ActivityDetailAction
-) {
+@Test
+func workflowWriteCapabilityExposesStateAppropriateAction() {
     #expect(
         workflowDetailActions(
             kind: .workflowRun,
-            state: state,
+            state: .success,
             writeCapability: .available
-        ) == [expected]
+        ) == [.rerunWorkflow]
+    )
+    #expect(
+        workflowDetailActions(
+            kind: .workflowRun,
+            state: .failed,
+            writeCapability: .available
+        ) == [.rerunWorkflow]
+    )
+    #expect(
+        workflowDetailActions(
+            kind: .workflowRun,
+            state: .running,
+            writeCapability: .available
+        ) == [.cancelWorkflow]
+    )
+    #expect(
+        workflowDetailActions(
+            kind: .workflowRun,
+            state: .waiting,
+            writeCapability: .available
+        ) == [.cancelWorkflow]
     )
 }
 
