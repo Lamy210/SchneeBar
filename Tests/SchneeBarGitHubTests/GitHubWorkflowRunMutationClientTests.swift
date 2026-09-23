@@ -2,27 +2,44 @@ import Foundation
 import SchneeBarGitHub
 import Testing
 
+private struct WorkflowMutationStubResponse: Sendable {
+    let statusCode: Int
+    let headers: [String: String]
+
+    init(
+        _ statusCode: Int,
+        headers: [String: String] = [:]
+    ) {
+        self.statusCode = statusCode
+        self.headers = headers
+    }
+}
+
 private actor WorkflowMutationRecordingTransport: GitHubHTTPTransport {
-    private var statusCodes: [Int]
+    private var responses: [WorkflowMutationStubResponse]
     private var requests: [URLRequest] = []
 
     init(statusCodes: [Int]) {
-        self.statusCodes = statusCodes
+        responses = statusCodes.map(WorkflowMutationStubResponse.init)
+    }
+
+    init(responses: [WorkflowMutationStubResponse]) {
+        self.responses = responses
     }
 
     func data(
         for request: URLRequest
     ) async throws -> (Data, HTTPURLResponse) {
         requests.append(request)
-        let statusCode = statusCodes.isEmpty
-            ? 500
-            : statusCodes.removeFirst()
+        let stub = responses.isEmpty
+            ? WorkflowMutationStubResponse(500)
+            : responses.removeFirst()
         let response = try #require(
             HTTPURLResponse(
                 url: request.url!,
-                statusCode: statusCode,
+                statusCode: stub.statusCode,
                 httpVersion: "HTTP/1.1",
-                headerFields: nil
+                headerFields: stub.headers
             )
         )
         return (Data(), response)
@@ -111,6 +128,38 @@ func cancelPreservesConflictStatusForCaller() async throws {
         throws: GitHubWorkflowRunMutationError.httpStatus(409)
     ) {
         try await client.cancel(
+            runID: 7,
+            repository: try mutationRepository(),
+            connection: try mutationGitHubDotComConnection(),
+            credential: GitHubCredential(accessToken: "ghu_write")
+        )
+    }
+}
+
+@Test
+func mutationPreservesSanitizedSSORequiredFailureEvidence() async throws {
+    let transport = WorkflowMutationRecordingTransport(
+        responses: [
+            WorkflowMutationStubResponse(
+                403,
+                headers: [
+                    "X-GitHub-SSO":
+                        "required; url=https://github.com/orgs/acme/sso?authorization_request=sensitive"
+                ]
+            )
+        ]
+    )
+    let client = GitHubWorkflowRunMutationClient(transport: transport)
+
+    await #expect(
+        throws: GitHubWorkflowRunMutationError.httpFailure(
+            GitHubHTTPFailureEvidence(
+                statusCode: 403,
+                ssoSignal: .required
+            )
+        )
+    ) {
+        try await client.rerun(
             runID: 7,
             repository: try mutationRepository(),
             connection: try mutationGitHubDotComConnection(),
