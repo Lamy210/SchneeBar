@@ -193,7 +193,7 @@ Still required:
 
 ## Phase 6 — Interaction and extensibility
 
-- opt-in workflow re-run/cancel actions (Actions-write capability preflight implemented; mutation/confirmation flow still required)
+- opt-in workflow re-run/cancel actions (Actions-write capability gate, provider mutations, explicit confirmation, action-state handling, and post-mutation refresh implemented)
 - provider/plugin contracts
 - declarative external widgets
 - additional CI providers after GitHub architecture proves stable

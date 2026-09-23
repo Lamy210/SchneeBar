@@ -962,6 +962,18 @@ final class GitHubConnectionsRuntimeModel {
         )
     }
 
+    func workflowWriteAccessPresentation(
+        profileID: UUID,
+        repositoryID: Int64
+    ) -> GitHubRepositoryActivityAccessPresentation {
+        activityAccessPresentation(
+            capabilitiesByConnectionID[profileID]?.state(
+                for: .workflowWrite,
+                repositoryID: repositoryID
+            )
+        )
+    }
+
     private func activityAccessPresentation(
         _ state: GitHubCapabilityState?
     ) -> GitHubRepositoryActivityAccessPresentation {

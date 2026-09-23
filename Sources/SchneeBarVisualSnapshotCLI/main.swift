@@ -244,6 +244,7 @@ private func activityDetailRoot(
             errorMessage: nil,
             onBack: {},
             onRetry: {},
+            onAction: { _ in },
             evidenceInitiallyExpanded:
                 scenario.detail.deliveryTimeline?.evidence.isEmpty == false,
             surfaceStyle: .deterministic

@@ -1,5 +1,10 @@
 import Foundation
 
+public enum ActivityDetailAction: String, Codable, CaseIterable, Hashable, Sendable {
+    case rerunWorkflow
+    case cancelWorkflow
+}
+
 public enum ActivityDetailState: String, Codable, CaseIterable, Sendable {
     case success
     case running
@@ -41,6 +46,7 @@ public struct ActivityDetailSnapshot: Identifiable, Equatable, Sendable {
     public let state: ActivityState
     public let destinationURL: URL?
     public let deliveryTimeline: DeliveryTimelineSnapshot?
+    public let actions: [ActivityDetailAction]
     public let rows: [ActivityDetailRow]
 
     public init(
@@ -51,6 +57,7 @@ public struct ActivityDetailSnapshot: Identifiable, Equatable, Sendable {
         state: ActivityState,
         destinationURL: URL? = nil,
         deliveryTimeline: DeliveryTimelineSnapshot? = nil,
+        actions: [ActivityDetailAction] = [],
         rows: [ActivityDetailRow]
     ) {
         self.id = id
@@ -60,6 +67,7 @@ public struct ActivityDetailSnapshot: Identifiable, Equatable, Sendable {
         self.state = state
         self.destinationURL = destinationURL
         self.deliveryTimeline = deliveryTimeline
+        self.actions = actions
         self.rows = rows
     }
 }
