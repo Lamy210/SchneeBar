@@ -93,7 +93,7 @@ private enum GitHubOnboardingSnapshotScenario: String, CaseIterable {
             )
         case .failure:
             return .failed(
-                message: "Could not reach the GitHub Enterprise Server. Check VPN and server URL."
+                message: "Could not reach GitHub Enterprise Server. Check VPN or private-network access and the server URL."
             )
         }
     }
