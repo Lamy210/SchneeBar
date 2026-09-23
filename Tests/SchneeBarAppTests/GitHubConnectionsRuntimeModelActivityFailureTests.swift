@@ -232,7 +232,7 @@ func activitySourceSnapshotPreservesPartialGitHubSuccess() async throws {
     )
 
     await fixture.model.refresh(profileID: profile.id)
-    let snapshot = await fixture.model.loadActivitySourceSnapshot()
+    let snapshot = try await fixture.model.loadActivitySourceSnapshot()
 
     #expect(snapshot.status == .available)
     #expect(snapshot.items.map(\.id) == ["github-actions:1:11"])
@@ -251,7 +251,7 @@ func activitySourceSnapshotNormalizesTotalNetworkFailure() async throws {
     )
 
     await fixture.model.refresh(profileID: profile.id)
-    let snapshot = await fixture.model.loadActivitySourceSnapshot()
+    let snapshot = try await fixture.model.loadActivitySourceSnapshot()
 
     #expect(snapshot.status == .temporarilyUnavailable)
     #expect(snapshot.items.isEmpty)
@@ -270,7 +270,7 @@ func activitySourceSnapshotNormalizesAuthenticationFailure() async throws {
     )
 
     await fixture.model.refresh(profileID: profile.id)
-    let snapshot = await fixture.model.loadActivitySourceSnapshot()
+    let snapshot = try await fixture.model.loadActivitySourceSnapshot()
 
     #expect(snapshot.status == .authenticationRequired)
     #expect(snapshot.items.isEmpty)
