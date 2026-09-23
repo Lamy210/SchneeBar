@@ -2,6 +2,7 @@ import Foundation
 
 public enum GitHubCapabilityBlocker: Equatable, Sendable {
     case missingPermission
+    case insufficientRepositoryAccess
 }
 
 public enum GitHubCapabilityUncertainty: Hashable, Sendable {
@@ -74,11 +75,54 @@ public struct GitHubConnectionCapabilityAssessment: Equatable, Sendable {
 }
 
 public struct GitHubCapabilityEvaluator: Sendable {
-    private static let permissionKeys: [GitHubCapability: String] = [
-        .actions: "actions",
-        .pullRequests: "pull_requests",
-        .checks: "checks",
-        .deployments: "deployments",
+    private enum RequiredPermissionLevel: Sendable {
+        case read
+        case write
+
+        func isSatisfied(by level: String) -> Bool {
+            switch (self, level) {
+            case (.read, "read"), (.read, "write"), (.write, "write"):
+                return true
+            default:
+                return false
+            }
+        }
+    }
+
+    private struct PermissionRequirement: Sendable {
+        let key: String
+        let level: RequiredPermissionLevel
+        let allowsPublicReadFallback: Bool
+    }
+
+    private static let permissionRequirements: [
+        GitHubCapability: PermissionRequirement
+    ] = [
+        .actions: PermissionRequirement(
+            key: "actions",
+            level: .read,
+            allowsPublicReadFallback: true
+        ),
+        .pullRequests: PermissionRequirement(
+            key: "pull_requests",
+            level: .read,
+            allowsPublicReadFallback: true
+        ),
+        .checks: PermissionRequirement(
+            key: "checks",
+            level: .read,
+            allowsPublicReadFallback: true
+        ),
+        .deployments: PermissionRequirement(
+            key: "deployments",
+            level: .read,
+            allowsPublicReadFallback: true
+        ),
+        .workflowWrite: PermissionRequirement(
+            key: "actions",
+            level: .write,
+            allowsPublicReadFallback: false
+        ),
     ]
 
     private let compatibilityPolicy: GitHubEnterpriseCompatibilityPolicy
@@ -160,37 +204,55 @@ public struct GitHubCapabilityEvaluator: Sendable {
         permissions: [String: String],
         platformUncertainties: Set<GitHubCapabilityUncertainty>
     ) -> GitHubCapabilityState {
-        guard let permissionKey = Self.permissionKeys[capability] else {
+        guard let requirement = Self.permissionRequirements[capability] else {
             var uncertainties = platformUncertainties
             uncertainties.insert(.unmappedCapability)
             return .unknown(uncertainties)
         }
 
-        let rawLevel = permissions[permissionKey]
+        let rawLevel = permissions[requirement.key]
         let level = rawLevel?
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased()
 
         switch level {
         case "read", "write":
+            guard let level,
+                  requirement.level.isSatisfied(by: level)
+            else {
+                return .unavailable(.missingPermission)
+            }
+            if capability == .workflowWrite,
+               !hasRepositoryWriteAccess(repository.permissions)
+            {
+                return .unavailable(.insufficientRepositoryAccess)
+            }
             if platformUncertainties.isEmpty {
                 return .available
             }
             return .unknown(platformUncertainties)
 
         case nil, "":
-            if repository.isPrivate {
-                return .unavailable(.missingPermission)
+            if !repository.isPrivate,
+               requirement.allowsPublicReadFallback
+            {
+                var uncertainties = platformUncertainties
+                uncertainties.insert(.publicRepositoryPermissionNotProven)
+                return .unknown(uncertainties)
             }
-            var uncertainties = platformUncertainties
-            uncertainties.insert(.publicRepositoryPermissionNotProven)
-            return .unknown(uncertainties)
+            return .unavailable(.missingPermission)
 
         default:
             var uncertainties = platformUncertainties
             uncertainties.insert(.unrecognizedPermissionLevel)
             return .unknown(uncertainties)
         }
+    }
+
+    private func hasRepositoryWriteAccess(
+        _ permissions: GitHubRepositoryPermissions
+    ) -> Bool {
+        permissions.admin || permissions.maintain || permissions.push
     }
 
     private func platformUncertainties(

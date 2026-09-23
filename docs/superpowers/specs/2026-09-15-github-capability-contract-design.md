@@ -53,7 +53,7 @@ The initial read-capability policies are based on current GitHub REST documentat
 | `checks` | `checks` repository permission at `read` or `write` | Reading check runs/suites requires Checks read. |
 | `deployments` | `deployments` repository permission at `read` or `write` | Deployment listing/status requires Deployments read. Environment APIs additionally use Actions read; environment availability will therefore compose `deployments` and `actions` when that Phase 4 feature is implemented. |
 
-`releases`, `mergeQueue`, `securityAlerts`, and `workflowWrite` remain `unknown` in the first evaluator until their exact product semantics are implemented and verified.
+`workflowWrite` is available only when two independent requirements are proven: explicit `actions: write` installation permission and repository write access for the authenticated user (`push`, `maintain`, or `admin` repository permission evidence). GitHub documents both Actions(write) for the REST endpoints and write access to the repository for workflow run mutation. `releases`, `mergeQueue`, and `securityAlerts` remain `unknown` until their exact product semantics are implemented and verified.
 
 GitHub documents that several read endpoints can be used without the listed fine-grained permission when only public resources are requested. Therefore, a missing installation permission is definitive evidence for a private repository but not always for a public repository.
 
