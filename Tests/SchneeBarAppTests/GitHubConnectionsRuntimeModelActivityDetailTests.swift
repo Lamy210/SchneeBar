@@ -630,6 +630,56 @@ func workflowMutationRejectsReadOnlyCapabilityBeforeProviderCall() async throws 
     #expect(refreshCount == 0)
 }
 
+private struct DetailRejectedMutationService: GitHubWorkflowRunMutating {
+    func rerun(
+        connection: GitHubConnection,
+        identity: GitHubAccountIdentity,
+        clientID: String?,
+        repository: GitHubRepositoryAccess,
+        runID: Int64
+    ) async throws {
+        throw GitHubConnectionSessionError.reauthenticationRequired
+    }
+
+    func cancel(
+        connection: GitHubConnection,
+        identity: GitHubAccountIdentity,
+        clientID: String?,
+        repository: GitHubRepositoryAccess,
+        runID: Int64
+    ) async throws {
+        throw GitHubConnectionSessionError.reauthenticationRequired
+    }
+}
+
+@Test @MainActor
+func workflowMutationAuthenticationFailureUpdatesConnectionHealth() async throws {
+    let fixture = try await detailFixture(
+        jobStatusCode: 200,
+        actionsCapability: .writeAvailable
+    )
+    var refreshCount = 0
+    fixture.model.onActivitySourceChanged = {
+        refreshCount += 1
+    }
+
+    await #expect(
+        throws: GitHubConnectionSessionError.reauthenticationRequired
+    ) {
+        try await fixture.model.performActivityDetailAction(
+            .rerunWorkflow,
+            for: detailActivityItem(),
+            mutationService: DetailRejectedMutationService()
+        )
+    }
+
+    #expect(
+        fixture.model.connectionCards.first?.status
+            == .authenticationRequired
+    )
+    #expect(refreshCount == 1)
+}
+
 @MainActor
 private struct DetailFixture {
     let model: GitHubConnectionsRuntimeModel
