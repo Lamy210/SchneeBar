@@ -938,6 +938,23 @@ final class GitHubConnectionsRuntimeModel {
         return match
     }
 
+    func workflowWriteCapabilityState(
+        profileID: UUID,
+        repositoryID: Int64
+    ) -> GitHubCapabilityState? {
+        capabilitiesByConnectionID[profileID]?.state(
+            for: .workflowWrite,
+            repositoryID: repositoryID
+        )
+    }
+
+    func refreshActivitySourceAfterMutation(
+        profileID: UUID
+    ) async {
+        await activityProvider.reset(connectionID: profileID)
+        onActivitySourceChanged?()
+    }
+
     func actionsAccessPresentation(
         profileID: UUID,
         repositoryID: Int64
