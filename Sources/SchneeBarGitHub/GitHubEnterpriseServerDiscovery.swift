@@ -188,12 +188,35 @@ public struct GitHubEnterpriseServerDiscoveryClient: Sendable {
             throw GitHubEnterpriseServerDiscoveryError.invalidPayload
         }
 
-        let parsedVersion = GitHubEnterpriseServerVersion(parsing: payload.installedVersion)
+        let installedVersion = try normalizedInstalledVersion(
+            payload.installedVersion
+        )
+        let parsedVersion = GitHubEnterpriseServerVersion(
+            parsing: installedVersion
+        )
         return GitHubEnterpriseServerDiscoveryResult(
-            installedVersion: payload.installedVersion,
+            installedVersion: installedVersion,
             parsedVersion: parsedVersion,
             compatibility: compatibilityPolicy.compatibility(for: parsedVersion)
         )
+    }
+
+    private func normalizedInstalledVersion(
+        _ rawValue: String
+    ) throws -> String {
+        let value = rawValue.trimmingCharacters(
+            in: .whitespacesAndNewlines
+        )
+        guard !value.isEmpty,
+              !value.unicodeScalars.contains(where: isControlScalar)
+        else {
+            throw GitHubEnterpriseServerDiscoveryError.invalidPayload
+        }
+        return value
+    }
+
+    private func isControlScalar(_ scalar: Unicode.Scalar) -> Bool {
+        scalar.value < 0x20 || (0x7F ... 0x9F).contains(scalar.value)
     }
 }
 
