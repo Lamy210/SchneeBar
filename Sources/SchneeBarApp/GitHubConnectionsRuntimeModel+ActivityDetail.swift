@@ -137,11 +137,13 @@ extension GitHubConnectionsRuntimeModel {
     ) throws -> GitHubWorkflowActivityContext {
         guard item.kind == .workflowRun,
               let destinationURL = item.destinationURL,
-              let runID = workflowRunID(from: destinationURL)
+              let destination = workflowRunDestination(from: destinationURL),
+              destination.repositoryFullName == item.repository
         else {
             throw ActivityDetailLoadingError.unsupportedActivity
         }
 
+        let destinationScheme = destinationURL.scheme?.lowercased()
         let destinationHost = destinationURL.host?.lowercased()
         let destinationPort = destinationURL.port
 
@@ -150,12 +152,14 @@ extension GitHubConnectionsRuntimeModel {
                 deploymentKind: profile.connection.deploymentKind,
                 webBaseURL: profile.connection.webBaseURL
             )
-            guard endpoints.webBaseURL.host?.lowercased() == destinationHost,
+            guard endpoints.webBaseURL.scheme?.lowercased() == destinationScheme,
+                  endpoints.webBaseURL.host?.lowercased() == destinationHost,
                   endpoints.webBaseURL.port == destinationPort,
                   let repository = repositoryAccess(
                       profileID: profile.id,
-                      fullName: item.repository
-                  )
+                      fullName: destination.repositoryFullName
+                  ),
+                  repository.fullName == destination.repositoryFullName
             else {
                 continue
             }
@@ -163,21 +167,30 @@ extension GitHubConnectionsRuntimeModel {
             return GitHubWorkflowActivityContext(
                 profile: profile,
                 repository: repository,
-                runID: runID
+                runID: destination.runID
             )
         }
 
         throw ActivityDetailLoadingError.activityContextUnavailable
     }
 
-    private func workflowRunID(from url: URL) -> Int64? {
+    private func workflowRunDestination(
+        from url: URL
+    ) -> GitHubWorkflowRunDestination? {
         let components = url.pathComponents.filter { $0 != "/" }
-        guard let runsIndex = components.lastIndex(of: "runs"),
-              components.indices.contains(runsIndex + 1)
+        guard components.count == 5,
+              components[2] == "actions",
+              components[3] == "runs",
+              let runID = Int64(components[4]),
+              runID > 0
         else {
             return nil
         }
-        return Int64(components[runsIndex + 1])
+
+        return GitHubWorkflowRunDestination(
+            repositoryFullName: "\(components[0])/\(components[1])",
+            runID: runID
+        )
     }
 
 }
@@ -185,6 +198,11 @@ extension GitHubConnectionsRuntimeModel {
 struct GitHubWorkflowActivityContext {
     let profile: GitHubConnectionProfile
     let repository: GitHubRepositoryAccess
+    let runID: Int64
+}
+
+private struct GitHubWorkflowRunDestination {
+    let repositoryFullName: String
     let runID: Int64
 }
 
