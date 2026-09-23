@@ -345,18 +345,22 @@ final class GitHubConnectionsRuntimeModel {
         return items.sorted(by: ActivityInboxOrdering().areInIncreasingOrder)
     }
 
-    func loadActivitySourceSnapshot() async -> ActivitySourceSnapshot {
+    func loadActivitySourceSnapshot() async throws -> ActivitySourceSnapshot {
         do {
+            let items = try await loadActivityItems()
+            try Task.checkCancellation()
             return ActivitySourceSnapshot(
-                items: try await loadActivityItems(),
+                items: items,
                 status: .available
             )
         } catch RuntimeError.activityAuthenticationRequired {
+            try Task.checkCancellation()
             return ActivitySourceSnapshot(
                 items: [],
                 status: .authenticationRequired
             )
         } catch {
+            try Task.checkCancellation()
             return .unavailable
         }
     }
