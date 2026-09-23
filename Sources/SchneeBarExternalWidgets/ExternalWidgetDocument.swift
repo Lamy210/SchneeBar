@@ -1,12 +1,12 @@
 import Foundation
 
-public enum ExternalWidgetRepresentation: String, Codable, Sendable {
+public enum ExternalWidgetRepresentation: String, Codable, Equatable, Sendable {
     case compact
     case normal
     case critical
 }
 
-public enum ExternalWidgetSeverity: String, Codable, Sendable {
+public enum ExternalWidgetSeverity: String, Codable, Equatable, Sendable {
     case nominal
     case active
     case attention
@@ -14,20 +14,20 @@ public enum ExternalWidgetSeverity: String, Codable, Sendable {
     case unavailable
 }
 
-public enum ExternalWidgetPriority: String, Codable, Sendable {
+public enum ExternalWidgetPriority: String, Codable, Equatable, Sendable {
     case background
     case normal
     case attention
     case critical
 }
 
-public enum ExternalWidgetVisibilityKind: String, Codable, Sendable {
+public enum ExternalWidgetVisibilityKind: String, Codable, Equatable, Sendable {
     case always
     case whenNotNominal
     case minimumSeverity
 }
 
-public enum ExternalWidgetRefreshKind: String, Codable, Sendable {
+public enum ExternalWidgetRefreshKind: String, Codable, Equatable, Sendable {
     case manual
     case interval
     case adaptive
