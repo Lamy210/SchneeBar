@@ -333,6 +333,10 @@ func workflowMutationExecutesOnlyWithConfirmedWriteCapability() async throws {
         workflowWriteAvailable: true
     )
     let recorder = DetailMutationRecorder()
+    var refreshCount = 0
+    fixture.model.onActivitySourceChanged = {
+        refreshCount += 1
+    }
 
     try await fixture.model.performWorkflowRunAction(
         .rerunWorkflow,
@@ -342,6 +346,57 @@ func workflowMutationExecutesOnlyWithConfirmedWriteCapability() async throws {
 
     #expect(await recorder.reruns() == [700])
     #expect(await recorder.cancellations().isEmpty)
+    #expect(refreshCount == 1)
+}
+
+private struct DetailRejectedMutationService: GitHubWorkflowRunMutating {
+    func rerun(
+        connection: GitHubConnection,
+        identity: GitHubAccountIdentity,
+        clientID: String?,
+        repository: GitHubRepositoryAccess,
+        runID: Int64
+    ) async throws {
+        throw GitHubConnectionSessionError.reauthenticationRequired
+    }
+
+    func cancel(
+        connection: GitHubConnection,
+        identity: GitHubAccountIdentity,
+        clientID: String?,
+        repository: GitHubRepositoryAccess,
+        runID: Int64
+    ) async throws {
+        throw GitHubConnectionSessionError.reauthenticationRequired
+    }
+}
+
+@Test @MainActor
+func workflowMutationAuthenticationFailureUpdatesConnectionHealth() async throws {
+    let fixture = try await detailFixture(
+        jobStatusCode: 200,
+        workflowWriteAvailable: true
+    )
+    var refreshCount = 0
+    fixture.model.onActivitySourceChanged = {
+        refreshCount += 1
+    }
+
+    await #expect(
+        throws: GitHubConnectionSessionError.reauthenticationRequired
+    ) {
+        try await fixture.model.performWorkflowRunAction(
+            .rerunWorkflow,
+            for: detailActivityItem(state: .failed),
+            mutationService: DetailRejectedMutationService()
+        )
+    }
+
+    #expect(
+        fixture.model.connectionCards.first?.status
+            == .authenticationRequired
+    )
+    #expect(refreshCount == 1)
 }
 
 @Test @MainActor
