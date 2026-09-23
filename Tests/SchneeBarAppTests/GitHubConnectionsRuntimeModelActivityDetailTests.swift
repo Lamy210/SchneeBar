@@ -417,6 +417,34 @@ func workflowMutationCannotBypassUnavailableWriteCapability() async throws {
 }
 
 @Test @MainActor
+func workflowMutationCannotBypassRunStateActionGate() async throws {
+    let fixture = try await detailFixture(
+        jobStatusCode: 200,
+        workflowWriteAvailable: true
+    )
+    let recorder = DetailMutationRecorder()
+
+    await #expect(throws: WorkflowRunActionError.unavailable) {
+        try await fixture.model.performWorkflowRunAction(
+            .cancelWorkflow,
+            for: detailActivityItem(state: .failed),
+            mutationService: recorder
+        )
+    }
+
+    await #expect(throws: WorkflowRunActionError.unavailable) {
+        try await fixture.model.performWorkflowRunAction(
+            .rerunWorkflow,
+            for: detailActivityItem(state: .running),
+            mutationService: recorder
+        )
+    }
+
+    #expect(await recorder.reruns().isEmpty)
+    #expect(await recorder.cancellations().isEmpty)
+}
+
+@Test @MainActor
 func activityDetailRejectsDestinationRepositoryMismatch() async throws {
     let fixture = try await detailFixture(
         jobStatusCode: 200,
