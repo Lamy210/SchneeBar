@@ -21,97 +21,97 @@ extension GitHubConnectionsRuntimeModel {
         let runID = context.runID
 
         let jobs = try await jobService.jobs(
+            connection: profile.connection,
+            identity: profile.account,
+            clientID: profile.clientID,
+            repository: repository,
+            runID: runID,
+            query: GitHubWorkflowJobQuery(filter: .latest, limit: 100)
+        )
+        let jobDetail = detailMapper.map(item: item, jobs: jobs)
+
+        var deliveryTimeline: DeliveryTimelineSnapshot
+        do {
+            let evidence = try await timelineLoader.timelineEvidence(
                 connection: profile.connection,
                 identity: profile.account,
                 clientID: profile.clientID,
                 repository: repository,
-                runID: runID,
-                query: GitHubWorkflowJobQuery(filter: .latest, limit: 100)
+                runID: runID
             )
-            let jobDetail = detailMapper.map(item: item, jobs: jobs)
+            let buildResult = timelineBuilder.buildResult(
+                repositoryID: repository.id,
+                evidence: evidence
+            )
+            deliveryTimeline = buildResult.timeline
 
-            var deliveryTimeline: DeliveryTimelineSnapshot
-            do {
-                let evidence = try await timelineLoader.timelineEvidence(
-                    connection: profile.connection,
-                    identity: profile.account,
-                    clientID: profile.clientID,
-                    repository: repository,
-                    runID: runID
-                )
-                let buildResult = timelineBuilder.buildResult(
-                    repositoryID: repository.id,
-                    evidence: evidence
-                )
-                deliveryTimeline = buildResult.timeline
+            if let baseRun = buildResult.correlatedBaseRun,
+               deploymentAccessPresentation(
+                   profileID: profile.id,
+                   repositoryID: repository.id
+               ) != .unavailable
+            {
+                do {
+                    let deploymentEvidence = try await deploymentTimelineLoader.deploymentEvidence(
+                        connection: profile.connection,
+                        identity: profile.account,
+                        clientID: profile.clientID,
+                        repository: repository,
+                        exactSHA: baseRun.headSHA
+                    )
 
-                if let baseRun = buildResult.correlatedBaseRun,
-                   deploymentAccessPresentation(
-                       profileID: profile.id,
-                       repositoryID: repository.id
-                   ) != .unavailable
-                {
-                    do {
-                        let deploymentEvidence = try await deploymentTimelineLoader.deploymentEvidence(
-                            connection: profile.connection,
-                            identity: profile.account,
-                            clientID: profile.clientID,
-                            repository: repository,
-                            exactSHA: baseRun.headSHA
-                        )
-
-                        var environmentCatalog: GitHubEnvironmentCatalog?
-                        if !deploymentEvidence.deployments.isEmpty,
-                           actionsAccessPresentation(
-                               profileID: profile.id,
-                               repositoryID: repository.id
-                           ) != .unavailable
-                        {
-                            do {
-                                environmentCatalog = try await environmentCatalogLoader.environmentCatalog(
-                                    connection: profile.connection,
-                                    identity: profile.account,
-                                    clientID: profile.clientID,
-                                    repository: repository
-                                )
-                            } catch let cancellation as CancellationError {
-                                throw cancellation
-                            } catch {
-                                // Environment enrichment is best effort.
-                                // Preserve the already-proven Deployment evidence.
-                                environmentCatalog = nil
-                            }
+                    var environmentCatalog: GitHubEnvironmentCatalog?
+                    if !deploymentEvidence.deployments.isEmpty,
+                       actionsAccessPresentation(
+                           profileID: profile.id,
+                           repositoryID: repository.id
+                       ) != .unavailable
+                    {
+                        do {
+                            environmentCatalog = try await environmentCatalogLoader.environmentCatalog(
+                                connection: profile.connection,
+                                identity: profile.account,
+                                clientID: profile.clientID,
+                                repository: repository
+                            )
+                        } catch let cancellation as CancellationError {
+                            throw cancellation
+                        } catch {
+                            // Environment enrichment is best effort.
+                            // Preserve the already-proven Deployment evidence.
+                            environmentCatalog = nil
                         }
-
-                        deliveryTimeline = timelineBuilder.appendDeployments(
-                            to: deliveryTimeline,
-                            evidence: deploymentEvidence,
-                            environmentCatalog: environmentCatalog
-                        )
-                    } catch let cancellation as CancellationError {
-                        throw cancellation
-                    } catch {
-                        // Deployment enrichment is best effort. Preserve the
-                        // already-correlated delivery timeline.
                     }
+
+                    deliveryTimeline = timelineBuilder.appendDeployments(
+                        to: deliveryTimeline,
+                        evidence: deploymentEvidence,
+                        environmentCatalog: environmentCatalog
+                    )
+                } catch let cancellation as CancellationError {
+                    throw cancellation
+                } catch {
+                    // Deployment enrichment is best effort. Preserve the
+                    // already-correlated delivery timeline.
                 }
-            } catch let cancellation as CancellationError {
-                throw cancellation
-            } catch {
-                deliveryTimeline = DeliveryTimelineSnapshot(
-                    status: .temporarilyUnavailable,
-                    confidence: .unknown,
-                    events: [],
-                    evidence: [
-                        DeliveryTimelineEvidenceItem(
-                            id: "delivery-evidence-load",
-                            title: "Delivery evidence",
-                            detail: "GitHub evidence could not be loaded right now",
-                            state: .unavailable
-                        ),
-                    ]
-                )
             }
+        } catch let cancellation as CancellationError {
+            throw cancellation
+        } catch {
+            deliveryTimeline = DeliveryTimelineSnapshot(
+                status: .temporarilyUnavailable,
+                confidence: .unknown,
+                events: [],
+                evidence: [
+                    DeliveryTimelineEvidenceItem(
+                        id: "delivery-evidence-load",
+                        title: "Delivery evidence",
+                        detail: "GitHub evidence could not be loaded right now",
+                        state: .unavailable
+                    ),
+                ]
+            )
+        }
 
         return ActivityDetailSnapshot(
             id: jobDetail.id,
