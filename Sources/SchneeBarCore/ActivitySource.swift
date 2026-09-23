@@ -139,10 +139,19 @@ public struct ActivitySourceAggregator: Sendable {
         ) { group in
             for source in sources {
                 group.addTask {
-                    LoadedActivitySource(
-                        id: source.id,
-                        snapshot: try await source.snapshot()
-                    )
+                    do {
+                        return LoadedActivitySource(
+                            id: source.id,
+                            snapshot: try await source.snapshot()
+                        )
+                    } catch is CancellationError {
+                        throw CancellationError()
+                    } catch {
+                        return LoadedActivitySource(
+                            id: source.id,
+                            snapshot: .unavailable
+                        )
+                    }
                 }
             }
 
