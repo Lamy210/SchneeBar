@@ -55,23 +55,25 @@ public struct ActivitySourceSnapshot: Equatable, Sendable {
 
 public protocol ActivitySource: Sendable {
     var id: ActivitySourceID { get }
-    func snapshot() async -> ActivitySourceSnapshot
+    func snapshot() async throws -> ActivitySourceSnapshot
 }
 
 public struct ClosureActivitySource: ActivitySource, Sendable {
     public let id: ActivitySourceID
-    private let loadSnapshot: @Sendable () async -> ActivitySourceSnapshot
+    private let loadSnapshot:
+        @Sendable () async throws -> ActivitySourceSnapshot
 
     public init(
         id: ActivitySourceID,
-        loadSnapshot: @escaping @Sendable () async -> ActivitySourceSnapshot
+        loadSnapshot:
+            @escaping @Sendable () async throws -> ActivitySourceSnapshot
     ) {
         self.id = id
         self.loadSnapshot = loadSnapshot
     }
 
-    public func snapshot() async -> ActivitySourceSnapshot {
-        await loadSnapshot()
+    public func snapshot() async throws -> ActivitySourceSnapshot {
+        try await loadSnapshot()
     }
 }
 
@@ -131,7 +133,7 @@ public struct ActivitySourceAggregator: Sendable {
             }
         }
 
-        let loaded = await withTaskGroup(
+        let loaded = try await withThrowingTaskGroup(
             of: LoadedActivitySource.self,
             returning: [LoadedActivitySource].self
         ) { group in
@@ -139,14 +141,14 @@ public struct ActivitySourceAggregator: Sendable {
                 group.addTask {
                     LoadedActivitySource(
                         id: source.id,
-                        snapshot: await source.snapshot()
+                        snapshot: try await source.snapshot()
                     )
                 }
             }
 
             var results: [LoadedActivitySource] = []
             results.reserveCapacity(sources.count)
-            for await result in group {
+            for try await result in group {
                 results.append(result)
             }
             return results.sorted {
