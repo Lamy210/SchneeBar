@@ -45,6 +45,12 @@ extension GitHubConnectionsRuntimeModel {
                 profileID: context.profile.id
             )
             throw GitHubConnectionSessionError.reauthenticationRequired
+        } catch GitHubConnectionSessionError.ssoRequired {
+            statusByConnectionID[context.profile.id] = .ssoRequired
+            await refreshActivitySourceAfterMutation(
+                profileID: context.profile.id
+            )
+            throw GitHubConnectionSessionError.ssoRequired
         }
 
         try Task.checkCancellation()
