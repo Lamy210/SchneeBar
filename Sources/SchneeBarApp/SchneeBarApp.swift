@@ -99,7 +99,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let activityAggregator = ActivitySourceAggregator(
             sources: [
                 ClosureActivitySource(id: "github") {
-                    await githubRuntimeModel.loadActivitySourceSnapshot()
+                    try await githubRuntimeModel.loadActivitySourceSnapshot()
                 },
             ]
         )
