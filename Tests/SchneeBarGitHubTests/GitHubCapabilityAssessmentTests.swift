@@ -31,6 +31,96 @@ func hostedActionsWritePermissionAlsoSatisfiesReadCapability() throws {
 }
 
 @Test
+func actionsWritePermissionEnablesWorkflowMutationCapability() throws {
+    let repository = try capabilityRepository(
+        id: 1,
+        isPrivate: true,
+        permissions: GitHubRepositoryPermissions(
+            push: true,
+            pull: true
+        )
+    )
+    let result = GitHubCapabilityEvaluator().evaluate(
+        connection: try hostedCapabilityConnection(),
+        inventory: capabilityInventory(
+            repository: repository,
+            permissions: ["actions": "write"]
+        )
+    )
+
+    #expect(
+        result.state(for: .workflowWrite, repositoryID: 1)
+            == .available
+    )
+}
+
+@Test
+func actionsReadPermissionDoesNotEnableWorkflowMutationCapability() throws {
+    let repository = try capabilityRepository(
+        id: 1,
+        isPrivate: true,
+        permissions: GitHubRepositoryPermissions(
+            push: true,
+            pull: true
+        )
+    )
+    let result = GitHubCapabilityEvaluator().evaluate(
+        connection: try hostedCapabilityConnection(),
+        inventory: capabilityInventory(
+            repository: repository,
+            permissions: ["actions": "read"]
+        )
+    )
+
+    #expect(
+        result.state(for: .workflowWrite, repositoryID: 1)
+            == .unavailable(.missingPermission)
+    )
+}
+
+@Test
+func workflowWriteRequiresRepositoryWriteAccess() throws {
+    let repository = try capabilityRepository(
+        id: 1,
+        isPrivate: true,
+        permissions: GitHubRepositoryPermissions(pull: true)
+    )
+    let result = GitHubCapabilityEvaluator().evaluate(
+        connection: try hostedCapabilityConnection(),
+        inventory: capabilityInventory(
+            repository: repository,
+            permissions: ["actions": "write"]
+        )
+    )
+
+    #expect(
+        result.state(for: .workflowWrite, repositoryID: 1)
+            == .unavailable(.insufficientRepositoryAccess)
+    )
+}
+
+@Test
+func publicRepositoryDoesNotInventWorkflowWriteWithoutPermission() throws {
+    let repository = try capabilityRepository(id: 1, isPrivate: false)
+    let result = GitHubCapabilityEvaluator().evaluate(
+        connection: try hostedCapabilityConnection(),
+        inventory: capabilityInventory(
+            repository: repository,
+            permissions: [:]
+        )
+    )
+
+    #expect(
+        result.state(for: .actions, repositoryID: 1)
+            == .unknown([.publicRepositoryPermissionNotProven])
+    )
+    #expect(
+        result.state(for: .workflowWrite, repositoryID: 1)
+            == .unavailable(.missingPermission)
+    )
+}
+
+@Test
 func privateRepositoryWithoutActionsPermissionIsUnavailable() throws {
     let repository = try capabilityRepository(id: 1, isPrivate: true)
     let result = GitHubCapabilityEvaluator().evaluate(
@@ -111,7 +201,6 @@ func unmappedCapabilitiesRemainUnknown() throws {
         GitHubCapability.releases,
         .mergeQueue,
         .securityAlerts,
-        .workflowWrite,
     ] {
         #expect(
             result.state(for: capability, repositoryID: 1)
@@ -147,6 +236,32 @@ func untestedEnterpriseWithPermissionIsUnknownRatherThanUnavailable() throws {
 
     #expect(
         result.state(for: .actions, repositoryID: 1)
+            == .unknown([.untestedEnterpriseVersion])
+    )
+}
+
+@Test
+func untestedEnterpriseWorkflowWritePreservesPlatformUncertainty() throws {
+    let repository = try capabilityRepository(
+        id: 1,
+        isPrivate: true,
+        permissions: GitHubRepositoryPermissions(
+            push: true,
+            pull: true
+        )
+    )
+    let result = GitHubCapabilityEvaluator().evaluate(
+        connection: try enterpriseCapabilityConnection(
+            serverVersion: "3.23.0"
+        ),
+        inventory: capabilityInventory(
+            repository: repository,
+            permissions: ["actions": "write"]
+        )
+    )
+
+    #expect(
+        result.state(for: .workflowWrite, repositoryID: 1)
             == .unknown([.untestedEnterpriseVersion])
     )
 }
@@ -342,7 +457,10 @@ private func capabilityInstallationAccess(
 
 private func capabilityRepository(
     id: Int64,
-    isPrivate: Bool
+    isPrivate: Bool,
+    permissions: GitHubRepositoryPermissions = GitHubRepositoryPermissions(
+        pull: true
+    )
 ) throws -> GitHubRepositoryAccess {
     GitHubRepositoryAccess(
         id: id,
@@ -351,6 +469,6 @@ private func capabilityRepository(
         isPrivate: isPrivate,
         webURL: try #require(URL(string: "https://github.example.test/example-org/service-\(id)")),
         ownerLogin: "example-org",
-        permissions: GitHubRepositoryPermissions(pull: true)
+        permissions: permissions
     )
 }
