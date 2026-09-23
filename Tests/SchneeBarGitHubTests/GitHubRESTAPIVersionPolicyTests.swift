@@ -14,7 +14,7 @@ func choosesLegacyRESTVersionForGHES320() {
 }
 
 @Test
-func choosesCurrentRESTVersionForGHES321AndNewer() {
+func choosesCurrentRESTVersionForGHES321And322() {
     let policy = GitHubRESTAPIVersionPolicy()
 
     #expect(
@@ -27,11 +27,18 @@ func choosesCurrentRESTVersionForGHES321AndNewer() {
             for: GitHubEnterpriseServerVersion(major: 3, minor: 22)
         ) == "2026-03-10"
     )
-    #expect(
-        policy.preferredVersion(
-            for: GitHubEnterpriseServerVersion(major: 3, minor: 23)
-        ) == "2026-03-10"
-    )
+}
+
+@Test(arguments: [
+    GitHubEnterpriseServerVersion(major: 3, minor: 19),
+    GitHubEnterpriseServerVersion(major: 3, minor: 23),
+    GitHubEnterpriseServerVersion(major: 4, minor: 0),
+])
+func untestedEnterpriseReleaseDoesNotInventAPIVersion(
+    version: GitHubEnterpriseServerVersion
+) {
+    let policy = GitHubRESTAPIVersionPolicy()
+    #expect(policy.preferredVersion(for: version) == nil)
 }
 
 @Test
@@ -124,4 +131,71 @@ func hostedConnectionIgnoresEnterpriseServerDiscoveryMutation() throws {
 
     #expect(connection.serverVersion == nil)
     #expect(connection.apiVersion == "2026-03-10")
+}
+
+
+@Test
+func requestHeaderUsesCurrentVersionForHostedGitHub() throws {
+    let policy = GitHubRESTAPIVersionPolicy()
+    let github = GitHubConnection(
+        displayName: "GitHub.com",
+        deploymentKind: .githubDotCom,
+        webBaseURL: try #require(URL(string: "https://github.com"))
+    )
+    let ghe = GitHubConnection(
+        displayName: "Company GitHub",
+        deploymentKind: .gheDotCom,
+        webBaseURL: try #require(URL(string: "https://acme.ghe.com"))
+    )
+
+    #expect(policy.headerVersion(for: github) == GitHubRESTAPIVersionPolicy.currentVersion)
+    #expect(policy.headerVersion(for: ghe) == GitHubRESTAPIVersionPolicy.currentVersion)
+}
+
+@Test
+func requestHeaderPreservesTrimmedExplicitVersionOverride() throws {
+    let policy = GitHubRESTAPIVersionPolicy()
+    let connection = GitHubConnection(
+        displayName: "Internal GitHub",
+        deploymentKind: .enterpriseServer,
+        webBaseURL: try #require(URL(string: "https://github.internal.example")),
+        serverVersion: "3.22.0",
+        apiVersion: "  custom-version  "
+    )
+
+    #expect(policy.headerVersion(for: connection) == "custom-version")
+}
+
+@Test
+func requestHeaderDerivesEnterpriseVersionWhenStoredHeaderIsMissing() throws {
+    let policy = GitHubRESTAPIVersionPolicy()
+    var legacy = GitHubConnection(
+        displayName: "Legacy GHES",
+        deploymentKind: .enterpriseServer,
+        webBaseURL: try #require(URL(string: "https://legacy.internal.example")),
+        serverVersion: "3.20.9"
+    )
+    var current = GitHubConnection(
+        displayName: "Current GHES",
+        deploymentKind: .enterpriseServer,
+        webBaseURL: try #require(URL(string: "https://current.internal.example")),
+        serverVersion: "3.22.0"
+    )
+    legacy.apiVersion = nil
+    current.apiVersion = nil
+
+    #expect(policy.headerVersion(for: legacy) == GitHubRESTAPIVersionPolicy.legacyVersion)
+    #expect(policy.headerVersion(for: current) == GitHubRESTAPIVersionPolicy.currentVersion)
+}
+
+@Test
+func requestHeaderDoesNotInventVersionForUnknownEnterpriseServer() throws {
+    let policy = GitHubRESTAPIVersionPolicy()
+    let connection = GitHubConnection(
+        displayName: "Unknown GHES",
+        deploymentKind: .enterpriseServer,
+        webBaseURL: try #require(URL(string: "https://unknown.internal.example"))
+    )
+
+    #expect(policy.headerVersion(for: connection) == nil)
 }

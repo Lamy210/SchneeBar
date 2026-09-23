@@ -223,16 +223,10 @@ public struct GitHubCheckRunClient: Sendable {
         return date
     }
 
-    private func apiVersion(for connection: GitHubConnection) -> String? {
-        if let explicit = nonEmpty(connection.apiVersion) {
-            return explicit
-        }
-        switch connection.deploymentKind {
-        case .githubDotCom, .gheDotCom:
-            return GitHubRESTAPIVersionPolicy.currentVersion
-        case .enterpriseServer:
-            return nil
-        }
+    private func apiVersion(
+        for connection: GitHubConnection
+    ) -> String? {
+        GitHubRESTAPIVersionPolicy().headerVersion(for: connection)
     }
 
     private func isValidGitObjectID(_ value: String) -> Bool {

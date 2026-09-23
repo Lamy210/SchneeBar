@@ -57,6 +57,7 @@ Implemented foundation:
 - discovered GHES version compatibility surfaced in connection health without masking operational failures
 - bounded GHES metadata rediscovery during existing refreshes, capped at one `/meta` request when the persisted 24-hour check-attempt cadence is due, persisting failed attempts to prevent refresh-time polling, with no background polling and best-effort fallback to the last known server version
 - REST API version policy
+- centralized REST API request-version selection across GitHub clients, including explicit overrides and evidence-backed GHES 3.20-3.22 release mapping without guessing untested releases
 - GitHub.com / enterprise-aware request construction boundaries
 - session-scoped, repository-aware capability assessment for Actions, Pull Requests, Checks, and Deployments
 - conservative public-repository and untested/unknown-GHES capability evidence handling

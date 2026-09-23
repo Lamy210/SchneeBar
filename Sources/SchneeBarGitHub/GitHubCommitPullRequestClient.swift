@@ -180,17 +180,10 @@ public struct GitHubCommitPullRequestClient: Sendable {
         return url
     }
 
-    private func apiVersion(for connection: GitHubConnection) -> String? {
-        if let explicit = nonEmpty(connection.apiVersion) {
-            return explicit
-        }
-
-        switch connection.deploymentKind {
-        case .githubDotCom, .gheDotCom:
-            return GitHubRESTAPIVersionPolicy.currentVersion
-        case .enterpriseServer:
-            return nil
-        }
+    private func apiVersion(
+        for connection: GitHubConnection
+    ) -> String? {
+        GitHubRESTAPIVersionPolicy().headerVersion(for: connection)
     }
 
     private func nonEmpty(_ value: String?) -> String? {
