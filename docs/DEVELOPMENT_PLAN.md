@@ -187,11 +187,13 @@ Foundation already available from earlier phases:
 - GHES discovery errors that distinguish offline/DNS/connectivity/timeout/interruption failures without masking TLS or protocol failures
 - GHES onboarding/recovery guidance that suggests VPN/private-network checks only for enterprise-server connectivity failures
 - evidence-backed partial SAML/SSO connection status when accessible installations coexist with explicit SSO-required failures
+- explicit enterprise evidence boundary: no EMU inference from usernames/hosts/access failures and no enterprise-admin permission escalation solely for account classification
+- evidence-backed GHES REST API compatibility matrix from official versioned OpenAPI descriptions, without guessing untested releases or probing undocumented negotiation endpoints
 
-Still required:
+Evidence-bound / deferred pending upstream support:
 
-- GitHub Enterprise Cloud / SAML / EMU states
-- GHES capability/API-version negotiation
+- explicit EMU classification, until GitHub exposes a stable non-admin signal for the normal GitHub App user-token path
+- true GHES runtime API-version negotiation, until an authoritative supported-version endpoint contract or reproducible GHES fixture is available
 
 ## Phase 6 — Interaction and extensibility
 

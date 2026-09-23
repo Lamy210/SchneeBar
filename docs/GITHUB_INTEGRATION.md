@@ -61,6 +61,18 @@ Examples:
 
 GHES support requires per-instance app registration; a GitHub.com App cannot simply be installed into a customer GHES instance.
 
-Connection setup must detect server/version/capabilities and expose meaningful states such as SSO required, approval pending, VPN required, permission missing, unsupported version, and rate limited.
+Connection setup detects provider/server evidence conservatively and exposes only states justified by that evidence.
+
+Enterprise evidence rules:
+
+- SSO-required state comes only from explicit normalized SSO evidence; generic 403/404 responses, empty resources, and deployment host are not enough.
+- Partial access is preserved when accessible installations coexist with explicit SSO-required installations.
+- EMU is not inferred from usernames, domains, GHE.com hosting, repository visibility, or generic access failures. No enterprise-admin/SCIM permission is requested solely to classify account type.
+- GHES REST API versions use the evidence-backed release compatibility matrix. Unknown/untested releases do not inherit the newest version by assumption.
+- SchneeBar does not probe an undocumented GHES `/api/v3/versions` endpoint. Runtime negotiation requires an authoritative endpoint contract or reproducible GHES fixture first.
+
+Connection health may still expose operational states such as SSO required, VPN/private-network unavailable, permission missing, untested server version, and rate limiting when the underlying provider evidence supports them.
 
 TLS verification is mandatory. SchneeBar will not provide an 'ignore certificate errors' switch.
+
+See [ADR-0003: Enterprise evidence boundaries](decisions/0003-enterprise-evidence-boundaries.md).
