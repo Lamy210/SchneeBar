@@ -52,6 +52,7 @@ private enum GitHubOnboardingSnapshotScenario: String, CaseIterable {
     case gheConfiguration = "ghe-configuration"
     case ghesConfiguration = "ghes-configuration"
     case ghesPreflight = "ghes-preflight"
+    case ghesWarning = "ghes-warning"
     case waiting
     case invalidGHE = "invalid-ghe"
     case failure
@@ -72,7 +73,7 @@ private enum GitHubOnboardingSnapshotScenario: String, CaseIterable {
                 serverURL: "https://company.ghe.com",
                 clientID: "Iv1.enterprise-client"
             )
-        case .ghesConfiguration, .ghesPreflight:
+        case .ghesConfiguration, .ghesPreflight, .ghesWarning:
             GitHubConnectionDraft(
                 deploymentKind: .enterpriseServer,
                 displayName: "Internal GitHub",
@@ -102,6 +103,13 @@ private enum GitHubOnboardingSnapshotScenario: String, CaseIterable {
             return .configuration
         case .ghesPreflight:
             return .checkingEnterpriseServer
+        case .ghesWarning:
+            return .enterpriseServerCompatibilityWarning(
+                GitHubEnterpriseServerCompatibilityPresentation(
+                    installedVersion: "3.23.0",
+                    compatibility: .newerUntested
+                )
+            )
         case .waiting:
             return .waitingForAuthorization(
                 GitHubDeviceAuthorizationPresentation(

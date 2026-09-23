@@ -187,6 +187,44 @@ func doesNotMaskEnterpriseDiscoveryTLSErrorsAsNetworkUnavailable() async throws 
 }
 
 @Test
+func normalizesReportedEnterpriseVersionBeforeUse() async throws {
+    let transport = RecordingGitHubTransport(
+        json: #"{"installed_version":"  3.22.0-rc1  \n"}"#
+    )
+    let client = GitHubEnterpriseServerDiscoveryClient(transport: transport)
+    let connection = GitHubConnection(
+        displayName: "Internal GitHub",
+        deploymentKind: .enterpriseServer,
+        webBaseURL: try #require(URL(string: "https://github.internal.example"))
+    )
+
+    let result = try await client.discover(connection: connection)
+
+    #expect(result.installedVersion == "3.22.0-rc1")
+    #expect(
+        result.parsedVersion
+            == GitHubEnterpriseServerVersion(major: 3, minor: 22, patch: 0)
+    )
+}
+
+@Test
+func rejectsEmptyEnterpriseVersionMetadata() async throws {
+    let transport = RecordingGitHubTransport(
+        json: #"{"installed_version":"   \n  "}"#
+    )
+    let client = GitHubEnterpriseServerDiscoveryClient(transport: transport)
+    let connection = GitHubConnection(
+        displayName: "Internal GitHub",
+        deploymentKind: .enterpriseServer,
+        webBaseURL: try #require(URL(string: "https://github.internal.example"))
+    )
+
+    await #expect(throws: GitHubEnterpriseServerDiscoveryError.invalidPayload) {
+        try await client.discover(connection: connection)
+    }
+}
+
+@Test
 func reportsInvalidMetaPayload() async throws {
     let transport = RecordingGitHubTransport(json: #"{"ver":"3.22.0"}"#)
     let client = GitHubEnterpriseServerDiscoveryClient(transport: transport)

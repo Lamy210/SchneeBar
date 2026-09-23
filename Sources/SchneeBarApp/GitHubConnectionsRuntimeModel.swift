@@ -5,6 +5,16 @@ import SchneeBarGitHub
 import SchneeBarGitHubActivityProvider
 import SchneeBarGitHubFeature
 
+private struct PreparedGitHubConnection {
+    let connection: GitHubConnection
+    let enterpriseDiscovery: GitHubEnterpriseServerDiscoveryResult?
+}
+
+private struct PendingEnterpriseOnboarding {
+    let connection: GitHubConnection
+    let clientID: String
+}
+
 @MainActor
 @Observable
 final class GitHubConnectionsRuntimeModel {
@@ -63,6 +73,9 @@ final class GitHubConnectionsRuntimeModel {
     private var onboardingTask: Task<Void, Never>?
 
     @ObservationIgnored
+    private var pendingEnterpriseOnboarding: PendingEnterpriseOnboarding?
+
+    @ObservationIgnored
     private var recoveryTask: Task<Void, Never>?
 
     @ObservationIgnored
@@ -94,7 +107,11 @@ final class GitHubConnectionsRuntimeModel {
 
     var onboardingIsActive: Bool {
         switch onboardingPhase {
-        case .checkingEnterpriseServer, .requestingCode, .waitingForAuthorization, .finalizing:
+        case .checkingEnterpriseServer,
+             .enterpriseServerCompatibilityWarning,
+             .requestingCode,
+             .waitingForAuthorization,
+             .finalizing:
             return true
         case .configuration, .failed:
             return false
@@ -336,6 +353,7 @@ final class GitHubConnectionsRuntimeModel {
     func beginOnboarding(defaultClientID: String? = nil) {
         cancelRecovery()
         onboardingTask?.cancel()
+        pendingEnterpriseOnboarding = nil
         onboardingDraft = GitHubConnectionDraft(clientID: defaultClientID ?? "")
         onboardingPhase = .configuration
         isPresentingOnboarding = true
@@ -344,12 +362,14 @@ final class GitHubConnectionsRuntimeModel {
     func cancelOnboarding() {
         onboardingTask?.cancel()
         onboardingTask = nil
+        pendingEnterpriseOnboarding = nil
         onboardingPhase = .configuration
         isPresentingOnboarding = false
     }
 
     func connectDraft() {
         onboardingTask?.cancel()
+        pendingEnterpriseOnboarding = nil
         let draft = onboardingDraft
 
         onboardingTask = Task { @MainActor [weak self] in
@@ -358,95 +378,35 @@ final class GitHubConnectionsRuntimeModel {
                 onboardingPhase = draft.deploymentKind == .enterpriseServer
                     ? .checkingEnterpriseServer
                     : .requestingCode
-                let connection = try await makeConnection(from: draft)
-                onboardingPhase = .requestingCode
-                let clientID = draft.clientID.trimmingCharacters(in: .whitespacesAndNewlines)
-                let authorization = try await deviceFlowClient.begin(
-                    connection: connection,
+
+                let prepared = try await prepareConnection(from: draft)
+                try Task.checkCancellation()
+                let clientID = draft.clientID.trimmingCharacters(
+                    in: .whitespacesAndNewlines
+                )
+
+                if let discovery = prepared.enterpriseDiscovery,
+                   discovery.compatibility != .tested
+                {
+                    pendingEnterpriseOnboarding = PendingEnterpriseOnboarding(
+                        connection: prepared.connection,
+                        clientID: clientID
+                    )
+                    onboardingTask = nil
+                    onboardingPhase = .enterpriseServerCompatibilityWarning(
+                        GitHubEnterpriseServerCompatibilityPresentation(
+                            installedVersion: discovery.installedVersion,
+                            compatibility: discovery.compatibility
+                        )
+                    )
+                    return
+                }
+
+                try await completeOnboarding(
+                    connection: prepared.connection,
                     clientID: clientID
                 )
-
-                onboardingPhase = .waitingForAuthorization(
-                    GitHubDeviceAuthorizationPresentation(
-                        userCode: authorization.userCode,
-                        verificationURI: authorization.verificationURI,
-                        expiresAt: authorization.expiresAt
-                    )
-                )
-
-                let credential = try await authorizationWaiter.waitForAuthorization(
-                    connection: connection,
-                    clientID: clientID,
-                    session: authorization
-                )
-                try Task.checkCancellation()
-
-                onboardingPhase = .finalizing
-                let session = try await sessionCoordinator.establish(
-                    connection: connection,
-                    credential: credential
-                )
-
-                let now = Date.now
-                let profile = GitHubConnectionProfileReconciler().reconcile(
-                    existingProfiles: profiles,
-                    authenticatedConnection: connection,
-                    account: session.account.identity,
-                    authenticationMethod: .deviceFlow,
-                    clientID: clientID,
-                    now: now
-                )
-                let previousProfile = profiles.first(where: { $0.id == profile.id })
-
-                do {
-                    try Task.checkCancellation()
-                    try await profileStore.save(profile)
-                } catch {
-                    try? await sessionCoordinator.disconnect(
-                        connection: connection,
-                        identity: session.account.identity
-                    )
-                    throw error
-                }
-
-                var finalizedSession = session
-                if profile.id != connection.id {
-                    do {
-                        finalizedSession = try await sessionCoordinator.rebindEstablishedSession(
-                            session,
-                            from: connection,
-                            to: profile.connection
-                        )
-                    } catch {
-                        if let previousProfile {
-                            try? await profileStore.save(previousProfile)
-                        }
-                        try? await sessionCoordinator.disconnect(
-                            connection: connection,
-                            identity: session.account.identity
-                        )
-                        throw error
-                    }
-                }
-
-                await activityProvider.reset(connectionID: profile.id)
-                upsert(profile)
-                if profile.isEnabled {
-                    inventoryByConnectionID[profile.id] = finalizedSession.inventory
-                    capabilitiesByConnectionID[profile.id] = finalizedSession.capabilities
-                    statusByConnectionID[profile.id] = presentationStatus(
-                        for: finalizedSession.inventory,
-                        connection: profile.connection
-                    )
-                } else {
-                    inventoryByConnectionID.removeValue(forKey: profile.id)
-                    capabilitiesByConnectionID.removeValue(forKey: profile.id)
-                    statusByConnectionID[profile.id] = .disabled
-                }
-                onActivitySourceChanged?()
                 onboardingTask = nil
-                onboardingPhase = .configuration
-                isPresentingOnboarding = false
             } catch is CancellationError {
                 onboardingTask = nil
             } catch {
@@ -459,6 +419,130 @@ final class GitHubConnectionsRuntimeModel {
                 )
             }
         }
+    }
+
+    func continueEnterpriseServerOnboarding() {
+        guard let pending = pendingEnterpriseOnboarding else {
+            return
+        }
+
+        onboardingTask?.cancel()
+        pendingEnterpriseOnboarding = nil
+        onboardingPhase = .requestingCode
+
+        onboardingTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                try await completeOnboarding(
+                    connection: pending.connection,
+                    clientID: pending.clientID
+                )
+                onboardingTask = nil
+            } catch is CancellationError {
+                onboardingTask = nil
+            } catch {
+                onboardingTask = nil
+                onboardingPhase = .failed(
+                    message: errorMessage(
+                        for: error,
+                        deploymentKind: pending.connection.deploymentKind
+                    )
+                )
+            }
+        }
+    }
+
+    private func completeOnboarding(
+        connection: GitHubConnection,
+        clientID: String
+    ) async throws {
+        try Task.checkCancellation()
+        onboardingPhase = .requestingCode
+        let authorization = try await deviceFlowClient.begin(
+            connection: connection,
+            clientID: clientID
+        )
+
+        onboardingPhase = .waitingForAuthorization(
+            GitHubDeviceAuthorizationPresentation(
+                userCode: authorization.userCode,
+                verificationURI: authorization.verificationURI,
+                expiresAt: authorization.expiresAt
+            )
+        )
+
+        let credential = try await authorizationWaiter.waitForAuthorization(
+            connection: connection,
+            clientID: clientID,
+            session: authorization
+        )
+        try Task.checkCancellation()
+
+        onboardingPhase = .finalizing
+        let session = try await sessionCoordinator.establish(
+            connection: connection,
+            credential: credential
+        )
+
+        let now = Date.now
+        let profile = GitHubConnectionProfileReconciler().reconcile(
+            existingProfiles: profiles,
+            authenticatedConnection: connection,
+            account: session.account.identity,
+            authenticationMethod: .deviceFlow,
+            clientID: clientID,
+            now: now
+        )
+        let previousProfile = profiles.first(where: { $0.id == profile.id })
+
+        do {
+            try Task.checkCancellation()
+            try await profileStore.save(profile)
+        } catch {
+            try? await sessionCoordinator.disconnect(
+                connection: connection,
+                identity: session.account.identity
+            )
+            throw error
+        }
+
+        var finalizedSession = session
+        if profile.id != connection.id {
+            do {
+                finalizedSession = try await sessionCoordinator.rebindEstablishedSession(
+                    session,
+                    from: connection,
+                    to: profile.connection
+                )
+            } catch {
+                if let previousProfile {
+                    try? await profileStore.save(previousProfile)
+                }
+                try? await sessionCoordinator.disconnect(
+                    connection: connection,
+                    identity: session.account.identity
+                )
+                throw error
+            }
+        }
+
+        await activityProvider.reset(connectionID: profile.id)
+        upsert(profile)
+        if profile.isEnabled {
+            inventoryByConnectionID[profile.id] = finalizedSession.inventory
+            capabilitiesByConnectionID[profile.id] = finalizedSession.capabilities
+            statusByConnectionID[profile.id] = presentationStatus(
+                for: finalizedSession.inventory,
+                connection: profile.connection
+            )
+        } else {
+            inventoryByConnectionID.removeValue(forKey: profile.id)
+            capabilitiesByConnectionID.removeValue(forKey: profile.id)
+            statusByConnectionID[profile.id] = .disabled
+        }
+        onActivitySourceChanged?()
+        onboardingPhase = .configuration
+        isPresentingOnboarding = false
     }
 
     func beginRecovery(profileID: UUID) {
@@ -959,8 +1043,12 @@ final class GitHubConnectionsRuntimeModel {
         return updated
     }
 
-    private func makeConnection(from draft: GitHubConnectionDraft) async throws -> GitHubConnection {
-        let displayName = draft.displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+    private func prepareConnection(
+        from draft: GitHubConnectionDraft
+    ) async throws -> PreparedGitHubConnection {
+        let displayName = draft.displayName.trimmingCharacters(
+            in: .whitespacesAndNewlines
+        )
         let webBaseURL = try draft.resolvedWebBaseURL()
 
         var connection = GitHubConnection(
@@ -968,6 +1056,7 @@ final class GitHubConnectionsRuntimeModel {
             deploymentKind: draft.deploymentKind,
             webBaseURL: webBaseURL
         )
+        var discoveryResult: GitHubEnterpriseServerDiscoveryResult?
 
         if draft.deploymentKind == .enterpriseServer {
             let discovery = try await enterpriseDiscovery.discover(
@@ -976,9 +1065,13 @@ final class GitHubConnectionsRuntimeModel {
             connection.applyDiscoveredServerVersion(
                 discovery.installedVersion
             )
+            discoveryResult = discovery
         }
 
-        return connection
+        return PreparedGitHubConnection(
+            connection: connection,
+            enterpriseDiscovery: discoveryResult
+        )
     }
 
     private func presentationStatus(

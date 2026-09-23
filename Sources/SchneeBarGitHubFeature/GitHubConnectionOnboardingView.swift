@@ -122,9 +122,25 @@ public struct GitHubDeviceAuthorizationPresentation: Equatable, Sendable {
     }
 }
 
+public struct GitHubEnterpriseServerCompatibilityPresentation: Equatable, Sendable {
+    public let installedVersion: String
+    public let compatibility: GitHubEnterpriseCompatibility
+
+    public init(
+        installedVersion: String,
+        compatibility: GitHubEnterpriseCompatibility
+    ) {
+        self.installedVersion = installedVersion
+        self.compatibility = compatibility
+    }
+}
+
 public enum GitHubConnectionOnboardingPhase: Equatable, Sendable {
     case configuration
     case checkingEnterpriseServer
+    case enterpriseServerCompatibilityWarning(
+        GitHubEnterpriseServerCompatibilityPresentation
+    )
     case requestingCode
     case waitingForAuthorization(GitHubDeviceAuthorizationPresentation)
     case finalizing
@@ -135,6 +151,7 @@ public struct GitHubConnectionOnboardingView: View {
     @Binding private var draft: GitHubConnectionDraft
     private let phase: GitHubConnectionOnboardingPhase
     private let onConnect: () -> Void
+    private let onContinueEnterpriseServer: () -> Void
     private let onOpenVerificationPage: (URL) -> Void
     private let onCancel: () -> Void
 
@@ -142,12 +159,14 @@ public struct GitHubConnectionOnboardingView: View {
         draft: Binding<GitHubConnectionDraft>,
         phase: GitHubConnectionOnboardingPhase,
         onConnect: @escaping () -> Void,
+        onContinueEnterpriseServer: @escaping () -> Void = {},
         onOpenVerificationPage: @escaping (URL) -> Void,
         onCancel: @escaping () -> Void
     ) {
         _draft = draft
         self.phase = phase
         self.onConnect = onConnect
+        self.onContinueEnterpriseServer = onContinueEnterpriseServer
         self.onOpenVerificationPage = onOpenVerificationPage
         self.onCancel = onCancel
     }
@@ -170,6 +189,9 @@ public struct GitHubConnectionOnboardingView: View {
             case .checkingEnterpriseServer:
                 progress(message: "Checking GitHub Enterprise Server compatibility…")
                 cancelRow
+
+            case let .enterpriseServerCompatibilityWarning(presentation):
+                enterpriseServerCompatibilityWarning(presentation)
 
             case .requestingCode:
                 progress(message: "Requesting a GitHub authorization code…")
@@ -276,6 +298,61 @@ public struct GitHubConnectionOnboardingView: View {
             Text("SchneeBar polls only at GitHub's requested interval and backs off when GitHub asks it to slow down.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
+        }
+    }
+
+    @ViewBuilder
+    private func enterpriseServerCompatibilityWarning(
+        _ presentation: GitHubEnterpriseServerCompatibilityPresentation
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Label(
+                "Untested GitHub Enterprise Server",
+                systemImage: "exclamationmark.triangle.fill"
+            )
+            .font(.headline)
+            .foregroundStyle(.orange)
+
+            LabeledContent("Detected version", value: presentation.installedVersion)
+
+            Text(enterpriseCompatibilityMessage(presentation.compatibility))
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Text(
+                "You can continue, but SchneeBar may disable or degrade features when capability evidence is uncertain."
+            )
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+
+            HStack {
+                Button("Cancel", role: .cancel) {
+                    onCancel()
+                }
+                Spacer()
+                Button("Continue Anyway") {
+                    onContinueEnterpriseServer()
+                }
+                .buttonStyle(.borderedProminent)
+            }
+        }
+        .frame(maxWidth: .infinity, minHeight: 220, alignment: .topLeading)
+    }
+
+    private func enterpriseCompatibilityMessage(
+        _ compatibility: GitHubEnterpriseCompatibility
+    ) -> String {
+        switch compatibility {
+        case .tested:
+            return "This GitHub Enterprise Server release is within SchneeBar's tested compatibility range."
+        case .olderUntested:
+            return "This server is older than SchneeBar's tested GitHub Enterprise Server range."
+        case .newerUntested:
+            return "This server is newer than SchneeBar's tested GitHub Enterprise Server range."
+        case .unknownVersion:
+            return "SchneeBar could not map the reported server version to its tested compatibility range."
         }
     }
 

@@ -188,9 +188,17 @@ public struct GitHubEnterpriseServerDiscoveryClient: Sendable {
             throw GitHubEnterpriseServerDiscoveryError.invalidPayload
         }
 
-        let parsedVersion = GitHubEnterpriseServerVersion(parsing: payload.installedVersion)
+        let installedVersion = payload.installedVersion
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !installedVersion.isEmpty,
+              installedVersion.count <= 128
+        else {
+            throw GitHubEnterpriseServerDiscoveryError.invalidPayload
+        }
+
+        let parsedVersion = GitHubEnterpriseServerVersion(parsing: installedVersion)
         return GitHubEnterpriseServerDiscoveryResult(
-            installedVersion: payload.installedVersion,
+            installedVersion: installedVersion,
             parsedVersion: parsedVersion,
             compatibility: compatibilityPolicy.compatibility(for: parsedVersion)
         )
