@@ -16,27 +16,37 @@ extension GitHubConnectionsRuntimeModel {
             throw WorkflowRunActionError.unavailable
         }
 
-        switch action {
-        case .rerunWorkflow:
-            try await mutationService.rerun(
-                connection: context.profile.connection,
-                identity: context.profile.account,
-                clientID: context.profile.clientID,
-                repository: context.repository,
-                runID: context.runID
+        do {
+            switch action {
+            case .rerunWorkflow:
+                try await mutationService.rerun(
+                    connection: context.profile.connection,
+                    identity: context.profile.account,
+                    clientID: context.profile.clientID,
+                    repository: context.repository,
+                    runID: context.runID
+                )
+            case .cancelWorkflow:
+                try await mutationService.cancel(
+                    connection: context.profile.connection,
+                    identity: context.profile.account,
+                    clientID: context.profile.clientID,
+                    repository: context.repository,
+                    runID: context.runID
+                )
+            }
+        } catch GitHubConnectionSessionError.reauthenticationRequired {
+            statusByConnectionID[context.profile.id] = .authenticationRequired
+            await refreshActivitySourceAfterMutation(
+                profileID: context.profile.id
             )
-        case .cancelWorkflow:
-            try await mutationService.cancel(
-                connection: context.profile.connection,
-                identity: context.profile.account,
-                clientID: context.profile.clientID,
-                repository: context.repository,
-                runID: context.runID
-            )
+            throw GitHubConnectionSessionError.reauthenticationRequired
         }
 
         try Task.checkCancellation()
-        onActivitySourceChanged?()
+        await refreshActivitySourceAfterMutation(
+            profileID: context.profile.id
+        )
     }
 }
 
