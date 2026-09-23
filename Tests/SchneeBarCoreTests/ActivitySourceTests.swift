@@ -228,6 +228,28 @@ func activityAggregatorPropagatesSourceCancellation() async {
 }
 
 @Test
+func activityAggregatorPreservesParentTaskCancellationEvenIfSourceReturns() async {
+    let source = ClosureActivitySource(id: "alpha") {
+        try? await Task.sleep(for: .milliseconds(25))
+        return ActivitySourceSnapshot(
+            items: [activitySourceItem(id: "alpha-actions:1")],
+            status: .available
+        )
+    }
+
+    let task = Task {
+        try await ActivitySourceAggregator(
+            sources: [source]
+        ).load()
+    }
+    task.cancel()
+
+    await #expect(throws: CancellationError.self) {
+        try await task.value
+    }
+}
+
+@Test
 func activitySourceNamespaceUsesAnUnambiguousProviderPrefix() {
     let sourceID: ActivitySourceID = "github"
 
