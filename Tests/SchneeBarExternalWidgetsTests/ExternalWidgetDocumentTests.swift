@@ -206,6 +206,64 @@ func externalWidgetCannotSelfEnableOrPreemptNativeDefaultOrdering() {
 }
 
 @Test
+func visibilityPolicyRejectsMissingOrExtraneousParameters() {
+    let adapter = ExternalWidgetDocumentAdapter()
+
+    #expect(
+        throws: ExternalWidgetDocumentError.invalidVisibilityPolicy
+    ) {
+        try adapter.normalize(
+            externalWidgetDocument(
+                visibility: ExternalWidgetVisibilityDocument(
+                    kind: .minimumSeverity
+                )
+            )
+        )
+    }
+
+    #expect(
+        throws: ExternalWidgetDocumentError.invalidVisibilityPolicy
+    ) {
+        try adapter.normalize(
+            externalWidgetDocument(
+                visibility: ExternalWidgetVisibilityDocument(
+                    kind: .always,
+                    minimumSeverity: .attention
+                )
+            )
+        )
+    }
+}
+
+@Test
+func refreshPolicyRejectsFieldsThatDoNotBelongToSelectedKind() {
+    let adapter = ExternalWidgetDocumentAdapter()
+
+    #expect(throws: ExternalWidgetDocumentError.invalidRefreshPolicy) {
+        try adapter.normalize(
+            externalWidgetDocument(
+                refresh: ExternalWidgetRefreshDocument(
+                    kind: .manual,
+                    intervalSeconds: 30
+                )
+            )
+        )
+    }
+
+    #expect(throws: ExternalWidgetDocumentError.invalidRefreshPolicy) {
+        try adapter.normalize(
+            externalWidgetDocument(
+                refresh: ExternalWidgetRefreshDocument(
+                    kind: .interval,
+                    intervalSeconds: 30,
+                    activeSeconds: 10
+                )
+            )
+        )
+    }
+}
+
+@Test
 func refreshPolicyIsBoundedAndAdaptivePolicyMustBeCoherent() {
     let adapter = ExternalWidgetDocumentAdapter()
 
@@ -419,6 +477,7 @@ private func externalWidgetDocument(
     id: String = "external.acme.build",
     defaultEnabled: Bool = false,
     defaultOrder: Int = 1200,
+    visibility: ExternalWidgetVisibilityDocument = .init(kind: .always),
     refresh: ExternalWidgetRefreshDocument = .init(kind: .manual),
     compact: ExternalWidgetContentDocument = .init(
         text: "OK",
@@ -439,7 +498,7 @@ private func externalWidgetDocument(
         defaultEnabled: defaultEnabled,
         defaultOrder: defaultOrder,
         defaultRepresentation: .normal,
-        visibility: ExternalWidgetVisibilityDocument(kind: .always),
+        visibility: visibility,
         refresh: refresh,
         snapshot: ExternalWidgetSnapshotDocument(
             severity: .nominal,
