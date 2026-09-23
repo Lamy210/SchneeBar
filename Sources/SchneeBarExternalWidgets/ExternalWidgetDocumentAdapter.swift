@@ -17,7 +17,7 @@ public enum ExternalWidgetDocumentError: Error, Equatable, Sendable {
     case invalidRefreshPolicy
     case invalidGeneratedAt
     case invalidContent(ExternalWidgetContentSlot)
-    case unsupportedSystemImage(String)
+    case unsupportedSystemImage
     case duplicateID(WidgetID)
 }
 
@@ -305,12 +305,15 @@ public struct ExternalWidgetDocumentAdapter: Sendable {
             throw ExternalWidgetDocumentError.invalidContent(slot)
         }
 
-        if let systemImage = document.systemImage,
-           !Self.allowedSystemImages.contains(systemImage)
-        {
-            throw ExternalWidgetDocumentError.unsupportedSystemImage(
-                systemImage
-            )
+        if let systemImage = document.systemImage {
+            guard !systemImage.unicodeScalars.contains(where: {
+                CharacterSet.controlCharacters.contains($0)
+            }),
+            systemImage.utf8.count <= 64,
+            Self.allowedSystemImages.contains(systemImage)
+            else {
+                throw ExternalWidgetDocumentError.unsupportedSystemImage
+            }
         }
 
         return WidgetContent(
@@ -326,15 +329,18 @@ public struct ExternalWidgetDocumentAdapter: Sendable {
         maximumUTF8Bytes: Int,
         error: ExternalWidgetDocumentError
     ) throws -> String {
+        guard !rawValue.unicodeScalars.contains(where: {
+            CharacterSet.controlCharacters.contains($0)
+        }) else {
+            throw error
+        }
+
         let value = rawValue.trimmingCharacters(
             in: .whitespacesAndNewlines
         )
         guard !value.isEmpty,
               value.count <= maximumCharacters,
-              value.utf8.count <= maximumUTF8Bytes,
-              !value.unicodeScalars.contains(where: {
-                  CharacterSet.controlCharacters.contains($0)
-              })
+              value.utf8.count <= maximumUTF8Bytes
         else {
             throw error
         }
