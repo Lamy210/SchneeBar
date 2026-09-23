@@ -222,7 +222,7 @@ func workflowRunDetailActions(
     }
 }
 
-enum ActivityDetailLoadingError: Error {
+enum ActivityDetailLoadingError: Error, Equatable {
     case unsupportedActivity
     case activityContextUnavailable
 }
