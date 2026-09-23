@@ -212,6 +212,7 @@ private actor DetailEnvironmentCatalogLoader: GitHubEnvironmentCatalogLoading {
 
 private enum DetailActionsCapabilityFixture {
     case available
+    case writeAvailable
     case unavailable
     case unknown
 }
@@ -260,6 +261,40 @@ func activityDetailCombinesJobsAndCorrelatedTimeline() async throws {
     #expect(requestedRepository.fullName == "snow/app")
     #expect(requestedRepository.defaultBranch == "main")
     #expect(await deploymentLoader.SHAs() == ["landed-sha"])
+}
+
+@Test @MainActor
+func activityDetailExposesRerunOnlyWithProvenWorkflowWriteCapability() async throws {
+    let fixture = try await detailFixture(
+        jobStatusCode: 200,
+        actionsCapability: .writeAvailable
+    )
+    let detail = try await fixture.model.loadActivityDetail(
+        for: detailActivityItem(),
+        jobService: fixture.jobService,
+        timelineLoader: DetailTimelineLoader(.failure),
+        deploymentTimelineLoader: DetailDeploymentLoader(.failure),
+        environmentCatalogLoader: emptyEnvironmentCatalogLoader()
+    )
+
+    #expect(detail.actions == [.rerunWorkflow])
+}
+
+@Test @MainActor
+func activityDetailDoesNotExposeMutationForActionsReadOnlyCapability() async throws {
+    let fixture = try await detailFixture(
+        jobStatusCode: 200,
+        actionsCapability: .available
+    )
+    let detail = try await fixture.model.loadActivityDetail(
+        for: detailActivityItem(),
+        jobService: fixture.jobService,
+        timelineLoader: DetailTimelineLoader(.failure),
+        deploymentTimelineLoader: DetailDeploymentLoader(.failure),
+        environmentCatalogLoader: emptyEnvironmentCatalogLoader()
+    )
+
+    #expect(detail.actions.isEmpty)
 }
 
 @Test @MainActor
@@ -495,6 +530,106 @@ func activityDetailPropagatesDeploymentCancellation() async throws {
     #expect(await deploymentLoader.calls() == 1)
 }
 
+private actor DetailMutationRecorder: GitHubWorkflowRunMutating {
+    struct Call: Equatable, Sendable {
+        let action: ActivityDetailAction
+        let runID: Int64
+        let repository: String
+    }
+
+    private var values: [Call] = []
+
+    func rerun(
+        connection: GitHubConnection,
+        identity: GitHubAccountIdentity,
+        clientID: String?,
+        repository: GitHubRepositoryAccess,
+        runID: Int64
+    ) async throws {
+        values.append(
+            Call(
+                action: .rerunWorkflow,
+                runID: runID,
+                repository: repository.fullName
+            )
+        )
+    }
+
+    func cancel(
+        connection: GitHubConnection,
+        identity: GitHubAccountIdentity,
+        clientID: String?,
+        repository: GitHubRepositoryAccess,
+        runID: Int64
+    ) async throws {
+        values.append(
+            Call(
+                action: .cancelWorkflow,
+                runID: runID,
+                repository: repository.fullName
+            )
+        )
+    }
+
+    func calls() -> [Call] {
+        values
+    }
+}
+
+@Test @MainActor
+func workflowMutationUsesResolvedContextAndRefreshesActivityAfterSuccess() async throws {
+    let fixture = try await detailFixture(
+        jobStatusCode: 200,
+        actionsCapability: .writeAvailable
+    )
+    let recorder = DetailMutationRecorder()
+    var refreshCount = 0
+    fixture.model.onActivitySourceChanged = {
+        refreshCount += 1
+    }
+
+    try await fixture.model.performActivityDetailAction(
+        .rerunWorkflow,
+        for: detailActivityItem(),
+        mutationService: recorder
+    )
+
+    #expect(
+        await recorder.calls() == [
+            DetailMutationRecorder.Call(
+                action: .rerunWorkflow,
+                runID: 700,
+                repository: "snow/app"
+            ),
+        ]
+    )
+    #expect(refreshCount == 1)
+}
+
+@Test @MainActor
+func workflowMutationRejectsReadOnlyCapabilityBeforeProviderCall() async throws {
+    let fixture = try await detailFixture(
+        jobStatusCode: 200,
+        actionsCapability: .available
+    )
+    let recorder = DetailMutationRecorder()
+    var refreshCount = 0
+    fixture.model.onActivitySourceChanged = {
+        refreshCount += 1
+    }
+
+    await #expect(throws: WorkflowActivityMutationError.actionUnavailable) {
+        try await fixture.model.performActivityDetailAction(
+            .rerunWorkflow,
+            for: detailActivityItem(),
+            mutationService: recorder
+        )
+    }
+
+    #expect(await recorder.calls().isEmpty)
+    #expect(refreshCount == 0)
+}
+
 @MainActor
 private struct DetailFixture {
     let model: GitHubConnectionsRuntimeModel
@@ -574,6 +709,8 @@ private func detailSessionResponses(
     switch actionsCapability {
     case .available:
         permissionPairs.append("\"actions\":\"read\"")
+    case .writeAvailable:
+        permissionPairs.append("\"actions\":\"write\"")
     case .unavailable, .unknown:
         break
     }
@@ -589,18 +726,19 @@ private func detailSessionResponses(
         actionsCapability == .unknown
             || deploymentCapability == .unknown
     )
+    let repositoryPush = actionsCapability == .writeAvailable
 
     let installation = """
     {"total_count":1,"installations":[{"id":10,"account":{"id":100,"login":"snow","type":"Organization","avatar_url":null},"repository_selection":"all","permissions":\(permissions),"suspended_at":null}]}
     """
     let duplicateRepository = duplicateRepositoryFullName
         ? """
-        ,{"id":2,"name":"app-shadow","full_name":"snow/app","private":\(repositoryIsPrivate),"owner":{"id":100,"login":"snow","type":"Organization","avatar_url":null},"permissions":{"admin":false,"maintain":false,"push":false,"triage":false,"pull":true},"default_branch":"main"}
+        ,{"id":2,"name":"app-shadow","full_name":"snow/app","private":\(repositoryIsPrivate),"owner":{"id":100,"login":"snow","type":"Organization","avatar_url":null},"permissions":{"admin":false,"maintain":false,"push":\(repositoryPush),"triage":false,"pull":true},"default_branch":"main"}
         """
         : ""
     let repositoryCount = duplicateRepositoryFullName ? 2 : 1
     let repositories = """
-    {"total_count":\(repositoryCount),"repositories":[{"id":1,"name":"app","full_name":"snow/app","private":\(repositoryIsPrivate),"owner":{"id":100,"login":"snow","type":"Organization","avatar_url":null},"permissions":{"admin":false,"maintain":false,"push":false,"triage":false,"pull":true},"default_branch":"main"}\(duplicateRepository)]}
+    {"total_count":\(repositoryCount),"repositories":[{"id":1,"name":"app","full_name":"snow/app","private":\(repositoryIsPrivate),"owner":{"id":100,"login":"snow","type":"Organization","avatar_url":null},"permissions":{"admin":false,"maintain":false,"push":\(repositoryPush),"triage":false,"pull":true},"default_branch":"main"}\(duplicateRepository)]}
     """
     return [
         DetailHTTPResponse(user),
