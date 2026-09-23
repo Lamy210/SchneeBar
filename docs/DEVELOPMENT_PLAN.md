@@ -69,6 +69,7 @@ Implemented foundation:
 - same-endpoint/different-account coexistence with connection-scoped credential isolation
 - deterministic connection ordering for stable multi-account UI and polling behavior
 - dedicated existing-connection Device Flow reauthentication
+- local-first Device Flow security decision with shared onboarding/recovery anti-phishing guidance and no embedded client secret
 - same-account binding enforcement during recovery
 - validate-before-Keychain replacement semantics
 - stale refresh / recovery race protection
