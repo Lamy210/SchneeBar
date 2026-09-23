@@ -184,6 +184,36 @@ func activityAggregatorUsesGlobalInboxOrdering() async throws {
     )
 }
 
+private enum ActivitySourceTestError: Error {
+    case providerSpecific
+}
+
+@Test
+func activityAggregatorContainsProviderSpecificFailure() async throws {
+    let healthy = ClosureActivitySource(id: "alpha") {
+        ActivitySourceSnapshot(
+            items: [activitySourceItem(id: "alpha-actions:1")],
+            status: .available
+        )
+    }
+    let failed = ClosureActivitySource(id: "beta") {
+        throw ActivitySourceTestError.providerSpecific
+    }
+
+    let result = try await ActivitySourceAggregator(
+        sources: [failed, healthy]
+    ).load()
+
+    #expect(result.items.map(\.id) == ["alpha-actions:1"])
+    #expect(
+        result.sources.last
+            == ActivitySourceStatusRecord(
+                sourceID: "beta",
+                status: .temporarilyUnavailable
+            )
+    )
+}
+
 @Test
 func activityAggregatorPropagatesSourceCancellation() async {
     let source = ClosureActivitySource(id: "alpha") {
