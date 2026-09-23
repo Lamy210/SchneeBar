@@ -185,6 +185,19 @@ func activityAggregatorUsesGlobalInboxOrdering() async throws {
 }
 
 @Test
+func activityAggregatorPropagatesSourceCancellation() async {
+    let source = ClosureActivitySource(id: "alpha") {
+        throw CancellationError()
+    }
+
+    await #expect(throws: CancellationError.self) {
+        try await ActivitySourceAggregator(
+            sources: [source]
+        ).load()
+    }
+}
+
+@Test
 func activityAggregatorRejectsItemOutsideSourceNamespace() async {
     let source = ClosureActivitySource(id: "alpha") {
         ActivitySourceSnapshot(
