@@ -97,6 +97,7 @@ public enum ActivityDetailFixture {
         summary: "4/6 jobs · 2 failed · 1 running · 1 waiting",
         state: .failed,
         destinationURL: item.destinationURL,
+        actions: [.rerunWorkflow],
         rows: [
             ActivityDetailRow(
                 id: "7001",
