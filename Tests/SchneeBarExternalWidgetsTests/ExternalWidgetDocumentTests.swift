@@ -264,9 +264,7 @@ func contentAndSystemImagesAreBounded() {
         )
     )
     #expect(
-        throws: ExternalWidgetDocumentError.unsupportedSystemImage(
-            "person.crop.circle.badge.questionmark"
-        )
+        throws: ExternalWidgetDocumentError.unsupportedSystemImage
     ) {
         try ExternalWidgetDocumentAdapter().normalize(unsupportedSymbol)
     }
@@ -282,6 +280,34 @@ func contentAndSystemImagesAreBounded() {
     ) {
         try ExternalWidgetDocumentAdapter().normalize(oversized)
     }
+}
+
+@Test
+func trailingControlCharactersAreRejectedBeforeWhitespaceNormalization() {
+    let document = externalWidgetDocument(
+        compact: ExternalWidgetContentDocument(
+            text: "OK\n",
+            accessibilityLabel: "Build okay"
+        )
+    )
+
+    #expect(
+        throws: ExternalWidgetDocumentError.invalidContent(.compact)
+    ) {
+        try ExternalWidgetDocumentAdapter().normalize(document)
+    }
+}
+
+@Test
+func documentRemainsCodableAfterStrictDecodingCustomization() throws {
+    let original = externalWidgetDocument()
+    let data = try JSONEncoder().encode(original)
+    let decoded = try JSONDecoder().decode(
+        ExternalWidgetDocument.self,
+        from: data
+    )
+
+    #expect(decoded == original)
 }
 
 @Test
