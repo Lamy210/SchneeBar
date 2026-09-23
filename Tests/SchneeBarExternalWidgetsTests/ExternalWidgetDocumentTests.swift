@@ -332,6 +332,29 @@ func collectionRejectsDuplicateIDsAndReturnsDeterministicOrder() throws {
 }
 
 @Test
+func duplicateIDPreflightWinsBeforeSecondDocumentContentValidation() {
+    let first = externalWidgetDocument(id: "external.alpha.build")
+    let invalidDuplicate = externalWidgetDocument(
+        id: "external.alpha.build",
+        compact: ExternalWidgetContentDocument(
+            text: "OK",
+            systemImage: "not.allowed",
+            accessibilityLabel: "Build okay"
+        )
+    )
+
+    #expect(
+        throws: ExternalWidgetDocumentError.duplicateID(
+            WidgetID(rawValue: "external.alpha.build")
+        )
+    ) {
+        try ExternalWidgetDocumentAdapter().normalizeCollection(
+            [first, invalidDuplicate]
+        )
+    }
+}
+
+@Test
 func generatedAtDefaultsToNormalizationTimeAndRejectsUnreasonableValues() throws {
     let adapter = ExternalWidgetDocumentAdapter()
     let now = Date(timeIntervalSince1970: 1_900_000_000)
