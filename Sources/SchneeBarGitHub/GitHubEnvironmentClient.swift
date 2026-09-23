@@ -309,16 +309,7 @@ public struct GitHubEnvironmentClient: Sendable {
     private func apiVersion(
         for connection: GitHubConnection
     ) -> String? {
-        if let version = nonEmpty(connection.apiVersion) {
-            return version
-        }
-
-        switch connection.deploymentKind {
-        case .githubDotCom, .gheDotCom:
-            return GitHubRESTAPIVersionPolicy.currentVersion
-        case .enterpriseServer:
-            return nil
-        }
+        GitHubRESTAPIVersionPolicy().headerVersion(for: connection)
     }
 }
 

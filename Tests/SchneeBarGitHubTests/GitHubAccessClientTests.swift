@@ -157,6 +157,34 @@ func usesExplicitAPIVersionForGHESWhenNegotiated() async throws {
 }
 
 @Test
+func derivesAPIVersionForGHESWhenPersistedHeaderIsMissing() async throws {
+    let transport = AccessQueueTransport([
+        AccessStubResponse(
+            #"{"id":1,"login":"octocat","name":null,"avatar_url":null}"#
+        )
+    ])
+    let client = GitHubAccessClient(transport: transport)
+    var connection = GitHubConnection(
+        displayName: "Internal GitHub",
+        deploymentKind: .enterpriseServer,
+        webBaseURL: try #require(URL(string: "https://github.internal.example")),
+        serverVersion: "3.20.9"
+    )
+    connection.apiVersion = nil
+
+    _ = try await client.authenticatedAccount(
+        connection: connection,
+        credential: GitHubCredential(accessToken: "ghu_enterprise")
+    )
+
+    let request = try #require(await transport.recordedRequests().last)
+    #expect(
+        request.value(forHTTPHeaderField: "X-GitHub-Api-Version")
+            == GitHubRESTAPIVersionPolicy.legacyVersion
+    )
+}
+
+@Test
 func inventoryAssociatesRepositoriesWithEachInstallation() async throws {
     let transport = AccessQueueTransport([
         AccessStubResponse(#"{"id":1,"login":"octocat","name":"Octo Cat","avatar_url":null}"#),

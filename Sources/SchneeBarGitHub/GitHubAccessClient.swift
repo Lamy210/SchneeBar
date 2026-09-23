@@ -483,19 +483,10 @@ public struct GitHubAccessClient: Sendable {
         }
     }
 
-    private func apiVersion(for connection: GitHubConnection) -> String? {
-        if let apiVersion = connection.apiVersion,
-           !apiVersion.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        {
-            return apiVersion
-        }
-
-        switch connection.deploymentKind {
-        case .githubDotCom, .gheDotCom:
-            return "2026-03-10"
-        case .enterpriseServer:
-            return nil
-        }
+    private func apiVersion(
+        for connection: GitHubConnection
+    ) -> String? {
+        GitHubRESTAPIVersionPolicy().headerVersion(for: connection)
     }
 
     private func paginatedURL(_ url: URL, page: Int) throws -> URL {
