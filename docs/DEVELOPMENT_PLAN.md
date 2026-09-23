@@ -199,7 +199,7 @@ Evidence-bound / deferred pending upstream support:
 
 - opt-in workflow re-run/cancel actions (Actions-write capability gate, provider mutations, explicit confirmation, action-state handling, and post-mutation refresh implemented)
 - provider/plugin contracts
-- declarative external widgets
+- declarative external widgets (versioned data-only document normalization foundation implemented; filesystem loading/install UX still pending)
 - additional CI providers after GitHub architecture proves stable
 
 ## Current implementation priority

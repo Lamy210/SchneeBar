@@ -50,6 +50,7 @@ SchneeBar App
 - `SchneeBarCore`: provider-neutral domain/application primitives only.
 - `SchneeBarDesignSystem`: reusable visual primitives and surfaces; it must not know Developer Activity domain types.
 - `SchneeBarActivityFeature`: Developer Activity presentation. Depends on Core + DesignSystem.
+- `SchneeBarExternalWidgetProvider`: data-only external widget document validation/normalization. Depends on Core and must not execute code, perform network I/O, or access credentials.
 - `SchneeBarPreviewSupport`: deterministic fictional fixtures used only by visual/test tooling.
 - `SchneeBar`: composition root and macOS integration. Production UI does not depend on PreviewSupport.
 - `SchneeBarVisualHarness` / `SchneeBarVisualSnapshotCLI`: development and CI tooling.
