@@ -185,3 +185,32 @@ func deliveryTimelineEvidenceDisclosureRequiresEvidence() {
     #expect(!deliveryTimelineShouldShowEvidence(empty))
     #expect(deliveryTimelineShouldShowEvidence(explained))
 }
+
+
+@Test
+func workflowActionPresentationUsesExplicitConfirmationCopy() {
+    #expect(activityDetailActionLabel(.rerunWorkflow) == "Re-run workflow")
+    #expect(activityDetailActionLabel(.cancelWorkflow) == "Cancel workflow")
+    #expect(
+        activityDetailActionConfirmationTitle(.rerunWorkflow)
+            == "Re-run this workflow?"
+    )
+    #expect(
+        activityDetailActionConfirmationTitle(.cancelWorkflow)
+            == "Cancel this workflow?"
+    )
+    #expect(!activityDetailActionIsDestructive(.rerunWorkflow))
+    #expect(activityDetailActionIsDestructive(.cancelWorkflow))
+}
+
+@Test
+func workflowActionProgressCopyDistinguishesMutation() {
+    #expect(
+        activityDetailActionProgressLabel(.rerunWorkflow)
+            == "Re-running workflow…"
+    )
+    #expect(
+        activityDetailActionProgressLabel(.cancelWorkflow)
+            == "Cancelling workflow…"
+    )
+}

@@ -146,6 +146,7 @@ private struct VisualHarnessView: View {
                         errorMessage: nil,
                         onBack: {},
                         onRetry: {},
+                        onAction: { _ in },
                         evidenceInitiallyExpanded:
                             activityDetailScenario.detail.deliveryTimeline?.evidence.isEmpty == false
                     )

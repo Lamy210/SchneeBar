@@ -87,6 +87,63 @@ func deliveryHistoryActionIsAvailable(
     detail != nil && hasHandler
 }
 
+func activityDetailActionLabel(_ action: ActivityDetailAction) -> String {
+    switch action {
+    case .rerunWorkflow:
+        return "Re-run workflow"
+    case .cancelWorkflow:
+        return "Cancel workflow"
+    }
+}
+
+func activityDetailActionSystemImage(_ action: ActivityDetailAction) -> String {
+    switch action {
+    case .rerunWorkflow:
+        return "arrow.clockwise"
+    case .cancelWorkflow:
+        return "xmark.circle"
+    }
+}
+
+func activityDetailActionConfirmationTitle(
+    _ action: ActivityDetailAction
+) -> String {
+    switch action {
+    case .rerunWorkflow:
+        return "Re-run this workflow?"
+    case .cancelWorkflow:
+        return "Cancel this workflow?"
+    }
+}
+
+func activityDetailActionConfirmationMessage(
+    _ action: ActivityDetailAction
+) -> String {
+    switch action {
+    case .rerunWorkflow:
+        return "GitHub will create a new attempt for this workflow run."
+    case .cancelWorkflow:
+        return "GitHub will request cancellation of the currently running workflow."
+    }
+}
+
+func activityDetailActionIsDestructive(
+    _ action: ActivityDetailAction
+) -> Bool {
+    action == .cancelWorkflow
+}
+
+func activityDetailActionProgressLabel(
+    _ action: ActivityDetailAction
+) -> String {
+    switch action {
+    case .rerunWorkflow:
+        return "Re-running workflow…"
+    case .cancelWorkflow:
+        return "Cancelling workflow…"
+    }
+}
+
 func activityDetailIconName(for state: ActivityDetailState) -> String {
     switch state {
     case .success: "checkmark.circle.fill"
@@ -105,8 +162,12 @@ public struct ActivityDetailView: View {
     private let onBack: () -> Void
     private let onRetry: () -> Void
     private let onShowHistory: (() -> Void)?
+    private let actionInProgress: ActivityDetailAction?
+    private let actionErrorMessage: String?
+    private let onAction: ((ActivityDetailAction) -> Void)?
     private let surfaceStyle: SchneeSurfaceStyle
     @State private var isEvidenceExpanded: Bool
+    @State private var pendingAction: ActivityDetailAction?
 
     public init(
         item: ActivityItem,
@@ -116,6 +177,9 @@ public struct ActivityDetailView: View {
         onBack: @escaping () -> Void,
         onRetry: @escaping () -> Void,
         onShowHistory: (() -> Void)? = nil,
+        actionInProgress: ActivityDetailAction? = nil,
+        actionErrorMessage: String? = nil,
+        onAction: ((ActivityDetailAction) -> Void)? = nil,
         evidenceInitiallyExpanded: Bool = false,
         surfaceStyle: SchneeSurfaceStyle = .adaptive
     ) {
@@ -126,8 +190,12 @@ public struct ActivityDetailView: View {
         self.onBack = onBack
         self.onRetry = onRetry
         self.onShowHistory = onShowHistory
+        self.actionInProgress = actionInProgress
+        self.actionErrorMessage = actionErrorMessage
+        self.onAction = onAction
         self.surfaceStyle = surfaceStyle
         _isEvidenceExpanded = State(initialValue: evidenceInitiallyExpanded)
+        _pendingAction = State(initialValue: nil)
     }
 
     public var body: some View {
@@ -153,6 +221,38 @@ public struct ActivityDetailView: View {
         .frame(width: 340)
         .foregroundStyle(.primary)
         .schneeSurface(surfaceStyle)
+        .confirmationDialog(
+            pendingAction.map(activityDetailActionConfirmationTitle)
+                ?? "Confirm workflow action",
+            isPresented: Binding(
+                get: { pendingAction != nil },
+                set: { isPresented in
+                    if !isPresented {
+                        pendingAction = nil
+                    }
+                }
+            ),
+            titleVisibility: .visible
+        ) {
+            if let action = pendingAction {
+                Button(
+                    activityDetailActionLabel(action),
+                    role: activityDetailActionIsDestructive(action)
+                        ? .destructive
+                        : nil
+                ) {
+                    pendingAction = nil
+                    onAction?(action)
+                }
+            }
+            Button("Cancel", role: .cancel) {
+                pendingAction = nil
+            }
+        } message: {
+            if let action = pendingAction {
+                Text(activityDetailActionConfirmationMessage(action))
+            }
+        }
     }
 
     private var header: some View {
@@ -236,6 +336,10 @@ public struct ActivityDetailView: View {
                     .foregroundStyle(.secondary)
             }
 
+            if !detail.actions.isEmpty, onAction != nil {
+                workflowActions(detail.actions)
+            }
+
             Text(detail.summary)
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -257,6 +361,49 @@ public struct ActivityDetailView: View {
                 }
                 .scrollIndicators(.visible)
                 .frame(maxHeight: 360)
+            }
+        }
+    }
+
+    private func workflowActions(
+        _ actions: [ActivityDetailAction]
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                ForEach(actions, id: \.self) { action in
+                    Button {
+                        pendingAction = action
+                    } label: {
+                        Label(
+                            activityDetailActionLabel(action),
+                            systemImage: activityDetailActionSystemImage(action)
+                        )
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .disabled(actionInProgress != nil)
+                }
+
+                Spacer(minLength: 4)
+            }
+
+            if let actionInProgress {
+                HStack(spacing: 6) {
+                    ProgressView()
+                        .controlSize(.mini)
+                    Text(activityDetailActionProgressLabel(actionInProgress))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            if let actionErrorMessage {
+                Label(
+                    actionErrorMessage,
+                    systemImage: "exclamationmark.triangle"
+                )
+                .font(.caption)
+                .foregroundStyle(.red)
             }
         }
     }

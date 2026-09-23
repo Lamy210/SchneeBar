@@ -30,3 +30,33 @@ func activityDetailRowPreservesChildren() {
     #expect(parent.children == [child])
     #expect(parent.destinationURL == nil)
 }
+
+
+@Test
+func activityDetailDefaultsToNoActions() {
+    let detail = ActivityDetailSnapshot(
+        id: "run",
+        repository: "snow/repo",
+        title: "CI",
+        summary: "1 job",
+        state: .failed,
+        rows: []
+    )
+
+    #expect(detail.actions.isEmpty)
+}
+
+@Test
+func activityDetailPreservesExplicitActions() {
+    let detail = ActivityDetailSnapshot(
+        id: "run",
+        repository: "snow/repo",
+        title: "CI",
+        summary: "1 job",
+        state: .failed,
+        actions: [.rerunWorkflow],
+        rows: []
+    )
+
+    #expect(detail.actions == [.rerunWorkflow])
+}
