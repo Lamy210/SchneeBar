@@ -136,6 +136,40 @@ func workflowMutationServiceStopsBeforeNetworkWhenCredentialIsMissing() async th
     #expect(await transport.recordedRequests().isEmpty)
 }
 
+@Test
+func workflowMutationServiceMapsRejectedStoredCredentialToReauthentication() async throws {
+    let connection = try mutationServiceConnection()
+    let identity = GitHubAccountIdentity(id: "42", login: "octocat")
+    let store = MutationServiceCredentialStore(
+        connection: connection,
+        identity: identity,
+        credential: GitHubCredential(accessToken: "expired-token")
+    )
+    let transport = MutationServiceTransport(statusCode: 401)
+    let service = GitHubWorkflowRunMutationService(
+        sessionCoordinator: GitHubConnectionSessionCoordinator(
+            credentialStore: store
+        ),
+        mutationClient: GitHubWorkflowRunMutationClient(
+            transport: transport
+        )
+    )
+
+    await #expect(
+        throws: GitHubConnectionSessionError.reauthenticationRequired
+    ) {
+        try await service.rerun(
+            connection: connection,
+            identity: identity,
+            clientID: nil,
+            repository: try mutationServiceRepository(),
+            runID: 700
+        )
+    }
+
+    #expect(await transport.recordedRequests().count == 1)
+}
+
 private func mutationServiceConnection() throws -> GitHubConnection {
     GitHubConnection(
         id: UUID(uuidString: "84000000-0000-0000-0000-000000000001")!,
