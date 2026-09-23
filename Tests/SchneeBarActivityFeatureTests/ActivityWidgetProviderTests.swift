@@ -127,3 +127,36 @@ func runningActivityUsesFastRefreshAndAttentionPriority() async throws {
     #expect(snapshot.content(for: .normal).text == "Running 1")
     #expect(snapshot.content(for: .compact).text == "●1")
 }
+
+
+@Test
+func aggregateSnapshotFeedsWidgetWithoutProviderSpecificTypes() async throws {
+    let provider = ActivityWidgetProvider(loadSnapshot: {
+        ActivityAggregateSnapshot(
+            items: [
+                ActivityItem(
+                    id: "alpha-actions:1",
+                    repository: "SchneeBar",
+                    context: "main",
+                    detail: "Tests failed",
+                    state: .failed
+                ),
+            ],
+            sources: [
+                ActivitySourceStatusRecord(
+                    sourceID: "alpha",
+                    status: .available
+                ),
+                ActivitySourceStatusRecord(
+                    sourceID: "beta",
+                    status: .temporarilyUnavailable
+                ),
+            ]
+        )
+    })
+
+    let snapshot = try await provider.snapshot()
+
+    #expect(snapshot.severity == .critical)
+    #expect(snapshot.content(for: .normal).text == "Alert 1")
+}
