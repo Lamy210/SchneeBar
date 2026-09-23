@@ -87,6 +87,39 @@ func deliveryHistoryActionIsAvailable(
     detail != nil && hasHandler
 }
 
+func activityDetailActionLabel(
+    _ action: ActivityDetailAction
+) -> String {
+    switch action {
+    case .rerunWorkflow:
+        "Re-run workflow"
+    case .cancelWorkflow:
+        "Cancel workflow"
+    }
+}
+
+func activityDetailActionConfirmationTitle(
+    _ action: ActivityDetailAction
+) -> String {
+    switch action {
+    case .rerunWorkflow:
+        "Re-run this workflow?"
+    case .cancelWorkflow:
+        "Cancel this workflow?"
+    }
+}
+
+func activityDetailActionsAreAvailable(
+    detail: ActivityDetailSnapshot?,
+    hasHandler: Bool,
+    isRunning: Bool
+) -> Bool {
+    guard !isRunning, hasHandler else {
+        return false
+    }
+    return !(detail?.actions.isEmpty ?? true)
+}
+
 func activityDetailIconName(for state: ActivityDetailState) -> String {
     switch state {
     case .success: "checkmark.circle.fill"
@@ -105,8 +138,12 @@ public struct ActivityDetailView: View {
     private let onBack: () -> Void
     private let onRetry: () -> Void
     private let onShowHistory: (() -> Void)?
+    private let detailActionIsRunning: Bool
+    private let detailActionErrorMessage: String?
+    private let onAction: ((ActivityDetailAction) -> Void)?
     private let surfaceStyle: SchneeSurfaceStyle
     @State private var isEvidenceExpanded: Bool
+    @State private var pendingAction: ActivityDetailAction?
 
     public init(
         item: ActivityItem,
@@ -116,6 +153,9 @@ public struct ActivityDetailView: View {
         onBack: @escaping () -> Void,
         onRetry: @escaping () -> Void,
         onShowHistory: (() -> Void)? = nil,
+        detailActionIsRunning: Bool = false,
+        detailActionErrorMessage: String? = nil,
+        onAction: ((ActivityDetailAction) -> Void)? = nil,
         evidenceInitiallyExpanded: Bool = false,
         surfaceStyle: SchneeSurfaceStyle = .adaptive
     ) {
@@ -126,8 +166,12 @@ public struct ActivityDetailView: View {
         self.onBack = onBack
         self.onRetry = onRetry
         self.onShowHistory = onShowHistory
+        self.detailActionIsRunning = detailActionIsRunning
+        self.detailActionErrorMessage = detailActionErrorMessage
+        self.onAction = onAction
         self.surfaceStyle = surfaceStyle
         _isEvidenceExpanded = State(initialValue: evidenceInitiallyExpanded)
+        _pendingAction = State(initialValue: nil)
     }
 
     public var body: some View {
@@ -153,6 +197,32 @@ public struct ActivityDetailView: View {
         .frame(width: 340)
         .foregroundStyle(.primary)
         .schneeSurface(surfaceStyle)
+        .confirmationDialog(
+            pendingAction.map(activityDetailActionConfirmationTitle)
+                ?? "Confirm workflow action",
+            isPresented: Binding(
+                get: { pendingAction != nil },
+                set: { isPresented in
+                    if !isPresented {
+                        pendingAction = nil
+                    }
+                }
+            ),
+            titleVisibility: .visible
+        ) {
+            if let action = pendingAction {
+                Button(
+                    activityDetailActionLabel(action),
+                    role: action == .cancelWorkflow ? .destructive : nil
+                ) {
+                    pendingAction = nil
+                    onAction?(action)
+                }
+                Button("Cancel", role: .cancel) {
+                    pendingAction = nil
+                }
+            }
+        }
     }
 
     private var header: some View {
@@ -187,6 +257,30 @@ public struct ActivityDetailView: View {
                 .buttonStyle(.plain)
                 .help("Show delivery history")
                 .accessibilityLabel("Show delivery history")
+            }
+
+            if activityDetailActionsAreAvailable(
+                detail: detail,
+                hasHandler: onAction != nil,
+                isRunning: detailActionIsRunning
+            ), let detail {
+                Menu {
+                    ForEach(detail.actions, id: \.self) { action in
+                        Button(activityDetailActionLabel(action)) {
+                            pendingAction = action
+                        }
+                    }
+                } label: {
+                    Image(systemName: "ellipsis.circle")
+                }
+                .menuStyle(.borderlessButton)
+                .fixedSize()
+                .help("Workflow actions")
+                .accessibilityLabel("Workflow actions")
+            } else if detailActionIsRunning {
+                ProgressView()
+                    .controlSize(.small)
+                    .help("Applying workflow action")
             }
 
             if let destinationURL = item.destinationURL {
@@ -239,6 +333,15 @@ public struct ActivityDetailView: View {
             Text(detail.summary)
                 .font(.caption)
                 .foregroundStyle(.secondary)
+
+            if let detailActionErrorMessage {
+                Label(
+                    detailActionErrorMessage,
+                    systemImage: "exclamationmark.triangle"
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
 
             if detail.rows.isEmpty {
                 ContentUnavailableView(
