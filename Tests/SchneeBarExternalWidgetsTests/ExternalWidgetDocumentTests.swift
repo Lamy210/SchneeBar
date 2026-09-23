@@ -206,6 +206,17 @@ func externalWidgetCannotSelfEnableOrPreemptNativeDefaultOrdering() {
 }
 
 @Test
+func externalWidgetCannotDefaultToCriticalRepresentation() {
+    #expect(
+        throws: ExternalWidgetDocumentError.invalidDefaultRepresentation
+    ) {
+        try ExternalWidgetDocumentAdapter().normalize(
+            externalWidgetDocument(defaultRepresentation: .critical)
+        )
+    }
+}
+
+@Test
 func visibilityPolicyRejectsMissingOrExtraneousParameters() {
     let adapter = ExternalWidgetDocumentAdapter()
 
@@ -423,7 +434,12 @@ func generatedAtDefaultsToNormalizationTimeAndRejectsUnreasonableValues() throws
     )
     #expect(definition.snapshot.generatedAt == now)
 
-    for timestamp in [-1.0, 4_102_444_801.0, .infinity] {
+    for timestamp in [
+        -1.0,
+        now.timeIntervalSince1970 + 301,
+        4_102_444_801.0,
+        .infinity,
+    ] {
         #expect(throws: ExternalWidgetDocumentError.invalidGeneratedAt) {
             try adapter.normalize(
                 externalWidgetDocument(
@@ -477,6 +493,7 @@ private func externalWidgetDocument(
     id: String = "external.acme.build",
     defaultEnabled: Bool = false,
     defaultOrder: Int = 1200,
+    defaultRepresentation: ExternalWidgetRepresentation = .normal,
     visibility: ExternalWidgetVisibilityDocument = .init(kind: .always),
     refresh: ExternalWidgetRefreshDocument = .init(kind: .manual),
     compact: ExternalWidgetContentDocument = .init(
@@ -497,7 +514,7 @@ private func externalWidgetDocument(
         displayName: "Acme Build",
         defaultEnabled: defaultEnabled,
         defaultOrder: defaultOrder,
-        defaultRepresentation: .normal,
+        defaultRepresentation: defaultRepresentation,
         visibility: visibility,
         refresh: refresh,
         snapshot: ExternalWidgetSnapshotDocument(
