@@ -767,7 +767,7 @@ private func detailSessionResponses(
         : ""
     let repositoryCount = duplicateRepositoryFullName ? 2 : 1
     let repositories = """
-    {"total_count":\(repositoryCount),"repositories":[{"id":1,"name":"app","full_name":"snow/app","private":\(repositoryIsPrivate),"owner":{"id":100,"login":"snow","type":"Organization","avatar_url":null},"permissions":{"admin":false,"maintain":false,"push":false,"triage":false,"pull":true},"default_branch":"main"}\(duplicateRepository)]}
+    {"total_count":\(repositoryCount),"repositories":[{"id":1,"name":"app","full_name":"snow/app","private":\(repositoryIsPrivate),"owner":{"id":100,"login":"snow","type":"Organization","avatar_url":null},"permissions":{"admin":false,"maintain":false,"push":\(workflowWriteAvailable),"triage":false,"pull":true},"default_branch":"main"}\(duplicateRepository)]}
     """
     return [
         DetailHTTPResponse(user),
