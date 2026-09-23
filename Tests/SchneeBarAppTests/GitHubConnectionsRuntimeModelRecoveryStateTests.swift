@@ -107,6 +107,22 @@ func enterprisePreflightCountsAsActiveOnboarding() async throws {
 }
 
 @Test @MainActor
+func enterpriseReviewCountsAsActiveOnboarding() async throws {
+    let original = try recoveryStateProfile(clientID: nil)
+    let fixture = recoveryStateFixture(original)
+
+    fixture.model.onboardingPhase = .reviewingEnterpriseServer(
+        GitHubEnterpriseServerPreflightPresentation(
+            host: "github.internal.example",
+            installedVersion: "3.22.0",
+            compatibility: .tested
+        )
+    )
+
+    #expect(fixture.model.onboardingIsActive)
+}
+
+@Test @MainActor
 func enterpriseOnboardingPausesAfterDiscoveryForReview() async throws {
     let original = try recoveryStateProfile(clientID: nil)
     let transport = RecoveryStateDiscoveryTransport(installedVersion: "3.23.0")
