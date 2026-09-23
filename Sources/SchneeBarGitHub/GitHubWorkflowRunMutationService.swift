@@ -45,12 +45,16 @@ public struct GitHubWorkflowRunMutationService:
             identity: identity,
             clientID: clientID
         )
-        try await client.rerun(
-            runID: runID,
-            repository: repository,
-            connection: connection,
-            credential: credential
-        )
+        do {
+            try await client.rerun(
+                runID: runID,
+                repository: repository,
+                connection: connection,
+                credential: credential
+            )
+        } catch GitHubWorkflowRunMutationError.httpStatus(401) {
+            throw GitHubConnectionSessionError.reauthenticationRequired
+        }
     }
 
     public func cancel(
@@ -65,11 +69,15 @@ public struct GitHubWorkflowRunMutationService:
             identity: identity,
             clientID: clientID
         )
-        try await client.cancel(
-            runID: runID,
-            repository: repository,
-            connection: connection,
-            credential: credential
-        )
+        do {
+            try await client.cancel(
+                runID: runID,
+                repository: repository,
+                connection: connection,
+                credential: credential
+            )
+        } catch GitHubWorkflowRunMutationError.httpStatus(401) {
+            throw GitHubConnectionSessionError.reauthenticationRequired
+        }
     }
 }
