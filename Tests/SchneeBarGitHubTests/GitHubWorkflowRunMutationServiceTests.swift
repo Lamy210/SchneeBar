@@ -23,10 +23,15 @@ private actor MutationServiceCredentialStore: GitHubCredentialStore {
 
 private actor MutationServiceTransport: GitHubHTTPTransport {
     private let statusCode: Int
+    private let headers: [String: String]
     private var requests: [URLRequest] = []
 
-    init(statusCode: Int) {
+    init(
+        statusCode: Int,
+        headers: [String: String] = [:]
+    ) {
         self.statusCode = statusCode
+        self.headers = headers
     }
 
     func data(
@@ -38,7 +43,7 @@ private actor MutationServiceTransport: GitHubHTTPTransport {
                 url: request.url!,
                 statusCode: statusCode,
                 httpVersion: "HTTP/1.1",
-                headerFields: nil
+                headerFields: headers
             )
         )
         return (Data(), response)
@@ -134,6 +139,45 @@ func mutationServiceMapsRejectedCredentialToReauthentication() async throws {
     await #expect(
         throws: GitHubConnectionSessionError.reauthenticationRequired
     ) {
+        try await service.rerun(
+            connection: connection,
+            identity: identity,
+            clientID: nil,
+            repository: try mutationServiceRepository(),
+            runID: 42
+        )
+    }
+
+    #expect(await transport.recordedRequests().count == 1)
+}
+
+@Test
+func mutationServiceMapsExplicitSSOFailureToSessionState() async throws {
+    let connection = try mutationServiceConnection()
+    let identity = GitHubAccountIdentity(id: "100", login: "octocat")
+    let store = MutationServiceCredentialStore()
+    try await store.save(
+        GitHubCredential(accessToken: "ghu_write"),
+        for: GitHubCredentialKey(
+            connectionID: connection.id,
+            accountID: identity.id
+        )
+    )
+    let transport = MutationServiceTransport(
+        statusCode: 403,
+        headers: [
+            "X-GitHub-SSO":
+                "required; url=https://github.com/orgs/acme/sso?authorization_request=sensitive"
+        ]
+    )
+    let service = GitHubWorkflowRunMutationService(
+        sessionCoordinator: GitHubConnectionSessionCoordinator(
+            credentialStore: store
+        ),
+        client: GitHubWorkflowRunMutationClient(transport: transport)
+    )
+
+    await #expect(throws: GitHubConnectionSessionError.ssoRequired) {
         try await service.rerun(
             connection: connection,
             identity: identity,
