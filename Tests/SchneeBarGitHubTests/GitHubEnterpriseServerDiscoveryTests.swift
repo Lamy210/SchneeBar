@@ -30,6 +30,14 @@ private actor RecordingGitHubTransport: GitHubHTTPTransport {
     }
 }
 
+private struct FailingGitHubTransport: GitHubHTTPTransport {
+    let error: URLError
+
+    func data(for request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+        throw error
+    }
+}
+
 @Test
 func discoversSupportedEnterpriseServerVersionFromMetaEndpoint() async throws {
     let transport = RecordingGitHubTransport(
@@ -125,6 +133,56 @@ func reportsNonSuccessHTTPStatus() async throws {
 
     await #expect(throws: GitHubEnterpriseServerDiscoveryError.httpStatus(503)) {
         try await client.discover(connection: connection)
+    }
+}
+
+@Test(arguments: [
+    (URLError.Code.notConnectedToInternet, GitHubNetworkFailureKind.offline),
+    (URLError.Code.cannotFindHost, GitHubNetworkFailureKind.hostResolution),
+    (URLError.Code.cannotConnectToHost, GitHubNetworkFailureKind.connection),
+    (URLError.Code.timedOut, GitHubNetworkFailureKind.timedOut),
+    (URLError.Code.networkConnectionLost, GitHubNetworkFailureKind.connectionLost),
+])
+func reportsTypedNetworkFailureDuringEnterpriseDiscovery(
+    code: URLError.Code,
+    expected: GitHubNetworkFailureKind
+) async throws {
+    let client = GitHubEnterpriseServerDiscoveryClient(
+        transport: FailingGitHubTransport(error: URLError(code))
+    )
+    let connection = GitHubConnection(
+        displayName: "Internal GitHub",
+        deploymentKind: .enterpriseServer,
+        webBaseURL: try #require(URL(string: "https://github.internal.example"))
+    )
+
+    await #expect(
+        throws: GitHubEnterpriseServerDiscoveryError.networkUnavailable(expected)
+    ) {
+        try await client.discover(connection: connection)
+    }
+}
+
+@Test
+func doesNotMaskEnterpriseDiscoveryTLSErrorsAsNetworkUnavailable() async throws {
+    let client = GitHubEnterpriseServerDiscoveryClient(
+        transport: FailingGitHubTransport(
+            error: URLError(.serverCertificateUntrusted)
+        )
+    )
+    let connection = GitHubConnection(
+        displayName: "Internal GitHub",
+        deploymentKind: .enterpriseServer,
+        webBaseURL: try #require(URL(string: "https://github.internal.example"))
+    )
+
+    do {
+        _ = try await client.discover(connection: connection)
+        Issue.record("Expected the TLS failure to propagate")
+    } catch let error as URLError {
+        #expect(error.code == .serverCertificateUntrusted)
+    } catch {
+        Issue.record("Expected URLError, received \(error)")
     }
 }
 

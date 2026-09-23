@@ -176,6 +176,9 @@ Foundation already available from earlier phases:
 - GHES discovery primitives
 - REST API version policy
 - connection profiles that do not assume GitHub.com-only hosts
+- centralized transient network-failure classification shared by session refresh and activity loading
+- GHES discovery errors that distinguish offline/DNS/connectivity/timeout/interruption failures without masking TLS or protocol failures
+- GHES onboarding/recovery guidance that suggests VPN/private-network checks only for enterprise-server connectivity failures
 
 Still required:
 
@@ -183,7 +186,6 @@ Still required:
 - GHE.com product UX and validation
 - self-hosted GHES connection wizard
 - GHES capability/API-version negotiation
-- VPN/private-network-aware error states
 
 ## Phase 6 — Interaction and extensibility
 

@@ -448,7 +448,12 @@ final class GitHubConnectionsRuntimeModel {
                 onboardingTask = nil
             } catch {
                 onboardingTask = nil
-                onboardingPhase = .failed(message: errorMessage(for: error))
+                onboardingPhase = .failed(
+                    message: errorMessage(
+                        for: error,
+                        deploymentKind: draft.deploymentKind
+                    )
+                )
             }
         }
     }
@@ -561,12 +566,7 @@ final class GitHubConnectionsRuntimeModel {
             if hadInventory {
                 onActivitySourceChanged?()
             }
-        } catch let error as URLError where error.code == .notConnectedToInternet
-            || error.code == .cannotFindHost
-            || error.code == .cannotConnectToHost
-            || error.code == .dnsLookupFailed
-            || error.code == .timedOut
-        {
+        } catch let error where GitHubNetworkFailureClassifier.isUnavailable(error) {
             guard isCurrentOperationGeneration(generation, for: profileID) else { return }
             statusByConnectionID[profileID] = .networkUnavailable
         } catch {
@@ -806,7 +806,10 @@ final class GitHubConnectionsRuntimeModel {
         if case GitHubConnectionSessionError.ssoRequired = error {
             return "GitHub requires an active SSO session. Sign in through your organization and try again."
         }
-        return errorMessage(for: error)
+        return errorMessage(
+            for: error,
+            deploymentKind: profile.connection.deploymentKind
+        )
     }
 
     private func accessibleRepositories(
@@ -1058,7 +1061,10 @@ final class GitHubConnectionsRuntimeModel {
         profiles = GitHubConnectionProfileOrdering.sorted(profiles)
     }
 
-    private func errorMessage(for error: Error) -> String {
+    private func errorMessage(
+        for error: Error,
+        deploymentKind: GitHubDeploymentKind? = nil
+    ) -> String {
         switch error {
         case GitHubDeviceFlowError.deviceFlowDisabled:
             return "Device Flow is disabled for this GitHub App. Enable Device Flow in the GitHub App settings."
@@ -1080,12 +1086,56 @@ final class GitHubConnectionsRuntimeModel {
              GitHubEndpointResolverError.invalidGitHubDotComHost,
              GitHubEndpointResolverError.invalidGHEHost:
             return "The GitHub server URL is invalid or unsupported."
+        case let GitHubEnterpriseServerDiscoveryError.networkUnavailable(kind):
+            return enterpriseNetworkFailureMessage(for: kind)
         case let GitHubEnterpriseServerDiscoveryError.httpStatus(status):
             return "GitHub Enterprise Server discovery failed with HTTP \(status)."
+        case let networkError where GitHubNetworkFailureClassifier.isUnavailable(networkError):
+            guard let kind = GitHubNetworkFailureClassifier.classify(networkError) else {
+                return "Could not connect to GitHub. Check the server and network."
+            }
+            if deploymentKind == .enterpriseServer {
+                return enterpriseNetworkFailureMessage(for: kind)
+            }
+            return hostedNetworkFailureMessage(for: kind)
         case GitHubConnectionSessionError.ssoRequired:
             return "GitHub requires an active SSO session for this organization. Sign in with SSO and try again."
         default:
             return "Could not connect to GitHub. Check the server, network, and GitHub App configuration."
+        }
+    }
+
+    private func enterpriseNetworkFailureMessage(
+        for kind: GitHubNetworkFailureKind
+    ) -> String {
+        switch kind {
+        case .offline:
+            return "No network connection. Connect to your network or required VPN and try again."
+        case .hostResolution:
+            return "Could not resolve the GitHub Enterprise Server host. Check VPN or private-network access, DNS, and the server URL."
+        case .connection:
+            return "Could not reach GitHub Enterprise Server. Check VPN or private-network access and the server URL."
+        case .timedOut:
+            return "GitHub Enterprise Server did not respond in time. Check VPN or private-network access and try again."
+        case .connectionLost:
+            return "The GitHub Enterprise Server connection was interrupted. Check your network or VPN and try again."
+        }
+    }
+
+    private func hostedNetworkFailureMessage(
+        for kind: GitHubNetworkFailureKind
+    ) -> String {
+        switch kind {
+        case .offline:
+            return "No network connection. Connect to the internet and try again."
+        case .hostResolution:
+            return "Could not resolve the GitHub host. Check DNS and your network connection."
+        case .connection:
+            return "Could not reach GitHub. Check your network connection and try again."
+        case .timedOut:
+            return "GitHub did not respond in time. Check your network connection and try again."
+        case .connectionLost:
+            return "The GitHub connection was interrupted. Check your network connection and try again."
         }
     }
 

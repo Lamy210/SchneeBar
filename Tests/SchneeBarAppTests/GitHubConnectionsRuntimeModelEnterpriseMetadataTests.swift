@@ -57,17 +57,20 @@ private actor EnterpriseMetadataCredentialStore: GitHubCredentialStore {
 private actor EnterpriseMetadataSessionTransport: GitHubHTTPTransport {
     private var responses: [String]
     private let statusCode: Int
+    private let failureCode: URLError.Code?
     private var apiVersions: [String?] = []
 
     init(
         refreshCount: Int,
-        statusCode: Int = 200
+        statusCode: Int = 200,
+        failureCode: URLError.Code? = nil
     ) {
         responses = Array(
             repeating: enterpriseMetadataSessionResponses(),
             count: refreshCount
         ).flatMap { $0 }
         self.statusCode = statusCode
+        self.failureCode = failureCode
     }
 
     func data(
@@ -76,6 +79,9 @@ private actor EnterpriseMetadataSessionTransport: GitHubHTTPTransport {
         apiVersions.append(
             request.value(forHTTPHeaderField: "X-GitHub-Api-Version")
         )
+        if let failureCode {
+            throw URLError(failureCode)
+        }
         let json = responses.removeFirst()
         let response = try #require(
             HTTPURLResponse(
@@ -221,6 +227,30 @@ func metadataCancellationDoesNotAdvanceRefreshCadence() async throws {
 }
 
 @Test @MainActor
+func sessionConnectionLossMarksEnterpriseConnectionNetworkUnavailable() async throws {
+    let now = Date(timeIntervalSince1970: 290_000)
+    let profile = try enterpriseMetadataProfile(
+        serverVersion: "3.22.0",
+        lastCheckAt: now
+    )
+    let fixture = enterpriseMetadataFixture(
+        profile: profile,
+        now: now,
+        refreshCount: 1,
+        sessionFailureCode: .networkConnectionLost
+    )
+    fixture.model.profiles = [profile]
+
+    await fixture.model.refresh(profileID: profile.id)
+
+    #expect(
+        fixture.model.statusByConnectionID[profile.id]
+            == .networkUnavailable
+    )
+    #expect(await fixture.discoveryTransport.callCount() == 0)
+}
+
+@Test @MainActor
 func failedEnterpriseRediscoveryDoesNotHideHealthySessionAndIsBounded() async throws {
     let now = Date(timeIntervalSince1970: 300_000)
     let profile = try enterpriseMetadataProfile(
@@ -295,13 +325,15 @@ private func enterpriseMetadataFixture(
     discoveredVersion: String = "3.22.0",
     discoveryStatusCode: Int = 200,
     discoveryThrowsCancellation: Bool = false,
-    sessionStatusCode: Int = 200
+    sessionStatusCode: Int = 200,
+    sessionFailureCode: URLError.Code? = nil
 ) -> EnterpriseMetadataFixture {
     let profileStore = EnterpriseMetadataProfileStore(profile: profile)
     let credentialStore = EnterpriseMetadataCredentialStore(profile: profile)
     let sessionTransport = EnterpriseMetadataSessionTransport(
         refreshCount: refreshCount,
-        statusCode: sessionStatusCode
+        statusCode: sessionStatusCode,
+        failureCode: sessionFailureCode
     )
     let discoveryTransport = EnterpriseMetadataDiscoveryTransport(
         installedVersion: discoveredVersion,

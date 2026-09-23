@@ -824,11 +824,7 @@ public actor GitHubActivityProvider {
              GitHubCheckRunClientError.httpStatus(404):
             return .notFound
 
-        case let error as URLError where error.code == .notConnectedToInternet
-            || error.code == .cannotFindHost
-            || error.code == .cannotConnectToHost
-            || error.code == .dnsLookupFailed
-            || error.code == .timedOut:
+        case let error where GitHubNetworkFailureClassifier.isUnavailable(error):
             return .networkUnavailable
 
         default:

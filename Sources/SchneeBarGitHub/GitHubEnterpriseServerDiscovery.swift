@@ -129,6 +129,7 @@ public struct GitHubEnterpriseServerDiscoveryResult: Equatable, Sendable {
 
 public enum GitHubEnterpriseServerDiscoveryError: Error, Equatable, Sendable {
     case enterpriseServerConnectionRequired
+    case networkUnavailable(GitHubNetworkFailureKind)
     case httpStatus(Int)
     case invalidPayload
 }
@@ -163,7 +164,19 @@ public struct GitHubEnterpriseServerDiscoveryClient: Sendable {
         // Version discovery is the bootstrap for choosing an API version.
         // Do not send X-GitHub-Api-Version before the server version is known.
 
-        let (data, response) = try await transport.data(for: request)
+        let data: Data
+        let response: HTTPURLResponse
+        do {
+            (data, response) = try await transport.data(for: request)
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch {
+            if let kind = GitHubNetworkFailureClassifier.classify(error) {
+                throw GitHubEnterpriseServerDiscoveryError.networkUnavailable(kind)
+            }
+            throw error
+        }
+
         guard (200 ... 299).contains(response.statusCode) else {
             throw GitHubEnterpriseServerDiscoveryError.httpStatus(response.statusCode)
         }
