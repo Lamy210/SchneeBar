@@ -13,6 +13,7 @@ public enum ExternalWidgetDocumentError: Error, Equatable, Sendable {
     case invalidDisplayName
     case defaultEnablementNotAllowed
     case invalidDefaultOrder
+    case invalidDefaultRepresentation
     case invalidVisibilityPolicy
     case invalidRefreshPolicy
     case invalidGeneratedAt
@@ -41,6 +42,7 @@ public struct ExternalWidgetDocumentAdapter: Sendable {
     private static let minimumRefreshSeconds: TimeInterval = 5
     private static let maximumRefreshSeconds: TimeInterval = 3_600
     private static let maximumGeneratedAtUnixSeconds: TimeInterval = 4_102_444_800
+    private static let maximumGeneratedAtFutureSkew: TimeInterval = 300
 
     private static let allowedSystemImages: Set<String> = [
         "antenna.radiowaves.left.and.right",
@@ -84,6 +86,9 @@ public struct ExternalWidgetDocumentAdapter: Sendable {
             .contains(document.defaultOrder)
         else {
             throw ExternalWidgetDocumentError.invalidDefaultOrder
+        }
+        guard document.defaultRepresentation != .critical else {
+            throw ExternalWidgetDocumentError.invalidDefaultRepresentation
         }
 
         let descriptor = WidgetDescriptor(
@@ -269,7 +274,13 @@ public struct ExternalWidgetDocumentAdapter: Sendable {
         else {
             throw ExternalWidgetDocumentError.invalidGeneratedAt
         }
-        return Date(timeIntervalSince1970: unixSeconds)
+        let generatedAt = Date(timeIntervalSince1970: unixSeconds)
+        guard generatedAt <= now.addingTimeInterval(
+            Self.maximumGeneratedAtFutureSkew
+        ) else {
+            throw ExternalWidgetDocumentError.invalidGeneratedAt
+        }
+        return generatedAt
     }
 
     private func content(
