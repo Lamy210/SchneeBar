@@ -114,6 +114,16 @@ public struct GitHubConnectionRecoveryView: View {
                 .textSelection(.enabled)
                 .lineLimit(2)
 
+            Label(
+                githubDeviceFlowAntiPhishingMessage(
+                    verificationURI: presentation.verificationURI
+                ),
+                systemImage: "shield.checkered"
+            )
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+
             Text("If GitHub is signed in as another account, switch to @\(context.accountLogin) before approving the request.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
