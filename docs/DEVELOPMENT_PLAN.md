@@ -184,6 +184,7 @@ Foundation already available from earlier phases:
 - centralized transient network-failure classification shared by session refresh and activity loading
 - GHES discovery errors that distinguish offline/DNS/connectivity/timeout/interruption failures without masking TLS or protocol failures
 - GHES onboarding/recovery guidance that suggests VPN/private-network checks only for enterprise-server connectivity failures
+- evidence-backed partial SAML/SSO connection status when accessible installations coexist with explicit SSO-required failures
 
 Still required:
 

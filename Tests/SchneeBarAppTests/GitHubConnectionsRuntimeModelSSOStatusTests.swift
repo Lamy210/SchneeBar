@@ -174,6 +174,26 @@ func availableInstallationKeepsConnectionConnectedWhenAnotherNeedsSSO() async th
 
     #expect(
         model.connectionCards.first?.status
+            == .connectedWithSSORequired(
+                repositoryCount: 1,
+                affectedInstallationCount: 1
+            )
+    )
+}
+
+@Test @MainActor
+func availableInstallationWithOrdinary403RemainsConnected() async throws {
+    let profile = try ssoStatusProfile()
+    let model = ssoStatusModel(
+        profile: profile,
+        responses: mixedAccessResponses(repositoryHeaders: [:])
+    )
+    model.profiles = [profile]
+
+    await model.refresh(profileID: profile.id)
+
+    #expect(
+        model.connectionCards.first?.status
             == .connected(repositoryCount: 1)
     )
 }
@@ -229,7 +249,12 @@ private func ssoOnlyResponses(
     ]
 }
 
-private func mixedAccessResponses() -> [SSOStatusResponse] {
+private func mixedAccessResponses(
+    repositoryHeaders: [String: String] = [
+        "X-GitHub-SSO":
+            "required; url=https://github.com/orgs/protected/sso?authorization_request=sensitive"
+    ]
+) -> [SSOStatusResponse] {
     [
         SSOStatusResponse(#"{"id":42,"login":"snow-user","name":null,"avatar_url":null}"#),
         SSOStatusResponse(#"{"id":42,"login":"snow-user","name":null,"avatar_url":null}"#),
@@ -242,10 +267,7 @@ private func mixedAccessResponses() -> [SSOStatusResponse] {
         SSOStatusResponse(
             #"{"message":"Forbidden"}"#,
             statusCode: 403,
-            headers: [
-                "X-GitHub-SSO":
-                    "required; url=https://github.com/orgs/protected/sso?authorization_request=sensitive"
-            ]
+            headers: repositoryHeaders
         ),
     ]
 }

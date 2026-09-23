@@ -78,6 +78,19 @@ public enum GitHubConnectionsFixture: String, CaseIterable, Hashable, Sendable {
                     isEnabled: true
                 ),
                 GitHubConnectionCardModel(
+                    id: UUID(uuidString: "20000000-0000-0000-0000-000000000013")!,
+                    displayName: "Partially Restricted Cloud",
+                    host: "restricted.ghe.com",
+                    accountLogin: "lamy_restricted",
+                    deploymentLabel: "GHE.com",
+                    repositorySelectionLabel: "9 accessible repositories",
+                    status: .connectedWithSSORequired(
+                        repositoryCount: 9,
+                        affectedInstallationCount: 1
+                    ),
+                    isEnabled: true
+                ),
+                GitHubConnectionCardModel(
                     id: UUID(uuidString: "20000000-0000-0000-0000-000000000012")!,
                     displayName: "Legacy Organization",
                     host: "github.com",

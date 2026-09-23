@@ -1077,8 +1077,22 @@ final class GitHubConnectionsRuntimeModel {
         let repositoryIDs = Set(available.flatMap { $0.repositories.map(\.id) })
 
         let operationalStatus: GitHubConnectionPresentationStatus
-        if !available.isEmpty || inventory.installations.isEmpty {
-            operationalStatus = .connected(repositoryCount: repositoryIDs.count)
+        if !available.isEmpty {
+            let ssoRequiredCount = inventory.installations.count {
+                $0.status == .ssoRequired
+            }
+            if ssoRequiredCount > 0 {
+                operationalStatus = .connectedWithSSORequired(
+                    repositoryCount: repositoryIDs.count,
+                    affectedInstallationCount: ssoRequiredCount
+                )
+            } else {
+                operationalStatus = .connected(
+                    repositoryCount: repositoryIDs.count
+                )
+            }
+        } else if inventory.installations.isEmpty {
+            operationalStatus = .connected(repositoryCount: 0)
         } else if inventory.installations.allSatisfy({ $0.status == .suspended }) {
             operationalStatus = .suspended
         } else if inventory.installations.contains(where: { $0.status == .ssoRequired }) {
