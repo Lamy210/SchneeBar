@@ -6,6 +6,8 @@ import SchneeBarCore
 final class ActivityRuntimeModel {
     typealias DetailLoader = @MainActor @Sendable (ActivityItem) async throws -> ActivityDetailSnapshot
     typealias DeliveryHistoryLoader = @MainActor @Sendable (ActivityItem) async throws -> DeliveryHistorySnapshot
+    typealias DetailActionPerformer =
+        @MainActor @Sendable (ActivityItem, ActivityDetailAction) async throws -> Void
 
     var items: [ActivityItem] = []
     var selectedItem: ActivityItem?
@@ -16,6 +18,8 @@ final class ActivityRuntimeModel {
     var deliveryHistoryIsLoading = false
     var deliveryHistoryErrorMessage: String?
     var isPresentingDeliveryHistory = false
+    var detailActionIsRunning = false
+    var detailActionErrorMessage: String?
 
     @ObservationIgnored
     private var detailLoader: DetailLoader?
@@ -24,7 +28,13 @@ final class ActivityRuntimeModel {
     private var deliveryHistoryLoader: DeliveryHistoryLoader?
 
     @ObservationIgnored
+    private var detailActionPerformer: DetailActionPerformer?
+
+    @ObservationIgnored
     private var detailTask: Task<Void, Never>?
+
+    @ObservationIgnored
+    private var detailActionTask: Task<Void, Never>?
 
     @ObservationIgnored
     private var deliveryHistoryTask: Task<Void, Never>?
@@ -37,6 +47,12 @@ final class ActivityRuntimeModel {
         _ loader: @escaping DeliveryHistoryLoader
     ) {
         deliveryHistoryLoader = loader
+    }
+
+    func configureDetailActionPerformer(
+        _ performer: @escaping DetailActionPerformer
+    ) {
+        detailActionPerformer = performer
     }
 
     func replace(with items: [ActivityItem]) {
@@ -54,6 +70,7 @@ final class ActivityRuntimeModel {
         selectedItem = item
         detail = nil
         detailErrorMessage = nil
+        detailActionErrorMessage = nil
         detailIsLoading = true
         loadSelectedDetail()
     }
@@ -63,6 +80,43 @@ final class ActivityRuntimeModel {
         detailErrorMessage = nil
         detailIsLoading = true
         loadSelectedDetail()
+    }
+
+    func performDetailAction(_ action: ActivityDetailAction) {
+        guard !detailActionIsRunning,
+              let item = selectedItem,
+              let detail,
+              detail.actions.contains(action),
+              let detailActionPerformer
+        else {
+            return
+        }
+
+        detailActionTask?.cancel()
+        detailActionErrorMessage = nil
+        detailActionIsRunning = true
+
+        detailActionTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                try await detailActionPerformer(item, action)
+                try Task.checkCancellation()
+                guard selectedItem?.id == item.id else { return }
+
+                detailActionIsRunning = false
+                detailActionErrorMessage = nil
+                retryDetail()
+            } catch is CancellationError {
+                guard selectedItem?.id == item.id else { return }
+                detailActionIsRunning = false
+            } catch {
+                guard selectedItem?.id == item.id else { return }
+                detailActionIsRunning = false
+                detailActionErrorMessage = Self.actionErrorMessage(
+                    for: action
+                )
+            }
+        }
     }
 
     func requestDeliveryHistory() {
@@ -93,12 +147,16 @@ final class ActivityRuntimeModel {
     func dismissDetail() {
         detailTask?.cancel()
         detailTask = nil
+        detailActionTask?.cancel()
+        detailActionTask = nil
         deliveryHistoryTask?.cancel()
         deliveryHistoryTask = nil
         selectedItem = nil
         detail = nil
         detailErrorMessage = nil
         detailIsLoading = false
+        detailActionIsRunning = false
+        detailActionErrorMessage = nil
         isPresentingDeliveryHistory = false
         deliveryHistory = nil
         deliveryHistoryErrorMessage = nil
@@ -140,6 +198,17 @@ final class ActivityRuntimeModel {
                 deliveryHistoryErrorMessage = "Could not load delivery history."
                 deliveryHistoryIsLoading = false
             }
+        }
+    }
+
+    private static func actionErrorMessage(
+        for action: ActivityDetailAction
+    ) -> String {
+        switch action {
+        case .rerunWorkflow:
+            "Could not re-run workflow."
+        case .cancelWorkflow:
+            "Could not cancel workflow."
         }
     }
 
