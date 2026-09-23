@@ -362,6 +362,67 @@ func workflowMutationCannotBypassUnavailableWriteCapability() async throws {
 }
 
 @Test @MainActor
+func activityDetailRejectsDestinationRepositoryMismatch() async throws {
+    let fixture = try await detailFixture(
+        jobStatusCode: 200,
+        workflowWriteAvailable: true
+    )
+    let timelineLoader = DetailTimelineLoader(
+        .evidence(try correlatedDetailEvidence())
+    )
+    let deploymentLoader = DetailDeploymentLoader(
+        .evidence(
+            GitHubDeploymentTimelineEvidence(
+                exactSHA: "unused",
+                deployments: []
+            )
+        )
+    )
+
+    await #expect(throws: ActivityDetailLoadingError.unsupportedActivity) {
+        _ = try await fixture.model.loadActivityDetail(
+            for: detailActivityItem(
+                destinationURL: URL(
+                    string: "https://github.com/other/repo/actions/runs/700"
+                )
+            ),
+            jobService: fixture.jobService,
+            timelineLoader: timelineLoader,
+            deploymentTimelineLoader: deploymentLoader,
+            environmentCatalogLoader: emptyEnvironmentCatalogLoader(),
+            timelineBuilder: GitHubDeliveryTimelineBuilder()
+        )
+    }
+
+    #expect(await timelineLoader.calls() == 0)
+    #expect(await deploymentLoader.calls() == 0)
+}
+
+@Test @MainActor
+func activityDetailRejectsNonHTTPSWorkflowDestination() async throws {
+    let fixture = try await detailFixture(
+        jobStatusCode: 200,
+        workflowWriteAvailable: true
+    )
+    let recorder = DetailMutationRecorder()
+
+    await #expect(throws: ActivityDetailLoadingError.activityContextUnavailable) {
+        try await fixture.model.performWorkflowRunAction(
+            .rerunWorkflow,
+            for: detailActivityItem(
+                state: .failed,
+                destinationURL: URL(
+                    string: "http://github.com/snow/app/actions/runs/700"
+                )
+            ),
+            mutationService: recorder
+        )
+    }
+
+    #expect(await recorder.reruns().isEmpty)
+}
+
+@Test @MainActor
 func activityDetailRejectsAmbiguousRuntimeRepositoryMatch() async throws {
     let fixture = try await detailFixture(
         jobStatusCode: 200,
@@ -717,7 +778,10 @@ private func detailSessionResponses(
 }
 
 private func detailActivityItem(
-    state: ActivityState = .success
+    state: ActivityState = .success,
+    destinationURL: URL? = URL(
+        string: "https://github.com/snow/app/actions/runs/700"
+    )
 ) -> ActivityItem {
     ActivityItem(
         id: "github-actions:1:700",
@@ -725,7 +789,7 @@ private func detailActivityItem(
         context: "PR #47 · CI",
         detail: "Succeeded",
         state: state,
-        destinationURL: URL(string: "https://github.com/snow/app/actions/runs/700"),
+        destinationURL: destinationURL,
         kind: .workflowRun,
         updatedAt: Date(timeIntervalSince1970: 200)
     )
