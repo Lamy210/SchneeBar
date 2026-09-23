@@ -24,7 +24,8 @@ final class MenuBarController: NSObject {
     init(
         runtimeModel: WidgetRuntimeModel,
         activityRuntimeModel: ActivityRuntimeModel,
-        loadActivityItems: @escaping @Sendable () async throws -> [ActivityItem]
+        loadActivitySnapshot:
+            @escaping @Sendable () async throws -> ActivityAggregateSnapshot
     ) {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         popover = NSPopover()
@@ -33,7 +34,7 @@ final class MenuBarController: NSObject {
         widgetEngine = WidgetEngine(providers: [
             ClockWidgetProvider(),
             CPUWidgetProvider(),
-            ActivityWidgetProvider(loadItems: loadActivityItems),
+            ActivityWidgetProvider(loadSnapshot: loadActivitySnapshot),
         ])
         workspaceNotificationCenter = NSWorkspace.shared.notificationCenter
         super.init()

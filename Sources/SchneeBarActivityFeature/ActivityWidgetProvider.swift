@@ -10,17 +10,30 @@ public struct ActivityWidgetProvider: WidgetProvider {
         refreshPolicy: .adaptive(active: 20, idle: 180)
     )
 
-    private let loadItems: @Sendable () async throws -> [ActivityItem]
+    private let loadSnapshot:
+        @Sendable () async throws -> ActivityAggregateSnapshot
+
+    public init(
+        loadSnapshot:
+            @escaping @Sendable () async throws -> ActivityAggregateSnapshot
+    ) {
+        self.loadSnapshot = loadSnapshot
+    }
 
     public init(
         loadItems: @escaping @Sendable () async throws -> [ActivityItem]
     ) {
-        self.loadItems = loadItems
+        loadSnapshot = {
+            ActivityAggregateSnapshot(
+                items: try await loadItems(),
+                sources: []
+            )
+        }
     }
 
     public func snapshot() async throws -> WidgetSnapshot {
-        let items = try await loadItems()
-        let summary = ActivitySummary(items: items)
+        let aggregate = try await loadSnapshot()
+        let summary = ActivitySummary(items: aggregate.items)
 
         let severity: WidgetSeverity
         let priority: WidgetPriority

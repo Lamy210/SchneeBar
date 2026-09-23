@@ -1,4 +1,5 @@
 import AppKit
+import SchneeBarCore
 import SchneeBarGitHub
 import SchneeBarGitHubActivityProvider
 import SchneeBarGitHubKeychain
@@ -96,6 +97,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let deploymentTimelineService = deploymentTimelineService
         let environmentCatalogService = environmentCatalogService
         let deliveryRecoveryNotifier = deliveryRecoveryNotifier
+        let activityAggregator = ActivitySourceAggregator(
+            sources: [
+                ClosureActivitySource(id: "github") {
+                    try await githubRuntimeModel.loadActivitySourceSnapshot()
+                },
+            ]
+        )
 
         activityRuntimeModel.configureDetailLoader { item in
             try await githubRuntimeModel.loadActivityDetail(
@@ -125,10 +133,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menuBarController = MenuBarController(
             runtimeModel: runtimeModel,
             activityRuntimeModel: activityRuntimeModel,
-            loadActivityItems: {
-                let items = try await githubRuntimeModel.loadActivityItems()
-                await activityRuntimeModel.replace(with: items)
-                return items
+            loadActivitySnapshot: {
+                let snapshot = try await activityAggregator.load()
+                await activityRuntimeModel.replace(with: snapshot.items)
+                return snapshot
             }
         )
 
