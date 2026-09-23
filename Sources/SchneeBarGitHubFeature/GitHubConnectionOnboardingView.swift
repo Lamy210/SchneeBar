@@ -20,6 +20,57 @@ public struct GitHubConnectionDraft: Equatable, Sendable {
     }
 }
 
+public enum GitHubConnectionDraftEndpointError: Error, Equatable, Sendable {
+    case serverURLRequired
+    case invalidServerURL
+    case unsupportedEndpoint(GitHubEndpointResolverError)
+}
+
+public extension GitHubConnectionDraft {
+    var isReadyToConnect: Bool {
+        !displayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && !clientID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && endpointValidationError == nil
+    }
+
+    var endpointValidationError: GitHubConnectionDraftEndpointError? {
+        do {
+            _ = try resolvedWebBaseURL()
+            return nil
+        } catch let error as GitHubConnectionDraftEndpointError {
+            return error
+        } catch {
+            return .invalidServerURL
+        }
+    }
+
+    func resolvedWebBaseURL() throws -> URL {
+        let rawURL: String
+        switch deploymentKind {
+        case .githubDotCom:
+            rawURL = "https://github.com"
+        case .gheDotCom, .enterpriseServer:
+            rawURL = serverURL.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !rawURL.isEmpty else {
+                throw GitHubConnectionDraftEndpointError.serverURLRequired
+            }
+        }
+
+        guard let webBaseURL = URL(string: rawURL) else {
+            throw GitHubConnectionDraftEndpointError.invalidServerURL
+        }
+
+        do {
+            return try GitHubEndpointResolver.resolve(
+                deploymentKind: deploymentKind,
+                webBaseURL: webBaseURL
+            ).webBaseURL
+        } catch let error as GitHubEndpointResolverError {
+            throw GitHubConnectionDraftEndpointError.unsupportedEndpoint(error)
+        }
+    }
+}
+
 public struct GitHubDeviceAuthorizationPresentation: Equatable, Sendable {
     public let userCode: String
     public let verificationURI: URL
@@ -117,6 +168,13 @@ public struct GitHubConnectionOnboardingView: View {
             if draft.deploymentKind != .githubDotCom {
                 TextField("Server URL", text: $draft.serverURL)
                     .textContentType(.URL)
+
+                if let endpointValidationMessage {
+                    Label(endpointValidationMessage, systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
 
             TextField("GitHub App Client ID", text: $draft.clientID)
@@ -201,10 +259,39 @@ public struct GitHubConnectionOnboardingView: View {
     }
 
     private var canConnect: Bool {
-        !draft.displayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            && !draft.clientID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            && (draft.deploymentKind == .githubDotCom
-                || !draft.serverURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        draft.isReadyToConnect
+    }
+
+    private var endpointValidationMessage: String? {
+        guard let error = draft.endpointValidationError else {
+            return nil
+        }
+
+        switch error {
+        case .serverURLRequired:
+            return "Enter the GitHub server URL."
+        case .invalidServerURL:
+            return "Enter a valid GitHub server URL."
+        case let .unsupportedEndpoint(endpointError):
+            switch endpointError {
+            case .httpsRequired:
+                return "Use an HTTPS URL."
+            case .missingHost:
+                return "Enter a URL with a valid GitHub host."
+            case .credentialsNotAllowed:
+                return "Remove the username or password from the server URL."
+            case .queryOrFragmentNotAllowed:
+                return "Remove query parameters or fragments from the server URL."
+            case .pathNotAllowed:
+                return "Enter only the GitHub server origin, without an additional path."
+            case .nonStandardPortNotAllowed:
+                return "Hosted GitHub connections must use the standard HTTPS port."
+            case .invalidGitHubDotComHost:
+                return "GitHub.com connections must use https://github.com."
+            case .invalidGHEHost:
+                return "Use a GHE.com web host such as https://company.ghe.com, not an API host."
+            }
+        }
     }
 
     private func applyDefaults(for kind: GitHubDeploymentKind) {

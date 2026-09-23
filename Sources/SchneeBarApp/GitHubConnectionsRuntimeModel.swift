@@ -955,22 +955,7 @@ final class GitHubConnectionsRuntimeModel {
 
     private func makeConnection(from draft: GitHubConnectionDraft) async throws -> GitHubConnection {
         let displayName = draft.displayName.trimmingCharacters(in: .whitespacesAndNewlines)
-        let rawURL: String
-        switch draft.deploymentKind {
-        case .githubDotCom:
-            rawURL = "https://github.com"
-        case .gheDotCom, .enterpriseServer:
-            rawURL = draft.serverURL.trimmingCharacters(in: .whitespacesAndNewlines)
-        }
-
-        guard let webBaseURL = URL(string: rawURL) else {
-            throw RuntimeError.invalidServerURL
-        }
-
-        _ = try GitHubEndpointResolver.resolve(
-            deploymentKind: draft.deploymentKind,
-            webBaseURL: webBaseURL
-        )
+        let webBaseURL = try draft.resolvedWebBaseURL()
 
         var connection = GitHubConnection(
             displayName: displayName,
@@ -1084,6 +1069,8 @@ final class GitHubConnectionsRuntimeModel {
             return "GitHub authorization was denied."
         case GitHubDeviceAuthorizationWaitError.expired:
             return "The GitHub authorization code expired. Request a new code."
+        case is GitHubConnectionDraftEndpointError:
+            return "The GitHub server URL is invalid or unsupported."
         case GitHubEndpointResolverError.httpsRequired,
              GitHubEndpointResolverError.missingHost,
              GitHubEndpointResolverError.credentialsNotAllowed,
@@ -1091,8 +1078,7 @@ final class GitHubConnectionsRuntimeModel {
              GitHubEndpointResolverError.pathNotAllowed,
              GitHubEndpointResolverError.nonStandardPortNotAllowed,
              GitHubEndpointResolverError.invalidGitHubDotComHost,
-             GitHubEndpointResolverError.invalidGHEHost,
-             RuntimeError.invalidServerURL:
+             GitHubEndpointResolverError.invalidGHEHost:
             return "The GitHub server URL is invalid or unsupported."
         case let GitHubEnterpriseServerDiscoveryError.httpStatus(status):
             return "GitHub Enterprise Server discovery failed with HTTP \(status)."
@@ -1104,7 +1090,6 @@ final class GitHubConnectionsRuntimeModel {
     }
 
     private enum RuntimeError: Error {
-        case invalidServerURL
         case activityAuthenticationRequired
         case activityUnavailable
     }
