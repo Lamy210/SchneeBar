@@ -52,8 +52,15 @@ public struct GitHubWorkflowRunMutationService:
                 connection: connection,
                 credential: credential
             )
-        } catch GitHubWorkflowRunMutationError.httpStatus(401) {
+        } catch let error as GitHubWorkflowRunMutationError
+            where error.statusCode == 401
+        {
             throw GitHubConnectionSessionError.reauthenticationRequired
+        } catch let GitHubWorkflowRunMutationError.httpFailure(evidence)
+            where evidence.statusCode == 403
+                && evidence.ssoSignal == .required
+        {
+            throw GitHubConnectionSessionError.ssoRequired
         }
     }
 
@@ -76,8 +83,15 @@ public struct GitHubWorkflowRunMutationService:
                 connection: connection,
                 credential: credential
             )
-        } catch GitHubWorkflowRunMutationError.httpStatus(401) {
+        } catch let error as GitHubWorkflowRunMutationError
+            where error.statusCode == 401
+        {
             throw GitHubConnectionSessionError.reauthenticationRequired
+        } catch let GitHubWorkflowRunMutationError.httpFailure(evidence)
+            where evidence.statusCode == 403
+                && evidence.ssoSignal == .required
+        {
+            throw GitHubConnectionSessionError.ssoRequired
         }
     }
 }

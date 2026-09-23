@@ -5,6 +5,18 @@ public enum GitHubWorkflowRunMutationError: Error, Equatable, Sendable {
     case invalidRepository
     case invalidRunID
     case httpStatus(Int)
+    case httpFailure(GitHubHTTPFailureEvidence)
+
+    public var statusCode: Int? {
+        switch self {
+        case let .httpStatus(statusCode):
+            return statusCode
+        case let .httpFailure(evidence):
+            return evidence.statusCode
+        case .invalidCredential, .invalidRepository, .invalidRunID:
+            return nil
+        }
+    }
 }
 
 public struct GitHubWorkflowRunMutationClient: Sendable {
@@ -131,6 +143,11 @@ public struct GitHubWorkflowRunMutationClient: Sendable {
 
         let (_, response) = try await transport.data(for: request)
         guard response.statusCode == mutation.successStatusCode else {
+            if let evidence = GitHubHTTPFailureEvidence.sanitized(
+                from: response
+            ) {
+                throw GitHubWorkflowRunMutationError.httpFailure(evidence)
+            }
             throw GitHubWorkflowRunMutationError.httpStatus(
                 response.statusCode
             )
