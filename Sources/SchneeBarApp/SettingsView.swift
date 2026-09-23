@@ -68,6 +68,9 @@ struct SettingsView: View {
                 onConnect: {
                     githubModel.connectDraft()
                 },
+                onContinueEnterpriseServer: {
+                    githubModel.continueEnterpriseOnboarding()
+                },
                 onOpenVerificationPage: { url in
                     openURL(url)
                 },

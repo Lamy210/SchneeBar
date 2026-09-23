@@ -2,6 +2,7 @@
 import Foundation
 import SchneeBarGitHub
 import SchneeBarGitHubActivityProvider
+import SchneeBarGitHubFeature
 import Testing
 
 private actor RecoveryStateProfileStore: GitHubConnectionProfileStore {
@@ -32,6 +33,33 @@ private actor RecoveryStateCredentialStore: GitHubCredentialStore {
     func load(for key: GitHubCredentialKey) async throws -> GitHubCredential? { nil }
     func save(_ credential: GitHubCredential, for key: GitHubCredentialKey) async throws {}
     func delete(for key: GitHubCredentialKey) async throws {}
+}
+
+private actor RecoveryStateDiscoveryTransport: GitHubHTTPTransport {
+    private let installedVersion: String
+    private var requests: [URLRequest] = []
+
+    init(installedVersion: String) {
+        self.installedVersion = installedVersion
+    }
+
+    func data(for request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+        requests.append(request)
+        let response = try #require(
+            HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: "HTTP/1.1",
+                headerFields: nil
+            )
+        )
+        let json = "{\"installed_version\":\"\(installedVersion)\"}"
+        return (Data(json.utf8), response)
+    }
+
+    func requestCount() -> Int {
+        requests.count
+    }
 }
 
 private struct RecoveryStateWorkflowLoader: GitHubWorkflowRunLoading {
@@ -79,6 +107,82 @@ func enterprisePreflightCountsAsActiveOnboarding() async throws {
 }
 
 @Test @MainActor
+func enterpriseReviewCountsAsActiveOnboarding() async throws {
+    let original = try recoveryStateProfile(clientID: nil)
+    let fixture = recoveryStateFixture(original)
+
+    fixture.model.onboardingPhase = .reviewingEnterpriseServer(
+        GitHubEnterpriseServerPreflightPresentation(
+            host: "github.internal.example",
+            installedVersion: "3.22.0",
+            compatibility: .tested
+        )
+    )
+
+    #expect(fixture.model.onboardingIsActive)
+}
+
+@Test @MainActor
+func enterpriseOnboardingPausesAfterDiscoveryForReview() async throws {
+    let original = try recoveryStateProfile(clientID: nil)
+    let transport = RecoveryStateDiscoveryTransport(installedVersion: "3.23.0")
+    let fixture = recoveryStateFixture(
+        original,
+        enterpriseDiscovery: GitHubEnterpriseServerDiscoveryClient(
+            transport: transport
+        )
+    )
+
+    fixture.model.beginOnboarding(defaultClientID: "Iv1.enterprise-client")
+    fixture.model.onboardingDraft = GitHubConnectionDraft(
+        deploymentKind: .enterpriseServer,
+        displayName: "Internal GitHub",
+        serverURL: "https://github.internal.example:8443",
+        clientID: "Iv1.enterprise-client"
+    )
+    fixture.model.connectDraft()
+
+    let presentation = try #require(
+        await waitForEnterpriseReview(fixture.model)
+    )
+
+    #expect(presentation.host == "github.internal.example:8443")
+    #expect(presentation.installedVersion == "3.23.0")
+    #expect(presentation.compatibility == .newerUntested)
+    #expect(fixture.model.onboardingIsActive)
+    #expect(await transport.requestCount() == 1)
+}
+
+@Test @MainActor
+func cancellingEnterpriseReviewPreventsContinuation() async throws {
+    let original = try recoveryStateProfile(clientID: nil)
+    let transport = RecoveryStateDiscoveryTransport(installedVersion: "3.22.0")
+    let fixture = recoveryStateFixture(
+        original,
+        enterpriseDiscovery: GitHubEnterpriseServerDiscoveryClient(
+            transport: transport
+        )
+    )
+
+    fixture.model.beginOnboarding(defaultClientID: "Iv1.enterprise-client")
+    fixture.model.onboardingDraft = GitHubConnectionDraft(
+        deploymentKind: .enterpriseServer,
+        displayName: "Internal GitHub",
+        serverURL: "https://github.internal.example",
+        clientID: "Iv1.enterprise-client"
+    )
+    fixture.model.connectDraft()
+    _ = try #require(await waitForEnterpriseReview(fixture.model))
+
+    fixture.model.cancelOnboarding()
+    fixture.model.continueEnterpriseOnboarding()
+
+    #expect(fixture.model.onboardingPhase == .configuration)
+    #expect(!fixture.model.isPresentingOnboarding)
+    #expect(await transport.requestCount() == 1)
+}
+
+@Test @MainActor
 func beginRecoveryCancelsExistingOnboardingState() async throws {
     let original = try recoveryStateProfile(clientID: nil)
     let fixture = recoveryStateFixture(original)
@@ -123,7 +227,10 @@ private struct RecoveryStateFixture {
 }
 
 @MainActor
-private func recoveryStateFixture(_ profile: GitHubConnectionProfile) -> RecoveryStateFixture {
+private func recoveryStateFixture(
+    _ profile: GitHubConnectionProfile,
+    enterpriseDiscovery: GitHubEnterpriseServerDiscoveryClient = .init()
+) -> RecoveryStateFixture {
     let store = RecoveryStateProfileStore([profile])
     let coordinator = GitHubConnectionSessionCoordinator(
         credentialStore: RecoveryStateCredentialStore()
@@ -135,10 +242,24 @@ private func recoveryStateFixture(_ profile: GitHubConnectionProfile) -> Recover
         model: GitHubConnectionsRuntimeModel(
             profileStore: store,
             sessionCoordinator: coordinator,
-            activityProvider: activityProvider
+            activityProvider: activityProvider,
+            enterpriseDiscovery: enterpriseDiscovery
         ),
         store: store
     )
+}
+
+@MainActor
+private func waitForEnterpriseReview(
+    _ model: GitHubConnectionsRuntimeModel
+) async -> GitHubEnterpriseServerPreflightPresentation? {
+    for _ in 0 ..< 100 {
+        if case let .reviewingEnterpriseServer(presentation) = model.onboardingPhase {
+            return presentation
+        }
+        await Task.yield()
+    }
+    return nil
 }
 
 private func recoveryStateProfile(clientID: String?) throws -> GitHubConnectionProfile {

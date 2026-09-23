@@ -122,9 +122,26 @@ public struct GitHubDeviceAuthorizationPresentation: Equatable, Sendable {
     }
 }
 
+public struct GitHubEnterpriseServerPreflightPresentation: Equatable, Sendable {
+    public let host: String
+    public let installedVersion: String
+    public let compatibility: GitHubEnterpriseCompatibility
+
+    public init(
+        host: String,
+        installedVersion: String,
+        compatibility: GitHubEnterpriseCompatibility
+    ) {
+        self.host = host
+        self.installedVersion = installedVersion
+        self.compatibility = compatibility
+    }
+}
+
 public enum GitHubConnectionOnboardingPhase: Equatable, Sendable {
     case configuration
     case checkingEnterpriseServer
+    case reviewingEnterpriseServer(GitHubEnterpriseServerPreflightPresentation)
     case requestingCode
     case waitingForAuthorization(GitHubDeviceAuthorizationPresentation)
     case finalizing
@@ -135,6 +152,7 @@ public struct GitHubConnectionOnboardingView: View {
     @Binding private var draft: GitHubConnectionDraft
     private let phase: GitHubConnectionOnboardingPhase
     private let onConnect: () -> Void
+    private let onContinueEnterpriseServer: () -> Void
     private let onOpenVerificationPage: (URL) -> Void
     private let onCancel: () -> Void
 
@@ -142,12 +160,14 @@ public struct GitHubConnectionOnboardingView: View {
         draft: Binding<GitHubConnectionDraft>,
         phase: GitHubConnectionOnboardingPhase,
         onConnect: @escaping () -> Void,
+        onContinueEnterpriseServer: @escaping () -> Void,
         onOpenVerificationPage: @escaping (URL) -> Void,
         onCancel: @escaping () -> Void
     ) {
         _draft = draft
         self.phase = phase
         self.onConnect = onConnect
+        self.onContinueEnterpriseServer = onContinueEnterpriseServer
         self.onOpenVerificationPage = onOpenVerificationPage
         self.onCancel = onCancel
     }
@@ -170,6 +190,9 @@ public struct GitHubConnectionOnboardingView: View {
             case .checkingEnterpriseServer:
                 progress(message: "Checking GitHub Enterprise Server compatibility…")
                 cancelRow
+
+            case let .reviewingEnterpriseServer(presentation):
+                enterpriseServerReview(presentation)
 
             case .requestingCode:
                 progress(message: "Requesting a GitHub authorization code…")
@@ -242,6 +265,76 @@ public struct GitHubConnectionOnboardingView: View {
         .frame(minHeight: 300)
         .onChange(of: draft.deploymentKind) { previousKind, kind in
             draft.applyDeploymentDefaults(from: previousKind, to: kind)
+        }
+    }
+
+    @ViewBuilder
+    private func enterpriseServerReview(
+        _ presentation: GitHubEnterpriseServerPreflightPresentation
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Label("Review GitHub Enterprise Server", systemImage: "server.rack")
+                .font(.headline)
+
+            LabeledContent("Server", value: presentation.host)
+            LabeledContent("Version", value: presentation.installedVersion)
+            LabeledContent("Compatibility", value: compatibilityLabel(presentation.compatibility))
+
+            if presentation.compatibility != .tested {
+                Label(
+                    compatibilityWarning(presentation.compatibility),
+                    systemImage: "exclamationmark.triangle.fill"
+                )
+                .font(.caption)
+                .foregroundStyle(.orange)
+                .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Text("Continue to request a one-time Device Flow code from this GitHub Enterprise Server.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            HStack {
+                Button("Cancel", role: .cancel) {
+                    onCancel()
+                }
+                Spacer()
+                Button("Continue") {
+                    onContinueEnterpriseServer()
+                }
+                .buttonStyle(.borderedProminent)
+            }
+        }
+    }
+
+    private func compatibilityLabel(
+        _ compatibility: GitHubEnterpriseCompatibility
+    ) -> String {
+        switch compatibility {
+        case .tested:
+            return "Tested"
+        case .olderUntested:
+            return "Older than tested range"
+        case .newerUntested:
+            return "Newer than tested range"
+        case .unknownVersion:
+            return "Unknown version format"
+        }
+    }
+
+    private func compatibilityWarning(
+        _ compatibility: GitHubEnterpriseCompatibility
+    ) -> String {
+        switch compatibility {
+        case .tested:
+            return ""
+        case .olderUntested:
+            return "This server is older than SchneeBar's tested GHES range. Some GitHub features may be unavailable."
+        case .newerUntested:
+            return "This server is newer than SchneeBar's tested GHES range. New or changed GitHub behavior may not be covered yet."
+        case .unknownVersion:
+            return "SchneeBar could not classify this GHES version. Continue only if this is the server you intended to connect."
         }
     }
 
