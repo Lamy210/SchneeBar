@@ -178,6 +178,7 @@ Foundation already available from earlier phases:
 - REST API version policy
 - connection profiles that do not assume GitHub.com-only hosts
 - pre-auth endpoint validation and canonicalization for GitHub.com, GHE.com, and GHES
+- strict GHE.com tenant web-host validation that accepts only `SUBDOMAIN.ghe.com` as the enterprise base and derives `api.SUBDOMAIN.ghe.com` for REST
 - deployment-specific onboarding guidance and safe default transitions for GitHub.com, GHE.com, and GHES
 - GHES onboarding preflight progress that distinguishes server discovery from the later Device Flow authorization request
 - explicit GHES preflight review with discovered host/version compatibility before Device Flow authorization
