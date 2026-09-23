@@ -2,6 +2,10 @@ import SwiftUI
 
 public enum GitHubConnectionPresentationStatus: Equatable, Sendable {
     case connected(repositoryCount: Int)
+    case connectedWithSSORequired(
+        repositoryCount: Int,
+        affectedInstallationCount: Int
+    )
     case syncing
     case disabled
     case authenticationRequired
@@ -15,6 +19,14 @@ public enum GitHubConnectionPresentationStatus: Equatable, Sendable {
         switch self {
         case let .connected(repositoryCount):
             return "Connected · \(repositoryCount) repos"
+        case let .connectedWithSSORequired(
+            repositoryCount,
+            affectedInstallationCount
+        ):
+            let installationLabel = affectedInstallationCount == 1
+                ? "1 installation"
+                : "\(affectedInstallationCount) installations"
+            return "Connected · \(repositoryCount) repos · SSO required for \(installationLabel)"
         case .syncing:
             return "Syncing"
         case .disabled:
@@ -38,6 +50,8 @@ public enum GitHubConnectionPresentationStatus: Equatable, Sendable {
         switch self {
         case .connected:
             return "checkmark.circle.fill"
+        case .connectedWithSSORequired:
+            return "person.crop.circle.badge.exclamationmark"
         case .syncing:
             return "arrow.triangle.2.circlepath"
         case .disabled:
@@ -59,6 +73,8 @@ public enum GitHubConnectionPresentationStatus: Equatable, Sendable {
         switch self {
         case .connected:
             return .green
+        case .connectedWithSSORequired:
+            return .orange
         case .syncing:
             return .blue
         case .disabled:
