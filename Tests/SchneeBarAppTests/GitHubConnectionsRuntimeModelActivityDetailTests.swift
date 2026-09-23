@@ -101,6 +101,39 @@ private struct DetailCheckLoader: GitHubCheckRunLoading {
     }
 }
 
+private actor DetailMutationRecorder: GitHubWorkflowRunMutating {
+    private var rerunIDs: [Int64] = []
+    private var cancelIDs: [Int64] = []
+
+    func rerun(
+        connection: GitHubConnection,
+        identity: GitHubAccountIdentity,
+        clientID: String?,
+        repository: GitHubRepositoryAccess,
+        runID: Int64
+    ) async throws {
+        rerunIDs.append(runID)
+    }
+
+    func cancel(
+        connection: GitHubConnection,
+        identity: GitHubAccountIdentity,
+        clientID: String?,
+        repository: GitHubRepositoryAccess,
+        runID: Int64
+    ) async throws {
+        cancelIDs.append(runID)
+    }
+
+    func reruns() -> [Int64] {
+        rerunIDs
+    }
+
+    func cancellations() -> [Int64] {
+        cancelIDs
+    }
+}
+
 private enum DetailTimelineOutcome: Sendable {
     case evidence(GitHubDeliveryTimelineEvidence)
     case failure
@@ -260,6 +293,216 @@ func activityDetailCombinesJobsAndCorrelatedTimeline() async throws {
     #expect(requestedRepository.fullName == "snow/app")
     #expect(requestedRepository.defaultBranch == "main")
     #expect(await deploymentLoader.SHAs() == ["landed-sha"])
+}
+
+@Test @MainActor
+func activityDetailActionsUseActivitySnapshotStateAndConfirmedWriteCapability() async throws {
+    let fixture = try await detailFixture(
+        jobStatusCode: 200,
+        workflowWriteAvailable: true
+    )
+    let timelineLoader = DetailTimelineLoader(
+        .evidence(try correlatedDetailEvidence())
+    )
+    let deploymentLoader = DetailDeploymentLoader(
+        .evidence(
+            GitHubDeploymentTimelineEvidence(
+                exactSHA: "landed-sha",
+                deployments: []
+            )
+        )
+    )
+
+    let detail = try await fixture.model.loadActivityDetail(
+        for: detailActivityItem(state: .running),
+        jobService: fixture.jobService,
+        timelineLoader: timelineLoader,
+        deploymentTimelineLoader: deploymentLoader,
+        environmentCatalogLoader: emptyEnvironmentCatalogLoader(),
+        timelineBuilder: GitHubDeliveryTimelineBuilder()
+    )
+
+    #expect(detail.state == .running)
+    #expect(detail.actions == [.cancelWorkflow])
+}
+
+@Test @MainActor
+func workflowMutationExecutesOnlyWithConfirmedWriteCapability() async throws {
+    let fixture = try await detailFixture(
+        jobStatusCode: 200,
+        workflowWriteAvailable: true
+    )
+    let recorder = DetailMutationRecorder()
+    var refreshCount = 0
+    fixture.model.onActivitySourceChanged = {
+        refreshCount += 1
+    }
+
+    try await fixture.model.performWorkflowRunAction(
+        .rerunWorkflow,
+        for: detailActivityItem(state: .failed),
+        mutationService: recorder
+    )
+
+    #expect(await recorder.reruns() == [700])
+    #expect(await recorder.cancellations().isEmpty)
+    #expect(refreshCount == 1)
+}
+
+private struct DetailRejectedMutationService: GitHubWorkflowRunMutating {
+    func rerun(
+        connection: GitHubConnection,
+        identity: GitHubAccountIdentity,
+        clientID: String?,
+        repository: GitHubRepositoryAccess,
+        runID: Int64
+    ) async throws {
+        throw GitHubConnectionSessionError.reauthenticationRequired
+    }
+
+    func cancel(
+        connection: GitHubConnection,
+        identity: GitHubAccountIdentity,
+        clientID: String?,
+        repository: GitHubRepositoryAccess,
+        runID: Int64
+    ) async throws {
+        throw GitHubConnectionSessionError.reauthenticationRequired
+    }
+}
+
+@Test @MainActor
+func workflowMutationAuthenticationFailureUpdatesConnectionHealth() async throws {
+    let fixture = try await detailFixture(
+        jobStatusCode: 200,
+        workflowWriteAvailable: true
+    )
+    var refreshCount = 0
+    fixture.model.onActivitySourceChanged = {
+        refreshCount += 1
+    }
+
+    await #expect(
+        throws: GitHubConnectionSessionError.reauthenticationRequired
+    ) {
+        try await fixture.model.performWorkflowRunAction(
+            .rerunWorkflow,
+            for: detailActivityItem(state: .failed),
+            mutationService: DetailRejectedMutationService()
+        )
+    }
+
+    #expect(
+        fixture.model.connectionCards.first?.status
+            == .authenticationRequired
+    )
+    #expect(refreshCount == 1)
+}
+
+@Test @MainActor
+func workflowMutationCannotBypassUnavailableWriteCapability() async throws {
+    let fixture = try await detailFixture(jobStatusCode: 200)
+    let recorder = DetailMutationRecorder()
+
+    await #expect(throws: WorkflowRunActionError.unavailable) {
+        try await fixture.model.performWorkflowRunAction(
+            .rerunWorkflow,
+            for: detailActivityItem(state: .failed),
+            mutationService: recorder
+        )
+    }
+
+    #expect(await recorder.reruns().isEmpty)
+    #expect(await recorder.cancellations().isEmpty)
+}
+
+@Test @MainActor
+func workflowMutationCannotBypassRunStateActionGate() async throws {
+    let fixture = try await detailFixture(
+        jobStatusCode: 200,
+        workflowWriteAvailable: true
+    )
+    let recorder = DetailMutationRecorder()
+
+    await #expect(throws: WorkflowRunActionError.unavailable) {
+        try await fixture.model.performWorkflowRunAction(
+            .cancelWorkflow,
+            for: detailActivityItem(state: .failed),
+            mutationService: recorder
+        )
+    }
+
+    await #expect(throws: WorkflowRunActionError.unavailable) {
+        try await fixture.model.performWorkflowRunAction(
+            .rerunWorkflow,
+            for: detailActivityItem(state: .running),
+            mutationService: recorder
+        )
+    }
+
+    #expect(await recorder.reruns().isEmpty)
+    #expect(await recorder.cancellations().isEmpty)
+}
+
+@Test @MainActor
+func activityDetailRejectsDestinationRepositoryMismatch() async throws {
+    let fixture = try await detailFixture(
+        jobStatusCode: 200,
+        workflowWriteAvailable: true
+    )
+    let timelineLoader = DetailTimelineLoader(
+        .evidence(try correlatedDetailEvidence())
+    )
+    let deploymentLoader = DetailDeploymentLoader(
+        .evidence(
+            GitHubDeploymentTimelineEvidence(
+                exactSHA: "unused",
+                deployments: []
+            )
+        )
+    )
+
+    await #expect(throws: ActivityDetailLoadingError.unsupportedActivity) {
+        _ = try await fixture.model.loadActivityDetail(
+            for: detailActivityItem(
+                destinationURL: URL(
+                    string: "https://github.com/other/repo/actions/runs/700"
+                )
+            ),
+            jobService: fixture.jobService,
+            timelineLoader: timelineLoader,
+            deploymentTimelineLoader: deploymentLoader,
+            environmentCatalogLoader: emptyEnvironmentCatalogLoader(),
+            timelineBuilder: GitHubDeliveryTimelineBuilder()
+        )
+    }
+
+    #expect(await timelineLoader.calls() == 0)
+    #expect(await deploymentLoader.calls() == 0)
+}
+
+@Test @MainActor
+func activityDetailRejectsNonHTTPSWorkflowDestination() async throws {
+    let fixture = try await detailFixture(
+        jobStatusCode: 200,
+        workflowWriteAvailable: true
+    )
+    let recorder = DetailMutationRecorder()
+
+    await #expect(throws: ActivityDetailLoadingError.activityContextUnavailable) {
+        try await fixture.model.performWorkflowRunAction(
+            .rerunWorkflow,
+            for: detailActivityItem(
+                state: .failed,
+                destinationURL: URL(
+                    string: "http://github.com/snow/app/actions/runs/700"
+                )
+            ),
+            mutationService: recorder
+        )
+    }
+
+    #expect(await recorder.reruns().isEmpty)
 }
 
 @Test @MainActor
@@ -506,6 +749,7 @@ private func detailFixture(
     jobStatusCode: Int,
     deploymentCapability: DetailDeploymentCapabilityFixture = .available,
     actionsCapability: DetailActionsCapabilityFixture = .available,
+    workflowWriteAvailable: Bool = false,
     duplicateRepositoryFullName: Bool = false
 ) async throws -> DetailFixture {
     let profile = try detailProfile()
@@ -515,6 +759,7 @@ private func detailFixture(
         detailSessionResponses(
             deploymentCapability: deploymentCapability,
             actionsCapability: actionsCapability,
+            workflowWriteAvailable: workflowWriteAvailable,
             duplicateRepositoryFullName: duplicateRepositoryFullName
         )
     )
@@ -566,16 +811,21 @@ private func detailProfile() throws -> GitHubConnectionProfile {
 private func detailSessionResponses(
     deploymentCapability: DetailDeploymentCapabilityFixture,
     actionsCapability: DetailActionsCapabilityFixture,
+    workflowWriteAvailable: Bool,
     duplicateRepositoryFullName: Bool
 ) -> [DetailHTTPResponse] {
     let user = #"{"id":42,"login":"snow-user","name":"Snow User","avatar_url":null}"#
 
     var permissionPairs = ["\"pull_requests\":\"read\""]
-    switch actionsCapability {
-    case .available:
-        permissionPairs.append("\"actions\":\"read\"")
-    case .unavailable, .unknown:
-        break
+    if workflowWriteAvailable {
+        permissionPairs.append("\"actions\":\"write\"")
+    } else {
+        switch actionsCapability {
+        case .available:
+            permissionPairs.append("\"actions\":\"read\"")
+        case .unavailable, .unknown:
+            break
+        }
     }
     switch deploymentCapability {
     case .available:
@@ -595,12 +845,12 @@ private func detailSessionResponses(
     """
     let duplicateRepository = duplicateRepositoryFullName
         ? """
-        ,{"id":2,"name":"app-shadow","full_name":"snow/app","private":\(repositoryIsPrivate),"owner":{"id":100,"login":"snow","type":"Organization","avatar_url":null},"permissions":{"admin":false,"maintain":false,"push":false,"triage":false,"pull":true},"default_branch":"main"}
+        ,{"id":2,"name":"app-shadow","full_name":"snow/app","private":\(repositoryIsPrivate),"owner":{"id":100,"login":"snow","type":"Organization","avatar_url":null},"permissions":{"admin":false,"maintain":false,"push":\(workflowWriteAvailable),"triage":false,"pull":true},"default_branch":"main"}
         """
         : ""
     let repositoryCount = duplicateRepositoryFullName ? 2 : 1
     let repositories = """
-    {"total_count":\(repositoryCount),"repositories":[{"id":1,"name":"app","full_name":"snow/app","private":\(repositoryIsPrivate),"owner":{"id":100,"login":"snow","type":"Organization","avatar_url":null},"permissions":{"admin":false,"maintain":false,"push":false,"triage":false,"pull":true},"default_branch":"main"}\(duplicateRepository)]}
+    {"total_count":\(repositoryCount),"repositories":[{"id":1,"name":"app","full_name":"snow/app","private":\(repositoryIsPrivate),"owner":{"id":100,"login":"snow","type":"Organization","avatar_url":null},"permissions":{"admin":false,"maintain":false,"push":\(workflowWriteAvailable),"triage":false,"pull":true},"default_branch":"main"}\(duplicateRepository)]}
     """
     return [
         DetailHTTPResponse(user),
@@ -610,14 +860,19 @@ private func detailSessionResponses(
     ]
 }
 
-private func detailActivityItem() -> ActivityItem {
+private func detailActivityItem(
+    state: ActivityState = .success,
+    destinationURL: URL? = URL(
+        string: "https://github.com/snow/app/actions/runs/700"
+    )
+) -> ActivityItem {
     ActivityItem(
         id: "github-actions:1:700",
         repository: "snow/app",
         context: "PR #47 · CI",
         detail: "Succeeded",
-        state: .success,
-        destinationURL: URL(string: "https://github.com/snow/app/actions/runs/700"),
+        state: state,
+        destinationURL: destinationURL,
         kind: .workflowRun,
         updatedAt: Date(timeIntervalSince1970: 200)
     )
