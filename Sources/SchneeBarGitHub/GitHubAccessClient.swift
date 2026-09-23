@@ -152,7 +152,7 @@ public enum GitHubSSOFailureSignal: Equatable, Sendable {
     case required
     case other
 
-    fileprivate init(headerValue: String) {
+    init(headerValue: String) {
         let directive = headerValue
             .split(separator: ";", maxSplits: 1, omittingEmptySubsequences: true)
             .first
@@ -174,6 +174,22 @@ public struct GitHubHTTPFailureEvidence: Equatable, Sendable {
     ) {
         self.statusCode = statusCode
         self.ssoSignal = ssoSignal
+    }
+
+    static func sanitized(
+        from response: HTTPURLResponse
+    ) -> GitHubHTTPFailureEvidence? {
+        guard let headerValue = response.value(
+            forHTTPHeaderField: "X-GitHub-SSO"
+        ) else {
+            return nil
+        }
+        return GitHubHTTPFailureEvidence(
+            statusCode: response.statusCode,
+            ssoSignal: GitHubSSOFailureSignal(
+                headerValue: headerValue
+            )
+        )
     }
 }
 
@@ -461,17 +477,10 @@ public struct GitHubAccessClient: Sendable {
 
         let (data, response) = try await transport.data(for: request)
         guard (200 ... 299).contains(response.statusCode) else {
-            if let headerValue = response.value(
-                forHTTPHeaderField: "X-GitHub-SSO"
+            if let evidence = GitHubHTTPFailureEvidence.sanitized(
+                from: response
             ) {
-                throw GitHubAccessClientError.httpFailure(
-                    GitHubHTTPFailureEvidence(
-                        statusCode: response.statusCode,
-                        ssoSignal: GitHubSSOFailureSignal(
-                            headerValue: headerValue
-                        )
-                    )
-                )
+                throw GitHubAccessClientError.httpFailure(evidence)
             }
             throw GitHubAccessClientError.httpStatus(response.statusCode)
         }
