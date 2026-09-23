@@ -193,7 +193,16 @@ Still required:
 
 ## Phase 6 — Interaction and extensibility
 
-- opt-in workflow re-run/cancel actions (Actions-write capability preflight implemented; mutation/confirmation flow still required)
+Implemented foundation:
+
+- opt-in workflow re-run/cancel actions with proven Actions-write + repository-write capability gating
+- credential-aware workflow mutation service that keeps bearer credentials inside the GitHub adapter
+- explicit destructive/non-destructive confirmation in Activity detail
+- no optimistic mutation state; successful mutations invalidate Activity cache and trigger a fresh poll
+- mutation-time 401 recovery into the existing authentication-required connection state
+
+Next:
+
 - provider/plugin contracts
 - declarative external widgets
 - additional CI providers after GitHub architecture proves stable
