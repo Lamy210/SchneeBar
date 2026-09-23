@@ -47,6 +47,13 @@ struct PopoverRootView: View {
                         },
                         onShowHistory: {
                             activityModel.requestDeliveryHistory()
+                        },
+                        detailActionIsRunning:
+                            activityModel.detailActionIsRunning,
+                        detailActionErrorMessage:
+                            activityModel.detailActionErrorMessage,
+                        onAction: { action in
+                            activityModel.performDetailAction(action)
                         }
                     )
                 } else {
