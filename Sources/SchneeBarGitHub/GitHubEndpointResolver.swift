@@ -38,9 +38,7 @@ public enum GitHubEndpointResolver {
 
         case .gheDotCom:
             let lowercasedHost = host.lowercased()
-            guard lowercasedHost.hasSuffix(".ghe.com"),
-                  !lowercasedHost.hasPrefix("api.")
-            else {
+            guard isValidGHEWebHost(lowercasedHost) else {
                 throw GitHubEndpointResolverError.invalidGHEHost
             }
 
@@ -117,6 +115,24 @@ public enum GitHubEndpointResolver {
             throw GitHubEndpointResolverError.missingHost
         }
         return canonicalURL
+    }
+
+    private static func isValidGHEWebHost(_ host: String) -> Bool {
+        let labels = host.split(
+            separator: ".",
+            omittingEmptySubsequences: false
+        )
+        guard labels.count == 3,
+              labels[1] == "ghe",
+              labels[2] == "com"
+        else {
+            return false
+        }
+
+        let tenant = labels[0]
+        return !tenant.isEmpty
+            && tenant != "api"
+            && tenant != "auth"
     }
 
     private static func requireComponents(_ url: URL) throws -> URLComponents {
