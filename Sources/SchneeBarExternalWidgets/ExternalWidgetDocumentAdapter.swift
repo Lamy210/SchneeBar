@@ -68,14 +68,7 @@ public struct ExternalWidgetDocumentAdapter: Sendable {
         _ document: ExternalWidgetDocument,
         now: Date = .now
     ) throws -> ExternalWidgetDefinition {
-        guard document.schemaVersion == Self.supportedSchemaVersion else {
-            throw ExternalWidgetDocumentError.unsupportedSchemaVersion(
-                document.schemaVersion
-            )
-        }
-        guard isValidExternalID(document.id) else {
-            throw ExternalWidgetDocumentError.invalidID
-        }
+        let widgetID = try validatedWidgetID(document)
 
         let displayName = try normalizedBoundedString(
             document.displayName,
@@ -94,7 +87,7 @@ public struct ExternalWidgetDocumentAdapter: Sendable {
         }
 
         let descriptor = WidgetDescriptor(
-            id: WidgetID(rawValue: document.id),
+            id: widgetID,
             displayName: displayName,
             defaultIsEnabled: false,
             defaultOrder: document.defaultOrder,
@@ -142,21 +135,34 @@ public struct ExternalWidgetDocumentAdapter: Sendable {
         now: Date = .now
     ) throws -> [ExternalWidgetDefinition] {
         var seen = Set<WidgetID>()
-        var normalized: [ExternalWidgetDefinition] = []
-        normalized.reserveCapacity(documents.count)
-
         for document in documents {
-            let definition = try normalize(document, now: now)
-            let id = definition.descriptor.id
+            let id = try validatedWidgetID(document)
             guard seen.insert(id).inserted else {
                 throw ExternalWidgetDocumentError.duplicateID(id)
             }
-            normalized.append(definition)
+        }
+
+        let normalized = try documents.map {
+            try normalize($0, now: now)
         }
 
         return normalized.sorted {
             $0.descriptor.id.rawValue < $1.descriptor.id.rawValue
         }
+    }
+
+    private func validatedWidgetID(
+        _ document: ExternalWidgetDocument
+    ) throws -> WidgetID {
+        guard document.schemaVersion == Self.supportedSchemaVersion else {
+            throw ExternalWidgetDocumentError.unsupportedSchemaVersion(
+                document.schemaVersion
+            )
+        }
+        guard isValidExternalID(document.id) else {
+            throw ExternalWidgetDocumentError.invalidID
+        }
+        return WidgetID(rawValue: document.id)
     }
 
     private func isValidExternalID(_ rawValue: String) -> Bool {
