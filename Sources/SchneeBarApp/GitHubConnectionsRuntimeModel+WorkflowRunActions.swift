@@ -9,14 +9,10 @@ extension GitHubConnectionsRuntimeModel {
         mutationService: any GitHubWorkflowRunMutating
     ) async throws {
         let context = try workflowActivityContext(for: item)
-        let availableActions = workflowRunDetailActions(
-            for: item.state,
-            writeAccess: workflowWriteAccessPresentation(
-                profileID: context.profile.id,
-                repositoryID: context.repository.id
-            )
-        )
-        guard availableActions.contains(action) else {
+        guard workflowWriteAccessPresentation(
+            profileID: context.profile.id,
+            repositoryID: context.repository.id
+        ) == .available else {
             throw WorkflowRunActionError.unavailable
         }
 
