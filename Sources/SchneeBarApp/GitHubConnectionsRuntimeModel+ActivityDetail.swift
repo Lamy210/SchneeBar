@@ -15,34 +15,12 @@ extension GitHubConnectionsRuntimeModel {
         timelineBuilder: GitHubDeliveryTimelineBuilder = GitHubDeliveryTimelineBuilder(),
         detailMapper: GitHubActivityJobDetailMapper = GitHubActivityJobDetailMapper()
     ) async throws -> ActivityDetailSnapshot {
-        guard let destinationURL = item.destinationURL,
-              let runID = workflowRunID(from: destinationURL)
-        else {
-            throw ActivityDetailLoadingError.unsupportedActivity
-        }
+        let context = try workflowActivityContext(for: item)
+        let profile = context.profile
+        let repository = context.repository
+        let runID = context.runID
 
-        let destinationHost = destinationURL.host?.lowercased()
-        let destinationPort = destinationURL.port
-
-        for profile in profiles where profile.isEnabled {
-            let endpoints = try GitHubEndpointResolver.resolve(
-                deploymentKind: profile.connection.deploymentKind,
-                webBaseURL: profile.connection.webBaseURL
-            )
-            guard endpoints.webBaseURL.host?.lowercased() == destinationHost,
-                  endpoints.webBaseURL.port == destinationPort
-            else {
-                continue
-            }
-
-            guard let repository = repositoryAccess(
-                profileID: profile.id,
-                fullName: item.repository
-            ) else {
-                continue
-            }
-
-            let jobs = try await jobService.jobs(
+        let jobs = try await jobService.jobs(
                 connection: profile.connection,
                 identity: profile.account,
                 clientID: profile.clientID,
@@ -135,15 +113,61 @@ extension GitHubConnectionsRuntimeModel {
                 )
             }
 
-            return ActivityDetailSnapshot(
-                id: jobDetail.id,
-                repository: jobDetail.repository,
-                title: jobDetail.title,
-                summary: jobDetail.summary,
-                state: jobDetail.state,
-                destinationURL: jobDetail.destinationURL,
-                deliveryTimeline: deliveryTimeline,
-                rows: jobDetail.rows
+        return ActivityDetailSnapshot(
+            id: jobDetail.id,
+            repository: jobDetail.repository,
+            title: jobDetail.title,
+            summary: jobDetail.summary,
+            state: jobDetail.state,
+            destinationURL: jobDetail.destinationURL,
+            deliveryTimeline: deliveryTimeline,
+            actions: workflowDetailActions(
+                kind: item.kind,
+                state: item.state,
+                writeCapability: workflowWriteCapabilityState(
+                    profileID: profile.id,
+                    repositoryID: repository.id
+                )
+            ),
+            rows: jobDetail.rows
+        )
+    }
+
+    func workflowActivityContext(
+        for item: ActivityItem
+    ) throws -> GitHubWorkflowActivityContext {
+        guard item.kind == .workflowRun,
+              let destinationURL = item.destinationURL,
+              let runID = workflowRunID(from: destinationURL)
+        else {
+            throw ActivityDetailLoadingError.unsupportedActivity
+        }
+
+        let destinationHost = destinationURL.host?.lowercased()
+        let destinationPort = destinationURL.port
+
+        for profile in profiles where profile.isEnabled {
+            let endpoints = try GitHubEndpointResolver.resolve(
+                deploymentKind: profile.connection.deploymentKind,
+                webBaseURL: profile.connection.webBaseURL
+            )
+            guard endpoints.webBaseURL.host?.lowercased() == destinationHost,
+                  endpoints.webBaseURL.port == destinationPort
+            else {
+                continue
+            }
+
+            guard let repository = repositoryAccess(
+                profileID: profile.id,
+                fullName: item.repository
+            ) else {
+                continue
+            }
+
+            return GitHubWorkflowActivityContext(
+                profile: profile,
+                repository: repository,
+                runID: runID
             )
         }
 
@@ -162,7 +186,32 @@ extension GitHubConnectionsRuntimeModel {
 
 }
 
-private enum ActivityDetailLoadingError: Error {
+struct GitHubWorkflowActivityContext: Sendable {
+    let profile: GitHubConnectionProfile
+    let repository: GitHubRepositoryAccess
+    let runID: Int64
+}
+
+func workflowDetailActions(
+    kind: ActivityKind,
+    state: ActivityState,
+    writeCapability: GitHubCapabilityState?
+) -> [ActivityDetailAction] {
+    guard kind == .workflowRun,
+          case .available? = writeCapability
+    else {
+        return []
+    }
+
+    switch state {
+    case .success, .failed:
+        return [.rerunWorkflow]
+    case .running, .waiting:
+        return [.cancelWorkflow]
+    }
+}
+
+enum ActivityDetailLoadingError: Error {
     case unsupportedActivity
     case activityContextUnavailable
 }
