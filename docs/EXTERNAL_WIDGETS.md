@@ -90,6 +90,10 @@ The default order must be between 1000 and 10000 so native widgets retain the
 front of the default ordering. Users can still reorder an enabled widget through
 the normal SchneeBar preference model later.
 
+The default representation may be `compact` or `normal`. External documents
+cannot default themselves to `critical`; a user may still choose a supported
+representation through SchneeBar preferences.
+
 ### Refresh policy
 
 Allowed policies are:
@@ -139,7 +143,10 @@ The image may also be omitted.
 `generatedAtUnixSeconds` is optional. When absent, normalization uses its
 injected current time.
 
-When present it must be finite and between the Unix epoch and 2100-01-01 UTC.
+When present it must be finite, between the Unix epoch and 2100-01-01 UTC, and
+no more than five minutes ahead of the normalization clock. This prevents an
+external document from manufacturing implausibly fresh diagnostic timestamps.
+
 The timestamp affects snapshot diagnostics only; it does not grant scheduling,
 execution, or network capabilities.
 
