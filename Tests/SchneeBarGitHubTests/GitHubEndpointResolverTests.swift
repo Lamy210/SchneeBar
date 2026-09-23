@@ -29,6 +29,17 @@ func resolvesGHEDataResidencyEndpoints() throws {
 }
 
 @Test
+func normalizesCaseForDedicatedGHEWebHost() throws {
+    let endpoints = try GitHubEndpointResolver.resolve(
+        deploymentKind: .gheDotCom,
+        webBaseURL: #require(URL(string: "https://Acme.GHE.com/"))
+    )
+
+    #expect(endpoints.webBaseURL.absoluteString == "https://acme.ghe.com")
+    #expect(endpoints.restBaseURL.absoluteString == "https://api.acme.ghe.com")
+}
+
+@Test
 func resolvesEnterpriseServerEndpoints() throws {
     let endpoints = try GitHubEndpointResolver.resolve(
         deploymentKind: .enterpriseServer,
@@ -90,6 +101,37 @@ func rejectsNonStandardPortsForHostedGitHub(
 @Test
 func rejectsAPIHostAsGHEWebHost() throws {
     let url = try #require(URL(string: "https://api.acme.ghe.com"))
+
+    #expect(throws: GitHubEndpointResolverError.invalidGHEHost) {
+        try GitHubEndpointResolver.resolve(
+            deploymentKind: .gheDotCom,
+            webBaseURL: url
+        )
+    }
+}
+
+@Test(arguments: [
+    "https://api.acme.ghe.com",
+    "https://actions.acme.ghe.com",
+    "https://raw.acme.ghe.com",
+    "https://foo.bar.ghe.com",
+])
+func rejectsGHEServiceOrNestedHostsAsEnterpriseWebBase(
+    rawURL: String
+) throws {
+    let url = try #require(URL(string: rawURL))
+
+    #expect(throws: GitHubEndpointResolverError.invalidGHEHost) {
+        try GitHubEndpointResolver.resolve(
+            deploymentKind: .gheDotCom,
+            webBaseURL: url
+        )
+    }
+}
+
+@Test
+func rejectsSharedGHEAuthenticationHostAsEnterpriseWebBase() throws {
+    let url = try #require(URL(string: "https://auth.ghe.com"))
 
     #expect(throws: GitHubEndpointResolverError.invalidGHEHost) {
         try GitHubEndpointResolver.resolve(
