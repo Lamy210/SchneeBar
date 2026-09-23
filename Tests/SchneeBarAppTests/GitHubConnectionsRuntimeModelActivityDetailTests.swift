@@ -263,6 +263,37 @@ func activityDetailCombinesJobsAndCorrelatedTimeline() async throws {
 }
 
 @Test @MainActor
+func activityDetailActionsUseLatestJobStateAndConfirmedWriteCapability() async throws {
+    let fixture = try await detailFixture(
+        jobStatusCode: 200,
+        workflowWriteAvailable: true
+    )
+    let timelineLoader = DetailTimelineLoader(
+        .evidence(try correlatedDetailEvidence())
+    )
+    let deploymentLoader = DetailDeploymentLoader(
+        .evidence(
+            GitHubDeploymentTimelineEvidence(
+                exactSHA: "landed-sha",
+                deployments: []
+            )
+        )
+    )
+
+    let detail = try await fixture.model.loadActivityDetail(
+        for: detailActivityItem(state: .running),
+        jobService: fixture.jobService,
+        timelineLoader: timelineLoader,
+        deploymentTimelineLoader: deploymentLoader,
+        environmentCatalogLoader: emptyEnvironmentCatalogLoader(),
+        timelineBuilder: GitHubDeliveryTimelineBuilder()
+    )
+
+    #expect(detail.state == .success)
+    #expect(detail.actions == [.rerunWorkflow])
+}
+
+@Test @MainActor
 func activityDetailRejectsAmbiguousRuntimeRepositoryMatch() async throws {
     let fixture = try await detailFixture(
         jobStatusCode: 200,
@@ -506,6 +537,7 @@ private func detailFixture(
     jobStatusCode: Int,
     deploymentCapability: DetailDeploymentCapabilityFixture = .available,
     actionsCapability: DetailActionsCapabilityFixture = .available,
+    workflowWriteAvailable: Bool = false,
     duplicateRepositoryFullName: Bool = false
 ) async throws -> DetailFixture {
     let profile = try detailProfile()
@@ -515,6 +547,7 @@ private func detailFixture(
         detailSessionResponses(
             deploymentCapability: deploymentCapability,
             actionsCapability: actionsCapability,
+            workflowWriteAvailable: workflowWriteAvailable,
             duplicateRepositoryFullName: duplicateRepositoryFullName
         )
     )
@@ -566,16 +599,21 @@ private func detailProfile() throws -> GitHubConnectionProfile {
 private func detailSessionResponses(
     deploymentCapability: DetailDeploymentCapabilityFixture,
     actionsCapability: DetailActionsCapabilityFixture,
+    workflowWriteAvailable: Bool,
     duplicateRepositoryFullName: Bool
 ) -> [DetailHTTPResponse] {
     let user = #"{"id":42,"login":"snow-user","name":"Snow User","avatar_url":null}"#
 
     var permissionPairs = ["\"pull_requests\":\"read\""]
-    switch actionsCapability {
-    case .available:
-        permissionPairs.append("\"actions\":\"read\"")
-    case .unavailable, .unknown:
-        break
+    if workflowWriteAvailable {
+        permissionPairs.append("\"actions\":\"write\"")
+    } else {
+        switch actionsCapability {
+        case .available:
+            permissionPairs.append("\"actions\":\"read\"")
+        case .unavailable, .unknown:
+            break
+        }
     }
     switch deploymentCapability {
     case .available:
@@ -595,7 +633,7 @@ private func detailSessionResponses(
     """
     let duplicateRepository = duplicateRepositoryFullName
         ? """
-        ,{"id":2,"name":"app-shadow","full_name":"snow/app","private":\(repositoryIsPrivate),"owner":{"id":100,"login":"snow","type":"Organization","avatar_url":null},"permissions":{"admin":false,"maintain":false,"push":false,"triage":false,"pull":true},"default_branch":"main"}
+        ,{"id":2,"name":"app-shadow","full_name":"snow/app","private":\(repositoryIsPrivate),"owner":{"id":100,"login":"snow","type":"Organization","avatar_url":null},"permissions":{"admin":false,"maintain":false,"push":\(workflowWriteAvailable),"triage":false,"pull":true},"default_branch":"main"}
         """
         : ""
     let repositoryCount = duplicateRepositoryFullName ? 2 : 1
@@ -610,13 +648,15 @@ private func detailSessionResponses(
     ]
 }
 
-private func detailActivityItem() -> ActivityItem {
+private func detailActivityItem(
+    state: ActivityState = .success
+) -> ActivityItem {
     ActivityItem(
         id: "github-actions:1:700",
         repository: "snow/app",
         context: "PR #47 · CI",
         detail: "Succeeded",
-        state: .success,
+        state: state,
         destinationURL: URL(string: "https://github.com/snow/app/actions/runs/700"),
         kind: .workflowRun,
         updatedAt: Date(timeIntervalSince1970: 200)
