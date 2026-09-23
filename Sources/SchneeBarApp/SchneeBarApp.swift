@@ -29,6 +29,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     let githubRuntimeModel: GitHubConnectionsRuntimeModel
     private let workflowRunService: GitHubWorkflowRunService
+    private let workflowRunMutationService: GitHubWorkflowRunMutationService
     private let workflowJobService: GitHubWorkflowJobService
     private let deliveryTimelineService: GitHubDeliveryTimelineService
     private let deploymentTimelineService: GitHubDeploymentTimelineService
@@ -44,6 +45,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             credentialStore: credentialStore
         )
         workflowRunService = GitHubWorkflowRunService(
+            sessionCoordinator: sessionCoordinator
+        )
+        workflowRunMutationService = GitHubWorkflowRunMutationService(
             sessionCoordinator: sessionCoordinator
         )
         let reviewRequestService = GitHubReviewRequestService(
@@ -86,6 +90,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let githubRuntimeModel = githubRuntimeModel
         let activityRuntimeModel = activityRuntimeModel
         let workflowRunService = workflowRunService
+        let workflowRunMutationService = workflowRunMutationService
         let workflowJobService = workflowJobService
         let deliveryTimelineService = deliveryTimelineService
         let deploymentTimelineService = deploymentTimelineService
@@ -106,6 +111,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             try await githubRuntimeModel.loadDeliveryHistory(
                 for: item,
                 workflowRunLoader: workflowRunService
+            )
+        }
+
+        activityRuntimeModel.configureDetailActionPerformer { item, action in
+            try await githubRuntimeModel.performActivityDetailAction(
+                action,
+                for: item,
+                mutationService: workflowRunMutationService
             )
         }
 
