@@ -204,9 +204,9 @@ Evidence-bound / deferred pending upstream support:
 
 ## Current implementation priority
 
-1. Broaden enterprise validation toward Phase 5 requirements.
-2. Revisit standalone/paginated Environment browsing, local history-row drill-down, and custom protection-rule details only if product usage justifies the extra scope.
-3. Only then broaden system widgets or external provider/plugin scope.
+1. Stabilize the provider-neutral Developer Activity source boundary and the strict data-only external-widget v1 contract.
+2. Add a threat-modeled, read-only Application Support loader for external widget documents (#99) without execution, network, credential, or automatic-enablement capabilities.
+3. Revisit standalone/paginated Environment browsing, local history-row drill-down, custom protection-rule details, and additional providers only when product usage or authoritative upstream evidence justifies the extra scope.
 
 ## Engineering constraints
 
