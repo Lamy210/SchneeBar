@@ -109,3 +109,53 @@ func draftStillRequiresDisplayNameAndClientID() {
     #expect(!draft.isReadyToConnect)
     #expect(draft.endpointValidationError == nil)
 }
+
+
+@Test
+func generatedDeploymentDefaultsFollowSelectedDeployment() {
+    var draft = GitHubConnectionDraft()
+
+    draft.applyDeploymentDefaults(
+        from: .githubDotCom,
+        to: .gheDotCom
+    )
+    #expect(draft.deploymentKind == .gheDotCom)
+    #expect(draft.displayName == "Company GitHub")
+    #expect(draft.serverURL == "https://company.ghe.com")
+
+    draft.applyDeploymentDefaults(
+        from: .gheDotCom,
+        to: .enterpriseServer
+    )
+    #expect(draft.deploymentKind == .enterpriseServer)
+    #expect(draft.displayName == "Internal GitHub")
+    #expect(draft.serverURL == "https://github.company.example")
+
+    draft.applyDeploymentDefaults(
+        from: .enterpriseServer,
+        to: .githubDotCom
+    )
+    #expect(draft.deploymentKind == .githubDotCom)
+    #expect(draft.displayName == "GitHub.com")
+    #expect(draft.serverURL == "https://github.com")
+}
+
+@Test
+func deploymentSwitchPreservesUserCustomizedValues() {
+    var draft = GitHubConnectionDraft(
+        deploymentKind: .enterpriseServer,
+        displayName: "Production Forge",
+        serverURL: "https://git.internal.example:8443",
+        clientID: "Iv1.enterprise-client"
+    )
+
+    draft.applyDeploymentDefaults(
+        from: .enterpriseServer,
+        to: .gheDotCom
+    )
+
+    #expect(draft.deploymentKind == .gheDotCom)
+    #expect(draft.displayName == "Production Forge")
+    #expect(draft.serverURL == "https://git.internal.example:8443")
+    #expect(!draft.isReadyToConnect)
+}

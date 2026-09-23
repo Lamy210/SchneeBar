@@ -69,6 +69,16 @@ func beginOnboardingCancelsExistingRecoveryState() async throws {
 }
 
 @Test @MainActor
+func enterprisePreflightCountsAsActiveOnboarding() async throws {
+    let original = try recoveryStateProfile(clientID: nil)
+    let fixture = recoveryStateFixture(original)
+
+    fixture.model.onboardingPhase = .checkingEnterpriseServer
+
+    #expect(fixture.model.onboardingIsActive)
+}
+
+@Test @MainActor
 func beginRecoveryCancelsExistingOnboardingState() async throws {
     let original = try recoveryStateProfile(clientID: nil)
     let fixture = recoveryStateFixture(original)

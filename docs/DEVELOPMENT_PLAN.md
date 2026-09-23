@@ -177,6 +177,9 @@ Foundation already available from earlier phases:
 - GHES discovery primitives
 - REST API version policy
 - connection profiles that do not assume GitHub.com-only hosts
+- pre-auth endpoint validation and canonicalization for GitHub.com, GHE.com, and GHES
+- deployment-specific onboarding guidance and safe default transitions for GitHub.com, GHE.com, and GHES
+- GHES onboarding preflight progress that distinguishes server discovery from the later Device Flow authorization request
 - centralized transient network-failure classification shared by session refresh and activity loading
 - GHES discovery errors that distinguish offline/DNS/connectivity/timeout/interruption failures without masking TLS or protocol failures
 - GHES onboarding/recovery guidance that suggests VPN/private-network checks only for enterprise-server connectivity failures
@@ -184,7 +187,6 @@ Foundation already available from earlier phases:
 Still required:
 
 - GitHub Enterprise Cloud / SAML / EMU states
-- GHE.com product UX and validation
 - self-hosted GHES connection wizard
 - GHES capability/API-version negotiation
 

@@ -44,6 +44,45 @@ public extension GitHubConnectionDraft {
         }
     }
 
+    mutating func applyDeploymentDefaults(
+        from previousKind: GitHubDeploymentKind,
+        to kind: GitHubDeploymentKind
+    ) {
+        let previousDisplayName = Self.defaultDisplayName(for: previousKind)
+        let previousServerURL = Self.defaultServerURL(for: previousKind)
+
+        deploymentKind = kind
+
+        if displayName == previousDisplayName {
+            displayName = Self.defaultDisplayName(for: kind)
+        }
+        if serverURL == previousServerURL {
+            serverURL = Self.defaultServerURL(for: kind)
+        }
+    }
+
+    private static func defaultDisplayName(for kind: GitHubDeploymentKind) -> String {
+        switch kind {
+        case .githubDotCom:
+            return "GitHub.com"
+        case .gheDotCom:
+            return "Company GitHub"
+        case .enterpriseServer:
+            return "Internal GitHub"
+        }
+    }
+
+    private static func defaultServerURL(for kind: GitHubDeploymentKind) -> String {
+        switch kind {
+        case .githubDotCom:
+            return "https://github.com"
+        case .gheDotCom:
+            return "https://company.ghe.com"
+        case .enterpriseServer:
+            return "https://github.company.example"
+        }
+    }
+
     func resolvedWebBaseURL() throws -> URL {
         let rawURL: String
         switch deploymentKind {
@@ -85,6 +124,7 @@ public struct GitHubDeviceAuthorizationPresentation: Equatable, Sendable {
 
 public enum GitHubConnectionOnboardingPhase: Equatable, Sendable {
     case configuration
+    case checkingEnterpriseServer
     case requestingCode
     case waitingForAuthorization(GitHubDeviceAuthorizationPresentation)
     case finalizing
@@ -127,6 +167,10 @@ public struct GitHubConnectionOnboardingView: View {
                 }
                 actionRow(connectEnabled: canConnect)
 
+            case .checkingEnterpriseServer:
+                progress(message: "Checking GitHub Enterprise Server compatibility…")
+                cancelRow
+
             case .requestingCode:
                 progress(message: "Requesting a GitHub authorization code…")
                 cancelRow
@@ -159,15 +203,25 @@ public struct GitHubConnectionOnboardingView: View {
         Form {
             Picker("GitHub deployment", selection: $draft.deploymentKind) {
                 Text("GitHub.com").tag(GitHubDeploymentKind.githubDotCom)
-                Text("GHE.com").tag(GitHubDeploymentKind.gheDotCom)
-                Text("Enterprise Server").tag(GitHubDeploymentKind.enterpriseServer)
+                Text("Enterprise Cloud (GHE.com)").tag(GitHubDeploymentKind.gheDotCom)
+                Text("Enterprise Server (self-hosted)").tag(GitHubDeploymentKind.enterpriseServer)
             }
+
+            Text(deploymentDescription)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
 
             TextField("Display name", text: $draft.displayName)
 
             if draft.deploymentKind != .githubDotCom {
-                TextField("Server URL", text: $draft.serverURL)
+                TextField(serverURLLabel, text: $draft.serverURL)
                     .textContentType(.URL)
+
+                Text(serverURLHelpText)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
 
                 if let endpointValidationMessage {
                     Label(endpointValidationMessage, systemImage: "exclamationmark.triangle.fill")
@@ -185,9 +239,9 @@ public struct GitHubConnectionOnboardingView: View {
                 .foregroundStyle(.secondary)
         }
         .formStyle(.grouped)
-        .frame(minHeight: 250)
-        .onChange(of: draft.deploymentKind) { _, kind in
-            applyDefaults(for: kind)
+        .frame(minHeight: 300)
+        .onChange(of: draft.deploymentKind) { previousKind, kind in
+            draft.applyDeploymentDefaults(from: previousKind, to: kind)
         }
     }
 
@@ -294,25 +348,36 @@ public struct GitHubConnectionOnboardingView: View {
         }
     }
 
-    private func applyDefaults(for kind: GitHubDeploymentKind) {
-        switch kind {
+    private var deploymentDescription: String {
+        switch draft.deploymentKind {
         case .githubDotCom:
-            draft.displayName = "GitHub.com"
-            draft.serverURL = "https://github.com"
+            return "GitHub-hosted accounts and repositories on github.com."
         case .gheDotCom:
-            if draft.displayName == "GitHub.com" {
-                draft.displayName = "Company GitHub"
-            }
-            if draft.serverURL == "https://github.com" {
-                draft.serverURL = "https://company.ghe.com"
-            }
+            return "GitHub Enterprise Cloud with data residency on your enterprise's dedicated GHE.com subdomain."
         case .enterpriseServer:
-            if draft.displayName == "GitHub.com" {
-                draft.displayName = "Internal GitHub"
-            }
-            if draft.serverURL == "https://github.com" || draft.serverURL.hasSuffix(".ghe.com") {
-                draft.serverURL = "https://github.company.example"
-            }
+            return "A self-hosted GitHub Enterprise Server instance operated by your organization."
+        }
+    }
+
+    private var serverURLLabel: String {
+        switch draft.deploymentKind {
+        case .githubDotCom:
+            return "GitHub URL"
+        case .gheDotCom:
+            return "GHE.com URL"
+        case .enterpriseServer:
+            return "Enterprise Server URL"
+        }
+    }
+
+    private var serverURLHelpText: String {
+        switch draft.deploymentKind {
+        case .githubDotCom:
+            return "SchneeBar uses https://github.com."
+        case .gheDotCom:
+            return "Enter the web URL users open, such as https://company.ghe.com. Do not enter an api.*.ghe.com host."
+        case .enterpriseServer:
+            return "Enter the HTTPS origin users open in a browser, such as https://github.company.example. Custom HTTPS ports are supported."
         }
     }
 }

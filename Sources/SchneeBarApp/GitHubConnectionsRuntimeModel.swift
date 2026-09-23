@@ -94,7 +94,7 @@ final class GitHubConnectionsRuntimeModel {
 
     var onboardingIsActive: Bool {
         switch onboardingPhase {
-        case .requestingCode, .waitingForAuthorization, .finalizing:
+        case .checkingEnterpriseServer, .requestingCode, .waitingForAuthorization, .finalizing:
             return true
         case .configuration, .failed:
             return false
@@ -355,8 +355,11 @@ final class GitHubConnectionsRuntimeModel {
         onboardingTask = Task { @MainActor [weak self] in
             guard let self else { return }
             do {
-                onboardingPhase = .requestingCode
+                onboardingPhase = draft.deploymentKind == .enterpriseServer
+                    ? .checkingEnterpriseServer
+                    : .requestingCode
                 let connection = try await makeConnection(from: draft)
+                onboardingPhase = .requestingCode
                 let clientID = draft.clientID.trimmingCharacters(in: .whitespacesAndNewlines)
                 let authorization = try await deviceFlowClient.begin(
                     connection: connection,
