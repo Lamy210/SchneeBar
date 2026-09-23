@@ -217,6 +217,65 @@ func activityAuthenticationFailureMarksConnectionAuthenticationRequiredAndResets
     #expect(await reviews.callCount() == 2)
 }
 
+@Test @MainActor
+func activitySourceSnapshotPreservesPartialGitHubSuccess() async throws {
+    let profile = try activityFailureProfile()
+    let workflow = ActivityFailureWorkflowLoader(
+        .success([try activityFailureWorkflowRun()])
+    )
+    let reviews = ActivityFailureReviewLoader(.networkFailure)
+    let fixture = try activityFailureFixture(
+        profile: profile,
+        permissions: ["actions": "read", "pull_requests": "read"],
+        workflow: workflow,
+        reviews: reviews
+    )
+
+    await fixture.model.refresh(profileID: profile.id)
+    let snapshot = await fixture.model.loadActivitySourceSnapshot()
+
+    #expect(snapshot.status == .available)
+    #expect(snapshot.items.map(\.id) == ["github-actions:1:11"])
+}
+
+@Test @MainActor
+func activitySourceSnapshotNormalizesTotalNetworkFailure() async throws {
+    let profile = try activityFailureProfile()
+    let workflow = ActivityFailureWorkflowLoader(.networkFailure)
+    let reviews = ActivityFailureReviewLoader(.networkFailure)
+    let fixture = try activityFailureFixture(
+        profile: profile,
+        permissions: ["actions": "read", "pull_requests": "read"],
+        workflow: workflow,
+        reviews: reviews
+    )
+
+    await fixture.model.refresh(profileID: profile.id)
+    let snapshot = await fixture.model.loadActivitySourceSnapshot()
+
+    #expect(snapshot.status == .temporarilyUnavailable)
+    #expect(snapshot.items.isEmpty)
+}
+
+@Test @MainActor
+func activitySourceSnapshotNormalizesAuthenticationFailure() async throws {
+    let profile = try activityFailureProfile()
+    let workflow = ActivityFailureWorkflowLoader(.success([]))
+    let reviews = ActivityFailureReviewLoader(.authenticationRequired)
+    let fixture = try activityFailureFixture(
+        profile: profile,
+        permissions: ["pull_requests": "read"],
+        workflow: workflow,
+        reviews: reviews
+    )
+
+    await fixture.model.refresh(profileID: profile.id)
+    let snapshot = await fixture.model.loadActivitySourceSnapshot()
+
+    #expect(snapshot.status == .authenticationRequired)
+    #expect(snapshot.items.isEmpty)
+}
+
 @MainActor
 private struct ActivityFailureFixture {
     let model: GitHubConnectionsRuntimeModel
