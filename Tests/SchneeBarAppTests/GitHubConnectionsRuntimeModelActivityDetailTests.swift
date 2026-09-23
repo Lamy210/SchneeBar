@@ -296,7 +296,7 @@ func activityDetailCombinesJobsAndCorrelatedTimeline() async throws {
 }
 
 @Test @MainActor
-func activityDetailActionsUseLatestJobStateAndConfirmedWriteCapability() async throws {
+func activityDetailActionsUseActivitySnapshotStateAndConfirmedWriteCapability() async throws {
     let fixture = try await detailFixture(
         jobStatusCode: 200,
         workflowWriteAvailable: true
@@ -322,8 +322,8 @@ func activityDetailActionsUseLatestJobStateAndConfirmedWriteCapability() async t
         timelineBuilder: GitHubDeliveryTimelineBuilder()
     )
 
-    #expect(detail.state == .success)
-    #expect(detail.actions == [.rerunWorkflow])
+    #expect(detail.state == .running)
+    #expect(detail.actions == [.cancelWorkflow])
 }
 
 @Test @MainActor
