@@ -122,7 +122,7 @@ extension GitHubConnectionsRuntimeModel {
             destinationURL: jobDetail.destinationURL,
             deliveryTimeline: deliveryTimeline,
             actions: workflowRunDetailActions(
-                for: jobDetail.state,
+                for: item.state,
                 writeAccess: workflowWriteAccessPresentation(
                     profileID: profile.id,
                     repositoryID: repository.id
