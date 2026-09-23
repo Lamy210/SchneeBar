@@ -33,7 +33,7 @@ public struct ActivityDetailRow: Identifiable, Equatable, Sendable {
     }
 }
 
-public enum ActivityDetailAction: String, CaseIterable, Equatable, Sendable {
+public enum ActivityDetailAction: String, CaseIterable, Equatable, Hashable, Sendable {
     case rerunWorkflow
     case cancelWorkflow
 }
