@@ -52,7 +52,7 @@ SchneeBar App
 - `SchneeBarActivityFeature`: Developer Activity presentation. Depends on Core + DesignSystem.
 - `SchneeBarExternalWidgets`: strict external-widget document adapter plus bounded read-only Application Support loader. Depends on Core, normalizes into existing widget models, and adds no execution, network, credential, or direct WidgetEngine mutation capability.
 - `SchneeBarPreviewSupport`: deterministic fictional fixtures used only by visual/test tooling.
-- `SchneeBar`: composition root and macOS integration. Production UI does not depend on PreviewSupport.
+- `SchneeBar`: composition root and macOS integration. It performs one startup external-widget load and atomically replaces the dedicated provider group; filesystem watching remains outside the App runtime. Production UI does not depend on PreviewSupport.
 - `SchneeBarVisualHarness` / `SchneeBarVisualSnapshotCLI`: development and CI tooling.
 
 ## Dependency rule

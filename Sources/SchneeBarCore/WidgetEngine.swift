@@ -1,7 +1,21 @@
 import Foundation
 
+public struct WidgetProviderGroupID: Hashable, Sendable {
+    public let rawValue: String
+
+    public init(rawValue: String) {
+        self.rawValue = rawValue
+    }
+}
+
+public enum WidgetProviderBatchUpdateError: Error, Equatable, Sendable {
+    case duplicateProviderID(WidgetID)
+    case providerAlreadyRegistered(WidgetID)
+}
+
 public actor WidgetEngine {
     private var providers: [WidgetID: any WidgetProvider]
+    private var providerGroups: [WidgetProviderGroupID: Set<WidgetID>] = [:]
     private var snapshots: [WidgetID: WidgetSnapshot] = [:]
     private var lastAttemptedAt: [WidgetID: Date] = [:]
     private var lastSucceededAt: [WidgetID: Date] = [:]
@@ -24,15 +38,65 @@ public actor WidgetEngine {
 
     public func register(_ provider: any WidgetProvider) {
         let id = provider.descriptor.id
+        detachFromProviderGroups(id: id)
         providers[id] = provider
         invalidateProviderRevision(id: id)
         resetRuntimeState(id: id)
     }
 
     public func unregister(id: WidgetID) {
+        detachFromProviderGroups(id: id)
         providers.removeValue(forKey: id)
         invalidateProviderRevision(id: id)
         resetRuntimeState(id: id)
+    }
+
+    public func replaceProviders(
+        in groupID: WidgetProviderGroupID,
+        with replacements: [any WidgetProvider]
+    ) throws {
+        try Task.checkCancellation()
+
+        var replacementByID: [WidgetID: any WidgetProvider] = [:]
+        replacementByID.reserveCapacity(replacements.count)
+
+        for provider in replacements {
+            let id = provider.descriptor.id
+            guard replacementByID[id] == nil else {
+                throw WidgetProviderBatchUpdateError.duplicateProviderID(id)
+            }
+            replacementByID[id] = provider
+        }
+
+        let previousIDs = providerGroups[groupID] ?? []
+        for id in replacementByID.keys
+        where providers[id] != nil && !previousIDs.contains(id)
+        {
+            throw WidgetProviderBatchUpdateError.providerAlreadyRegistered(id)
+        }
+
+        let replacementIDs = Set(replacementByID.keys)
+        let affectedIDs = previousIDs.union(replacementIDs)
+
+        try Task.checkCancellation()
+
+        for id in previousIDs {
+            providers.removeValue(forKey: id)
+        }
+        for (id, provider) in replacementByID {
+            providers[id] = provider
+        }
+
+        if replacementIDs.isEmpty {
+            providerGroups.removeValue(forKey: groupID)
+        } else {
+            providerGroups[groupID] = replacementIDs
+        }
+
+        for id in affectedIDs {
+            invalidateProviderRevision(id: id)
+            resetRuntimeState(id: id)
+        }
     }
 
     public func setConfiguration(_ configuration: WidgetConfiguration) {
@@ -210,6 +274,15 @@ public actor WidgetEngine {
             isServingLastKnownGood: failures > 0 && hasSnapshot,
             snapshotGeneratedAt: snapshots[id]?.generatedAt
         )
+    }
+
+    private func detachFromProviderGroups(id: WidgetID) {
+        for groupID in Array(providerGroups.keys) {
+            providerGroups[groupID]?.remove(id)
+            if providerGroups[groupID]?.isEmpty == true {
+                providerGroups.removeValue(forKey: groupID)
+            }
+        }
     }
 
     private func invalidateProviderRevision(id: WidgetID) {

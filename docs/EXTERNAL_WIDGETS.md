@@ -194,6 +194,28 @@ Support directory. A custom root exists only as an internal test seam.
 File watching, automatic registration, installation UI, signing/trust, and any
 execution/network capability remain separate concerns.
 
+## Startup registration
+
+SchneeBar loads the bounded Application Support collection once during widget
+runtime startup. Only a fully validated collection is handed to
+`WidgetEngine`, where the dedicated `external.widgets` provider group is
+replaced atomically.
+
+Startup-only v1 providers intentionally use `manual` runtime refresh even when
+the declarative document contains a bounded interval/adaptive refresh policy.
+That metadata is retained by the document contract for a future live source
+adapter, but this slice does not poll the filesystem merely to satisfy it.
+
+Consequences:
+
+- a new external widget remains disabled unless an existing persisted
+  `WidgetPreference` explicitly enables its stable ID;
+- removed documents disappear only after a successful full collection load;
+- loader/validation failure leaves the previous provider group untouched;
+- startup cancellation does not intentionally apply a replacement after the
+  cancellation boundary;
+- no directory watcher or periodic filesystem polling is introduced.
+
 ## Module boundary
 
 `SchneeBarExternalWidgets` owns the external document and normalization rules.

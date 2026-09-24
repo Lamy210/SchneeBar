@@ -1,5 +1,6 @@
 import AppKit
 import SchneeBarCore
+import SchneeBarExternalWidgets
 import SchneeBarGitHub
 import SchneeBarGitHubActivityProvider
 import SchneeBarGitHubKeychain
@@ -133,6 +134,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menuBarController = MenuBarController(
             runtimeModel: runtimeModel,
             activityRuntimeModel: activityRuntimeModel,
+            externalWidgetRegistrar: .applicationSupport(),
             loadActivitySnapshot: {
                 let snapshot = try await activityAggregator.load()
                 await activityRuntimeModel.replace(with: snapshot.items)
