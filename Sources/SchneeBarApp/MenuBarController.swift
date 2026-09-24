@@ -201,16 +201,31 @@ final class MenuBarController: NSObject {
             if !externalWidgetStartupFinished,
                let externalWidgetRegistrar
             {
+                model.externalWidgetStartupHealth = .loading
+
                 do {
-                    try await externalWidgetRegistrar.loadAndRegister(
-                        in: engine
-                    )
+                    let result = try await externalWidgetRegistrar
+                        .loadAndRegister(in: engine)
                     guard isCurrentRuntime(generation) else { return }
+
+                    switch result {
+                    case let .loaded(widgetCount):
+                        model.externalWidgetStartupHealth = .loaded(
+                            widgetCount: widgetCount
+                        )
+                    case let .unavailable(reason):
+                        model.externalWidgetStartupHealth = .unavailable(
+                            reason
+                        )
+                    }
                     externalWidgetStartupFinished = true
                 } catch is CancellationError {
                     return
                 } catch {
                     guard isCurrentRuntime(generation) else { return }
+                    model.externalWidgetStartupHealth = .unavailable(
+                        .unknown
+                    )
                     externalWidgetStartupFinished = true
                 }
             }
