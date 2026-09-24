@@ -216,6 +216,34 @@ Consequences:
   cancellation boundary;
 - no directory watcher or periodic filesystem polling is introduced.
 
+## Startup health diagnostics
+
+Startup registration exposes only a sanitized App-level health state:
+
+- `notAttempted`;
+- `loading`;
+- `loaded(widgetCount)`;
+- `unavailable(reason)`.
+
+The unavailable reason is a coarse enum such as unsafe storage, resource limit,
+invalid documents, unreadable storage, registration conflict, or unknown.
+
+The diagnostic state must not retain:
+
+- filesystem paths or filenames;
+- raw JSON or decoding payloads;
+- widget IDs, display names, provider strings, or rejected values;
+- the original loader/registration error.
+
+Cancellation is propagated rather than converted to `unavailable`. Runtime
+generation checks prevent an older startup attempt from publishing a final
+health result after sleep/wake invalidates that generation. If sleep cancels an
+unfinished startup attempt, the visible state returns to `notAttempted` so a
+wake retry does not leave a stale `loading` state.
+
+This health model does not enable widgets, retry the loader, watch the
+filesystem, or perform additional I/O.
+
 ## Module boundary
 
 `SchneeBarExternalWidgets` owns the external document and normalization rules.
