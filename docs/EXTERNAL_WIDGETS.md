@@ -176,6 +176,7 @@ Safety policy:
 - only direct-child, case-sensitive `.json` filenames are considered;
 - symbolic links, hard links, and non-regular `.json` entries fail closed;
 - filenames are limited to 255 UTF-8 bytes and control characters are rejected;
+- fd-based enumeration stops and fails closed after 256 direct directory entries, including non-JSON entries;
 - at most 32 JSON documents are accepted;
 - each document is limited to 64 KiB;
 - aggregate JSON input is limited to 512 KiB;
