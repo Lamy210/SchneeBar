@@ -199,13 +199,13 @@ Evidence-bound / deferred pending upstream support:
 
 - opt-in workflow re-run/cancel actions (Actions-write capability gate, provider mutations, explicit confirmation, action-state handling, and post-mutation refresh implemented)
 - provider/plugin contracts (provider-neutral Developer Activity source contract and deterministic multi-source aggregator implemented; external plugin surface pending)
-- declarative external widgets (v1 strict data-only document + normalization contract implemented; filesystem loading/install UX deferred)
+- declarative external widgets (v1 strict data-only document + normalization contract and bounded read-only Application Support loader implemented; watch/install UX deferred)
 - additional CI providers after GitHub architecture proves stable
 
 ## Current implementation priority
 
 1. Stabilize the provider-neutral Developer Activity source boundary and the strict data-only external-widget v1 contract.
-2. Add a threat-modeled, read-only Application Support loader for external widget documents (#99) without execution, network, credential, or automatic-enablement capabilities.
+2. Validate App-level atomic registration/replacement for loaded external widgets without execution, network, credential, or automatic-enablement capabilities.
 3. Revisit standalone/paginated Environment browsing, local history-row drill-down, custom protection-rule details, and additional providers only when product usage or authoritative upstream evidence justifies the extra scope.
 
 ## Engineering constraints

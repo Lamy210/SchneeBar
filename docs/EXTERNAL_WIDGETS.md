@@ -157,6 +157,42 @@ Duplicate widget IDs fail the entire collection.
 A successfully normalized collection is sorted by canonical widget ID so load
 order is deterministic.
 
+## Read-only Application Support loader
+
+The first filesystem adapter reads direct-child `.json` documents from:
+
+`~/Library/Application Support/SchneeBar/ExternalWidgets`
+
+The loader is read-only. It does not create the directory, watch it, install
+documents, or mutate `WidgetEngine`.
+
+Safety policy:
+
+- a missing directory is an empty collection;
+- the root is opened with `O_DIRECTORY | O_NOFOLLOW`;
+- directory entries are enumerated from a duplicated descriptor for that
+  already-open root, not by resolving the path again;
+- child files are opened with `openat(..., O_NOFOLLOW | O_NONBLOCK)`;
+- only direct-child, case-sensitive `.json` filenames are considered;
+- symbolic links, hard links, and non-regular `.json` entries fail closed;
+- filenames are limited to 255 UTF-8 bytes and control characters are rejected;
+- at most 32 JSON documents are accepted;
+- each document is limited to 64 KiB;
+- aggregate JSON input is limited to 512 KiB;
+- reads are bounded even if a file grows after metadata inspection;
+- cancellation is checked before filesystem work, between documents, during
+  bounded reads, and before normalization;
+- all documents are decoded and normalized before a collection is returned;
+- duplicate IDs or any decode/validation failure reject the whole collection;
+- loader errors do not retain raw file contents, filesystem paths, filenames,
+  provider strings, or rejected document values.
+
+The production initializer always uses the dedicated SchneeBar Application
+Support directory. A custom root exists only as an internal test seam.
+
+File watching, automatic registration, installation UI, signing/trust, and any
+execution/network capability remain separate concerns.
+
 ## Module boundary
 
 `SchneeBarExternalWidgets` owns the external document and normalization rules.
@@ -164,5 +200,6 @@ order is deterministic.
 It depends on `SchneeBarCore` and produces existing Core models. Core and
 `WidgetEngine` do not depend on external document types.
 
-Filesystem loading, symlink/path rules, atomic writes, signing, and third-party
-installation UX are intentionally deferred to separate, threat-modeled slices.
+File watching, automatic registration/replacement, atomic-write install flows,
+signing, and third-party installation UX are intentionally deferred to
+separate, threat-modeled slices.
