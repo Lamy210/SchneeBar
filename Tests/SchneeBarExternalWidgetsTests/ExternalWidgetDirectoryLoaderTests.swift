@@ -167,6 +167,28 @@ func rejectsUnsafeFilenameBeforeOpeningEntry() async throws {
 }
 
 @Test
+func rejectsDirectoryEntryCountAboveBoundBeforeFilteringJSON() async throws {
+    let fixture = try LoaderDirectoryFixture()
+    defer { fixture.cleanup() }
+
+    for index in 0 ... ExternalWidgetDirectoryLoader.maximumDirectoryEntryCount {
+        try Data().write(
+            to: fixture.rootURL.appendingPathComponent(
+                "ignored-\(index).txt"
+            )
+        )
+    }
+
+    await #expect(
+        throws: ExternalWidgetDirectoryLoaderError.tooManyDirectoryEntries
+    ) {
+        try await ExternalWidgetDirectoryLoader(
+            rootURL: fixture.rootURL
+        ).load()
+    }
+}
+
+@Test
 func rejectsDocumentCountAboveBound() async throws {
     let fixture = try LoaderDirectoryFixture()
     defer { fixture.cleanup() }
