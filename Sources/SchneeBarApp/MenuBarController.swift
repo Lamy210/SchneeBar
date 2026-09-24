@@ -152,6 +152,9 @@ final class MenuBarController: NSObject {
         runtimeLifecycle.willSleep()
         activeRuntimeGeneration = nil
         widgetRuntimeIsConfigured = false
+        if !externalWidgetStartupFinished {
+            runtimeModel.externalWidgetStartupHealth = .notAttempted
+        }
 
         refreshTask?.cancel()
         refreshTask = nil
