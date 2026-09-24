@@ -37,6 +37,7 @@ Implemented:
 - persisted widget configuration
 - provider-neutral runtime diagnostics and stale/failed provider health state
 - race-safe provider replacement and overlapping refresh handling
+- validation-first atomic provider-set replacement with duplicate/collision rejection and unrelated-provider isolation
 - macOS sleep/wake lifecycle handling with stale async-work rejection
 
 Deferred intentionally:
