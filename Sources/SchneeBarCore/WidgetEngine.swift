@@ -1,5 +1,14 @@
 import Foundation
 
+public enum WidgetEngineProviderSetError:
+    Error,
+    Equatable,
+    Sendable
+{
+    case duplicateReplacementID(WidgetID)
+    case conflictingProviderID(WidgetID)
+}
+
 public actor WidgetEngine {
     private var providers: [WidgetID: any WidgetProvider]
     private var snapshots: [WidgetID: WidgetSnapshot] = [:]
@@ -33,6 +42,43 @@ public actor WidgetEngine {
         providers.removeValue(forKey: id)
         invalidateProviderRevision(id: id)
         resetRuntimeState(id: id)
+    }
+
+    public func replaceProviders(
+        removing removedIDs: Set<WidgetID>,
+        with replacements: [any WidgetProvider]
+    ) throws {
+        var replacementByID: [WidgetID: any WidgetProvider] = [:]
+        replacementByID.reserveCapacity(replacements.count)
+
+        for provider in replacements {
+            let id = provider.descriptor.id
+            guard replacementByID[id] == nil else {
+                throw WidgetEngineProviderSetError
+                    .duplicateReplacementID(id)
+            }
+            guard providers[id] == nil || removedIDs.contains(id) else {
+                throw WidgetEngineProviderSetError
+                    .conflictingProviderID(id)
+            }
+            replacementByID[id] = provider
+        }
+
+        var updatedProviders = providers
+        for id in removedIDs {
+            updatedProviders.removeValue(forKey: id)
+        }
+        for (id, provider) in replacementByID {
+            updatedProviders[id] = provider
+        }
+
+        let affectedIDs = removedIDs.union(replacementByID.keys)
+        providers = updatedProviders
+
+        for id in affectedIDs {
+            invalidateProviderRevision(id: id)
+            resetRuntimeState(id: id)
+        }
     }
 
     public func setConfiguration(_ configuration: WidgetConfiguration) {
