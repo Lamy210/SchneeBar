@@ -8,6 +8,7 @@ public enum ExternalWidgetDirectoryLoaderError:
 {
     case unsafeRoot
     case rootUnavailable
+    case tooManyDirectoryEntries
     case tooManyDocuments
     case invalidFilename
     case unsafeDocumentEntry
@@ -18,6 +19,7 @@ public enum ExternalWidgetDirectoryLoaderError:
 }
 
 public struct ExternalWidgetDirectoryLoader: Sendable {
+    public static let maximumDirectoryEntryCount = 256
     public static let maximumDocumentCount = 32
     public static let maximumDocumentBytes = 64 * 1_024
     public static let maximumAggregateBytes = 512 * 1_024
@@ -180,6 +182,10 @@ public struct ExternalWidgetDirectoryLoader: Sendable {
                 continue
             }
             names.append(name)
+            guard names.count <= Self.maximumDirectoryEntryCount else {
+                throw ExternalWidgetDirectoryLoaderError
+                    .tooManyDirectoryEntries
+            }
         }
 
         guard errno == 0 else {
