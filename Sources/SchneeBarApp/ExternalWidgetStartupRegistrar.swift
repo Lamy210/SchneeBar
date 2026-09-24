@@ -8,13 +8,18 @@ struct ExternalWidgetStartupRegistrar: Sendable {
 
     typealias LoadDefinitions = @Sendable () async throws
         -> [ExternalWidgetDefinition]
+    typealias ClassifyFailure = @Sendable (any Error)
+        -> ExternalWidgetStartupFailureReason
 
     private let loadDefinitions: LoadDefinitions
+    private let classifyFailure: ClassifyFailure
 
     init(
-        loadDefinitions: @escaping LoadDefinitions
+        loadDefinitions: @escaping LoadDefinitions,
+        classifyFailure: @escaping ClassifyFailure = { _ in .unknown }
     ) {
         self.loadDefinitions = loadDefinitions
+        self.classifyFailure = classifyFailure
     }
 
     static func applicationSupport() -> Self {
@@ -22,24 +27,70 @@ struct ExternalWidgetStartupRegistrar: Sendable {
         return Self(
             loadDefinitions: {
                 try await loader.load()
-            }
+            },
+            classifyFailure: classifyApplicationSupportFailure
         )
     }
 
     func loadAndRegister(
         in engine: WidgetEngine
-    ) async throws {
-        let definitions = try await loadDefinitions()
+    ) async throws -> ExternalWidgetStartupRegistrationResult {
+        let definitions: [ExternalWidgetDefinition]
+        do {
+            definitions = try await loadDefinitions()
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch {
+            return .unavailable(classifyFailure(error))
+        }
+
         try Task.checkCancellation()
 
         let providers: [any WidgetProvider] = definitions.map {
             StaticExternalWidgetProvider(definition: $0)
         }
 
-        try await engine.replaceProviders(
-            in: Self.providerGroupID,
-            with: providers
-        )
+        do {
+            try await engine.replaceProviders(
+                in: Self.providerGroupID,
+                with: providers
+            )
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch {
+            return .unavailable(classifyFailure(error))
+        }
+
+        return .loaded(widgetCount: definitions.count)
+    }
+
+    static func classifyApplicationSupportFailure(
+        _ error: any Error
+    ) -> ExternalWidgetStartupFailureReason {
+        if let loaderError = error as? ExternalWidgetDirectoryLoaderError {
+            switch loaderError {
+            case .unsafeRoot, .invalidFilename, .unsafeDocumentEntry:
+                return .unsafeStorage
+
+            case .tooManyDirectoryEntries,
+                 .tooManyDocuments,
+                 .documentTooLarge,
+                 .aggregateTooLarge:
+                return .resourceLimit
+
+            case .invalidDocument:
+                return .invalidDocuments
+
+            case .rootUnavailable, .unreadableDocument:
+                return .unreadableStorage
+            }
+        }
+
+        if error is WidgetProviderBatchUpdateError {
+            return .registrationConflict
+        }
+
+        return .unknown
     }
 }
 
