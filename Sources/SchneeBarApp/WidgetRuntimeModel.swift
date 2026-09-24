@@ -7,6 +7,7 @@ final class WidgetRuntimeModel {
     var snapshots: [WidgetSnapshot] = []
     var descriptors: [WidgetDescriptor] = []
     var configuration = WidgetConfiguration()
+    var externalWidgetStartupHealth: ExternalWidgetStartupHealth = .notAttempted
 
     @ObservationIgnored
     private let preferencesStore: any WidgetPreferencesStore
