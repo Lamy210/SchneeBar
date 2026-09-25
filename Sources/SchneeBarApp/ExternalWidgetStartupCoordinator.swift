@@ -7,6 +7,8 @@ final class ExternalWidgetStartupCoordinator {
 
     private let register: Register?
     private(set) var isFinished = false
+    private var attemptSequence: UInt64 = 0
+    private var activeAttemptID: UInt64?
 
     init(registrar: ExternalWidgetStartupRegistrar?) {
         if let registrar {
@@ -28,10 +30,20 @@ final class ExternalWidgetStartupCoordinator {
         isCurrent: @MainActor () -> Bool
     ) async throws {
         guard !isFinished,
+              activeAttemptID == nil,
               let register,
               isCurrent()
         else {
             return
+        }
+
+        attemptSequence &+= 1
+        let attemptID = attemptSequence
+        activeAttemptID = attemptID
+        defer {
+            if activeAttemptID == attemptID {
+                activeAttemptID = nil
+            }
         }
 
         model.externalWidgetStartupHealth = .loading
@@ -39,7 +51,9 @@ final class ExternalWidgetStartupCoordinator {
         do {
             let result = try await register(engine)
             try Task.checkCancellation()
-            guard isCurrent() else {
+            guard activeAttemptID == attemptID,
+                  isCurrent()
+            else {
                 return
             }
 
@@ -50,7 +64,9 @@ final class ExternalWidgetStartupCoordinator {
             throw CancellationError()
         } catch {
             try Task.checkCancellation()
-            guard isCurrent() else {
+            guard activeAttemptID == attemptID,
+                  isCurrent()
+            else {
                 return
             }
             model.externalWidgetStartupHealth = .unavailable(.unknown)
@@ -59,6 +75,9 @@ final class ExternalWidgetStartupCoordinator {
     }
 
     func handleSleep(model: WidgetRuntimeModel) {
+        if !isFinished {
+            activeAttemptID = nil
+        }
         model.externalWidgetStartupHealth =
             ExternalWidgetStartupHealthPolicy.healthAfterSleep(
                 current: model.externalWidgetStartupHealth,
