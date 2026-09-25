@@ -152,6 +152,11 @@ final class MenuBarController: NSObject {
         runtimeLifecycle.willSleep()
         activeRuntimeGeneration = nil
         widgetRuntimeIsConfigured = false
+        runtimeModel.externalWidgetStartupHealth =
+            ExternalWidgetStartupHealthPolicy.healthAfterSleep(
+                current: runtimeModel.externalWidgetStartupHealth,
+                startupFinished: externalWidgetStartupFinished
+            )
 
         refreshTask?.cancel()
         refreshTask = nil
@@ -201,16 +206,29 @@ final class MenuBarController: NSObject {
             if !externalWidgetStartupFinished,
                let externalWidgetRegistrar
             {
+                model.externalWidgetStartupHealth = .loading
+
                 do {
-                    try await externalWidgetRegistrar.loadAndRegister(
-                        in: engine
-                    )
-                    guard isCurrentRuntime(generation) else { return }
+                    let result = try await externalWidgetRegistrar
+                        .loadAndRegister(in: engine)
+                    guard isCurrentRuntime(generation),
+                          let health = ExternalWidgetStartupHealthPolicy
+                              .terminalHealth(
+                                  for: result,
+                                  generation: generation,
+                                  lifecycle: runtimeLifecycle
+                              )
+                    else {
+                        return
+                    }
+
+                    model.externalWidgetStartupHealth = health
                     externalWidgetStartupFinished = true
                 } catch is CancellationError {
                     return
                 } catch {
                     guard isCurrentRuntime(generation) else { return }
+                    model.externalWidgetStartupHealth = .unavailable(.unknown)
                     externalWidgetStartupFinished = true
                 }
             }
