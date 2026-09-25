@@ -30,6 +30,11 @@ public enum GitHubConnectionSessionError: Error, Equatable, Sendable {
     case connectionEndpointMismatch
 }
 
+private struct CredentialAuthorizationTask: Sendable {
+    let id: UInt64
+    let task: Task<GitHubCredential, Error>
+}
+
 public actor GitHubConnectionSessionCoordinator {
     private let credentialStore: any GitHubCredentialStore
     private let accessClient: GitHubAccessClient
@@ -37,7 +42,10 @@ public actor GitHubConnectionSessionCoordinator {
     private let capabilityEvaluator: GitHubCapabilityEvaluator
     private let now: @Sendable () -> Date
     private let refreshLeeway: TimeInterval
-    private var refreshTasks: [GitHubCredentialKey: Task<GitHubCredential, Error>] = [:]
+    private var authorizationTaskSequence: UInt64 = 0
+    private var authorizationTasks: [
+        GitHubCredentialKey: CredentialAuthorizationTask
+    ] = [:]
 
     public init(
         credentialStore: any GitHubCredentialStore,
@@ -147,7 +155,7 @@ public actor GitHubConnectionSessionCoordinator {
         let key = credentialKey(connection: connection, identity: expectedIdentity)
 
         try Task.checkCancellation()
-        await cancelAndDrainRefreshTask(for: key)
+        await cancelAndDrainAuthorizationTask(for: key)
         try Task.checkCancellation()
         try await credentialStore.save(credential, for: key)
 
@@ -202,10 +210,8 @@ public actor GitHubConnectionSessionCoordinator {
         }
 
         let previousTargetCredential = try await credentialStore.load(for: targetKey)
-        refreshTasks[sourceKey]?.cancel()
-        refreshTasks[sourceKey] = nil
-        refreshTasks[targetKey]?.cancel()
-        refreshTasks[targetKey] = nil
+        await cancelAndDrainAuthorizationTask(for: sourceKey)
+        await cancelAndDrainAuthorizationTask(for: targetKey)
 
         try await credentialStore.save(credential, for: targetKey)
         do {
@@ -293,8 +299,7 @@ public actor GitHubConnectionSessionCoordinator {
         identity: GitHubAccountIdentity
     ) async throws {
         let key = credentialKey(connection: connection, identity: identity)
-        refreshTasks[key]?.cancel()
-        refreshTasks[key] = nil
+        await cancelAndDrainAuthorizationTask(for: key)
         try await credentialStore.delete(for: key)
     }
 
@@ -312,10 +317,39 @@ public actor GitHubConnectionSessionCoordinator {
     ) async throws -> GitHubCredential {
         let key = credentialKey(connection: connection, identity: identity)
 
-        if let refreshTask = refreshTasks[key] {
-            return try await refreshTask.value
+        if let state = authorizationTasks[key] {
+            return try await state.task.value
         }
 
+        authorizationTaskSequence &+= 1
+        let taskID = authorizationTaskSequence
+        let task = Task<GitHubCredential, Error> { [self] in
+            try await resolveAuthorizedCredential(
+                connection: connection,
+                key: key,
+                clientID: clientID
+            )
+        }
+        authorizationTasks[key] = CredentialAuthorizationTask(
+            id: taskID,
+            task: task
+        )
+
+        do {
+            let credential = try await task.value
+            clearAuthorizationTask(for: key, id: taskID)
+            return credential
+        } catch {
+            clearAuthorizationTask(for: key, id: taskID)
+            throw error
+        }
+    }
+
+    private func resolveAuthorizedCredential(
+        connection: GitHubConnection,
+        key: GitHubCredentialKey,
+        clientID: String?
+    ) async throws -> GitHubCredential {
         guard let credential = try await credentialStore.load(for: key) else {
             throw GitHubConnectionSessionError.credentialNotFound
         }
@@ -332,27 +366,13 @@ public actor GitHubConnectionSessionCoordinator {
             throw GitHubConnectionSessionError.reauthenticationRequired
         }
 
-        let deviceFlowClient = self.deviceFlowClient
-        let credentialStore = self.credentialStore
-        let refreshTask = Task<GitHubCredential, Error> {
-            let refreshed = try await deviceFlowClient.refresh(
-                connection: connection,
-                clientID: clientID,
-                credential: credential
-            )
-            try await credentialStore.save(refreshed, for: key)
-            return refreshed
-        }
-        refreshTasks[key] = refreshTask
-
-        do {
-            let refreshed = try await refreshTask.value
-            refreshTasks[key] = nil
-            return refreshed
-        } catch {
-            refreshTasks[key] = nil
-            throw error
-        }
+        let refreshed = try await deviceFlowClient.refresh(
+            connection: connection,
+            clientID: clientID,
+            credential: credential
+        )
+        try await credentialStore.save(refreshed, for: key)
+        return refreshed
     }
 
     private func isSSORequired(
@@ -365,12 +385,24 @@ public actor GitHubConnectionSessionCoordinator {
             && evidence.ssoSignal == .required
     }
 
-    private func cancelAndDrainRefreshTask(for key: GitHubCredentialKey) async {
-        guard let task = refreshTasks.removeValue(forKey: key) else {
+    private func cancelAndDrainAuthorizationTask(
+        for key: GitHubCredentialKey
+    ) async {
+        guard let state = authorizationTasks.removeValue(forKey: key) else {
             return
         }
-        task.cancel()
-        _ = try? await task.value
+        state.task.cancel()
+        _ = try? await state.task.value
+    }
+
+    private func clearAuthorizationTask(
+        for key: GitHubCredentialKey,
+        id: UInt64
+    ) {
+        guard authorizationTasks[key]?.id == id else {
+            return
+        }
+        authorizationTasks[key] = nil
     }
 
     private func credentialKey(
