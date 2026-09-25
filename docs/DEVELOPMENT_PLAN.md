@@ -199,7 +199,7 @@ Evidence-bound / deferred pending upstream support:
 
 - opt-in workflow re-run/cancel actions (Actions-write capability gate, provider mutations, explicit confirmation, action-state handling, and post-mutation refresh implemented)
 - provider/plugin contracts (provider-neutral Developer Activity source contract and deterministic multi-source aggregator implemented; external plugin surface pending)
-- declarative external widgets (v1 strict data-only document + normalization contract, bounded read-only Application Support loader, startup-only atomic registration, sanitized startup-health model, and coarse Settings status surface implemented; watch/install UX deferred)
+- declarative external widgets (v1 strict data-only document + normalization contract, bounded read-only Application Support loader, startup-only atomic registration, isolated/tested App startup coordinator, sanitized startup-health model, and coarse Settings status surface implemented; watch/install UX deferred)
 - additional CI providers after GitHub architecture proves stable
 
 ## Current implementation priority

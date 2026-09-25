@@ -260,6 +260,22 @@ the App-level enum:
 Settings does not receive or render filesystem paths, filenames, raw JSON,
 widget/provider identifiers, rejected field values, or original error text.
 
+### Startup orchestration
+
+The App owns a small startup coordinator between `MenuBarController` and the
+startup registrar. The coordinator owns only the one-shot registration state
+and sanitized health transitions.
+
+`MenuBarController` remains responsible for macOS lifecycle events and
+`WidgetRuntimeLifecycle` generations. It passes a current-generation check to
+the coordinator, so a stale registration result cannot publish terminal health
+or mark startup as complete.
+
+Cancellation remains cancellation. An unfinished startup returns to
+`notAttempted` across sleep, while a completed terminal health state survives
+sleep. The coordinator does not add filesystem reads, polling, watching,
+network access, or WidgetEngine scheduling behavior.
+
 ## Module boundary
 
 `SchneeBarExternalWidgets` owns the external document and normalization rules.
