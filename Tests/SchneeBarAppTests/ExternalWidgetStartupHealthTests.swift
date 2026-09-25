@@ -42,10 +42,12 @@ func cancellationIsNeverClassifiedAsUnavailableStartupHealth() async throws {
 @Test
 func staleRuntimeGenerationCannotPublishTerminalStartupHealth() throws {
     var lifecycle = WidgetRuntimeLifecycle()
-    let firstGeneration = try #require(lifecycle.beginRuntime())
+    let firstGenerationCandidate = lifecycle.beginRuntime()
+    let firstGeneration = try #require(firstGenerationCandidate)
 
     lifecycle.willSleep()
-    let currentGeneration = try #require(lifecycle.didWake())
+    let currentGenerationCandidate = lifecycle.didWake()
+    let currentGeneration = try #require(currentGenerationCandidate)
 
     #expect(
         ExternalWidgetStartupHealthPolicy.terminalHealth(
