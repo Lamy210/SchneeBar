@@ -12,13 +12,12 @@ final class MenuBarController: NSObject {
     private let popover: NSPopover
     private let runtimeModel: WidgetRuntimeModel
     private let activityRuntimeModel: ActivityRuntimeModel
-    private let externalWidgetRegistrar: ExternalWidgetStartupRegistrar?
+    private let externalWidgetStartupCoordinator: ExternalWidgetStartupCoordinator
     private let widgetEngine: WidgetEngine
     private let workspaceNotificationCenter: NotificationCenter
     private var refreshTask: Task<Void, Never>?
     private var immediateActivityRefreshTask: Task<Void, Never>?
     private var widgetRuntimeIsConfigured = false
-    private var externalWidgetStartupFinished = false
     private var activityRefreshIsPending = false
     private var runtimeLifecycle = WidgetRuntimeLifecycle()
     private var activeRuntimeGeneration: WidgetRuntimeLifecycle.Generation?
@@ -34,7 +33,9 @@ final class MenuBarController: NSObject {
         popover = NSPopover()
         self.runtimeModel = runtimeModel
         self.activityRuntimeModel = activityRuntimeModel
-        self.externalWidgetRegistrar = externalWidgetRegistrar
+        externalWidgetStartupCoordinator = ExternalWidgetStartupCoordinator(
+            registrar: externalWidgetRegistrar
+        )
         widgetEngine = WidgetEngine(providers: [
             ClockWidgetProvider(),
             CPUWidgetProvider(),
@@ -152,11 +153,9 @@ final class MenuBarController: NSObject {
         runtimeLifecycle.willSleep()
         activeRuntimeGeneration = nil
         widgetRuntimeIsConfigured = false
-        runtimeModel.externalWidgetStartupHealth =
-            ExternalWidgetStartupHealthPolicy.healthAfterSleep(
-                current: runtimeModel.externalWidgetStartupHealth,
-                startupFinished: externalWidgetStartupFinished
-            )
+        externalWidgetStartupCoordinator.handleSleep(
+            model: runtimeModel
+        )
 
         refreshTask?.cancel()
         refreshTask = nil
@@ -203,34 +202,19 @@ final class MenuBarController: NSObject {
                 guard isCurrentRuntime(generation) else { return }
             }
 
-            if !externalWidgetStartupFinished,
-               let externalWidgetRegistrar
-            {
-                model.externalWidgetStartupHealth = .loading
-
-                do {
-                    let result = try await externalWidgetRegistrar
-                        .loadAndRegister(in: engine)
-                    guard isCurrentRuntime(generation),
-                          let health = ExternalWidgetStartupHealthPolicy
-                              .terminalHealth(
-                                  for: result,
-                                  generation: generation,
-                                  lifecycle: runtimeLifecycle
-                              )
-                    else {
-                        return
+            do {
+                try await externalWidgetStartupCoordinator.runIfNeeded(
+                    in: engine,
+                    model: model,
+                    isCurrent: { [weak self] in
+                        guard let self else { return false }
+                        return self.isCurrentRuntime(generation)
                     }
-
-                    model.externalWidgetStartupHealth = health
-                    externalWidgetStartupFinished = true
-                } catch is CancellationError {
-                    return
-                } catch {
-                    guard isCurrentRuntime(generation) else { return }
-                    model.externalWidgetStartupHealth = .unavailable(.unknown)
-                    externalWidgetStartupFinished = true
-                }
+                )
+            } catch is CancellationError {
+                return
+            } catch {
+                return
             }
 
             await engine.setConfiguration(model.configuration)
