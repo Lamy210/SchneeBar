@@ -199,13 +199,13 @@ Evidence-bound / deferred pending upstream support:
 
 - opt-in workflow re-run/cancel actions (Actions-write capability gate, provider mutations, explicit confirmation, action-state handling, and post-mutation refresh implemented)
 - provider/plugin contracts (provider-neutral Developer Activity source contract and deterministic multi-source aggregator implemented; external plugin surface pending)
-- declarative external widgets (v1 strict data-only document + normalization contract and bounded read-only Application Support loader implemented; registration/install UX deferred)
+- declarative external widgets (v1 strict data-only document + normalization contract, bounded read-only Application Support loader, and startup-only atomic registration implemented; watch/install UX deferred)
 - additional CI providers after GitHub architecture proves stable
 
 ## Current implementation priority
 
-1. Stabilize the provider-neutral Developer Activity source boundary and the strict external-widget document + read-only loader contract.
-2. Integrate validated external widgets into WidgetEngine only through atomic, provider-neutral registration semantics; keep v1 startup-only, disabled by default, and free of filesystem polling.
+1. Stabilize the provider-neutral Developer Activity source boundary and the strict external-widget document + startup-registration contract.
+2. Validate startup-only external widget registration on real app launches, keeping live reload/watch and install UX explicitly deferred.
 3. Revisit standalone/paginated Environment browsing, local history-row drill-down, custom protection-rule details, and additional providers only when product usage or authoritative upstream evidence justifies the extra scope.
 
 ## Engineering constraints
