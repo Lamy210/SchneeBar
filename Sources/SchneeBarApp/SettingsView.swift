@@ -32,6 +32,8 @@ struct SettingsView: View {
                 }
             )
 
+            externalWidgetHealthSection
+
             GitHubConnectionsView(
                 connections: githubModel.connectionCards,
                 onAdd: {
@@ -146,6 +148,32 @@ struct SettingsView: View {
                 )
                 .frame(minWidth: 520, minHeight: 320)
             }
+        }
+    }
+
+    @ViewBuilder
+    private var externalWidgetHealthSection: some View {
+        let presentation = model.externalWidgetStartupHealth.settingsPresentation
+
+        Section("External Widgets") {
+            LabeledContent {
+                Label(
+                    presentation.status,
+                    systemImage: presentation.systemImage
+                )
+            } label: {
+                Text("Startup status")
+            }
+
+            Text(presentation.detail)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Text("External widgets are validated and registered once at app startup. Live reload, directory watching, and installation UI are not enabled.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 

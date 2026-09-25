@@ -247,6 +247,10 @@ Startup health changes no registration semantics: it does not enable widgets,
 retry the loader, watch the filesystem, perform network requests, or add
 filesystem reads.
 
+Settings surfaces this same sanitized state using only the coarse status,
+validated widget count, and fixed explanatory copy. It does not expose paths,
+filenames, document values, widget IDs, provider strings, or arbitrary errors.
+
 ## Module boundary
 
 `SchneeBarExternalWidgets` owns the external document and normalization rules.
