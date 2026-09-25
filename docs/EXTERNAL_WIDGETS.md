@@ -247,6 +247,13 @@ Startup health changes no registration semantics: it does not enable widgets,
 retry the loader, watch the filesystem, perform network requests, or add
 filesystem reads.
 
+The App-layer `ExternalWidgetStartupCoordinator` owns the one-shot startup
+attempt state, cancellation boundary, stale-completion rejection, and sleep
+retry semantics. `MenuBarController` remains responsible for the broader
+runtime generation and refresh loop and only supplies the current-generation
+predicate to the coordinator. This keeps the startup contract testable without
+constructing AppKit status-bar UI.
+
 ### Settings presentation
 
 Settings renders only the sanitized startup-health presentation derived from
