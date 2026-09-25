@@ -204,7 +204,7 @@ func startupLoaderFailureLeavesPreviouslyRegisteredGroupUntouched() async throws
     )
     let engine = WidgetEngine()
 
-    try await oldRegistrar.loadAndRegister(in: engine)
+    _ = try await oldRegistrar.loadAndRegister(in: engine)
 
     let failingRegistrar = ExternalWidgetStartupRegistrar(
         loadDefinitions: {
@@ -234,7 +234,7 @@ func startupCancellationDoesNotReplacePreviouslyRegisteredGroup() async throws {
     )
     let engine = WidgetEngine()
 
-    try await oldRegistrar.loadAndRegister(in: engine)
+    _ = try await oldRegistrar.loadAndRegister(in: engine)
 
     let cancelledRegistrar = ExternalWidgetStartupRegistrar(
         loadDefinitions: {
@@ -272,7 +272,7 @@ func stablePreferenceSurvivesTemporaryExternalWidgetAbsence() async throws {
         )
     )
 
-    try await ExternalWidgetStartupRegistrar(
+    _ = try await ExternalWidgetStartupRegistrar(
         loadDefinitions: { [definition] }
     ).loadAndRegister(in: engine)
     _ = await engine.refreshDue(
@@ -282,7 +282,7 @@ func stablePreferenceSurvivesTemporaryExternalWidgetAbsence() async throws {
         await engine.snapshot(id: definition.descriptor.id) != nil
     )
 
-    try await ExternalWidgetStartupRegistrar(
+    _ = try await ExternalWidgetStartupRegistrar(
         loadDefinitions: { [] }
     ).loadAndRegister(in: engine)
     #expect((await engine.descriptors()).isEmpty)
@@ -292,7 +292,7 @@ func stablePreferenceSurvivesTemporaryExternalWidgetAbsence() async throws {
             == preference
     )
 
-    try await ExternalWidgetStartupRegistrar(
+    _ = try await ExternalWidgetStartupRegistrar(
         loadDefinitions: { [definition] }
     ).loadAndRegister(in: engine)
     _ = await engine.refreshDue(
