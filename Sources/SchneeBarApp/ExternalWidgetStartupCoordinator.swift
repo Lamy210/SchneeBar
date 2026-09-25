@@ -43,7 +43,8 @@ final class ExternalWidgetStartupCoordinator {
                 return
             }
 
-            model.externalWidgetStartupHealth = health(for: result)
+            model.externalWidgetStartupHealth =
+                ExternalWidgetStartupHealthPolicy.terminalHealth(for: result)
             isFinished = true
         } catch is CancellationError {
             throw CancellationError()
@@ -58,20 +59,10 @@ final class ExternalWidgetStartupCoordinator {
     }
 
     func handleSleep(model: WidgetRuntimeModel) {
-        guard !isFinished else {
-            return
-        }
-        model.externalWidgetStartupHealth = .notAttempted
-    }
-
-    private func health(
-        for result: ExternalWidgetStartupRegistrationResult
-    ) -> ExternalWidgetStartupHealth {
-        switch result {
-        case let .loaded(widgetCount):
-            return .loaded(widgetCount: widgetCount)
-        case let .unavailable(reason):
-            return .unavailable(reason)
-        }
+        model.externalWidgetStartupHealth =
+            ExternalWidgetStartupHealthPolicy.healthAfterSleep(
+                current: model.externalWidgetStartupHealth,
+                startupFinished: isFinished
+            )
     }
 }
