@@ -198,6 +198,43 @@ func startupCoordinatorRunsSuccessfulRegistrationOnlyOnce() async throws {
 }
 
 @Test @MainActor
+func sanitizedUnavailableResultIsTerminalAndNotRetried() async throws {
+    let counter = StartupCoordinatorCallCounter()
+    let coordinator = ExternalWidgetStartupCoordinator(
+        register: { _ in
+            await counter.increment()
+            return .unavailable(.invalidDocuments)
+        }
+    )
+    let model = coordinatorRuntimeModel()
+    let engine = WidgetEngine()
+
+    try await coordinator.runIfNeeded(
+        in: engine,
+        model: model,
+        isCurrent: { true }
+    )
+    try await coordinator.runIfNeeded(
+        in: engine,
+        model: model,
+        isCurrent: { true }
+    )
+
+    #expect(await counter.value() == 1)
+    #expect(coordinator.isFinished)
+    #expect(
+        model.externalWidgetStartupHealth
+            == .unavailable(.invalidDocuments)
+    )
+
+    coordinator.handleSleep(model: model)
+    #expect(
+        model.externalWidgetStartupHealth
+            == .unavailable(.invalidDocuments)
+    )
+}
+
+@Test @MainActor
 func concurrentRunInSameGenerationDoesNotRegisterTwice() async throws {
     let counter = StartupCoordinatorCallCounter()
     let gate = StartupCoordinatorGate()
