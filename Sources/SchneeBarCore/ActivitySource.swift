@@ -34,11 +34,14 @@ public struct ActivitySourceID:
         guard isValidNamespace,
               let separator = itemID.firstIndex(where: {
                   $0 == "-" || $0 == ":"
-              })
+              }),
+              itemID[..<separator] == rawValue[...]
         else {
             return false
         }
-        return itemID[..<separator] == rawValue[...]
+
+        let payloadStart = itemID.index(after: separator)
+        return payloadStart < itemID.endIndex
     }
 }
 
