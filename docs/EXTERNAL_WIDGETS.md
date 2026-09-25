@@ -43,7 +43,6 @@ older SchneeBar build.
   "snapshot": {
     "severity": "attention",
     "priority": "attention",
-    "generatedAtUnixSeconds": 1800000000,
     "compact": {
       "text": "!1",
       "systemImage": "exclamationmark.triangle.fill",
@@ -140,8 +139,10 @@ The image may also be omitted.
 
 ### Generated timestamp
 
-`generatedAtUnixSeconds` is optional. When absent, normalization uses its
-injected current time.
+`generatedAtUnixSeconds` is optional. The example intentionally omits it so a
+copied static document does not become invalid merely because its example
+timestamp is in the future. When absent, normalization uses its injected current
+time.
 
 When present it must be finite, between the Unix epoch and 2100-01-01 UTC, and
 no more than five minutes ahead of the normalization clock. This prevents an
@@ -192,6 +193,32 @@ Support directory. A custom root exists only as an internal test seam.
 File watching, automatic registration, installation UI, signing/trust, and any
 execution/network capability remain separate concerns.
 
+## Startup registration
+
+SchneeBar loads the bounded Application Support collection once during widget
+runtime startup. Only a fully validated collection is handed to
+`WidgetEngine`, where the dedicated `external.widgets` provider group is
+replaced atomically.
+
+Startup-only v1 providers intentionally use `manual` runtime refresh even when
+the declarative document contains a bounded interval/adaptive refresh policy.
+That metadata is retained by the document contract for a future live source
+adapter, but this slice does not poll the filesystem merely to satisfy it.
+
+Consequences:
+
+- a new external widget remains disabled unless an existing persisted
+  `WidgetPreference` explicitly enables its stable ID;
+- preferences are keyed independently of provider presence, so a temporarily
+  missing widget can regain the same explicit preference when its stable ID
+  returns on a later launch;
+- removed documents disappear only after a successful full collection load;
+- loader/validation failure leaves the previous provider group untouched;
+- startup cancellation does not intentionally apply a replacement after the
+  cancellation boundary;
+- native/unrelated provider IDs cannot be replaced by the external group;
+- no directory watcher or periodic filesystem polling is introduced.
+
 ## Module boundary
 
 `SchneeBarExternalWidgets` owns the external document and normalization rules.
@@ -199,6 +226,5 @@ execution/network capability remain separate concerns.
 It depends on `SchneeBarCore` and produces existing Core models. Core and
 `WidgetEngine` do not depend on external document types.
 
-File watching/live reload, automatic registration/replacement, atomic-write install flows,
-signing, and third-party installation UX are intentionally deferred to separate,
-threat-modeled slices.
+File watching/live reload, atomic-write install flows, signing, and third-party
+installation UX are intentionally deferred to separate, threat-modeled slices.
