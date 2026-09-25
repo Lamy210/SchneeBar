@@ -247,6 +247,37 @@ Startup health changes no registration semantics: it does not enable widgets,
 retry the loader, watch the filesystem, perform network requests, or add
 filesystem reads.
 
+The App-layer `ExternalWidgetStartupCoordinator` owns the one-shot startup
+attempt state, cancellation boundary, stale-completion rejection, and sleep
+retry semantics. `MenuBarController` remains responsible for the broader
+runtime generation and refresh loop and only supplies the current-generation
+predicate to the coordinator. This keeps the startup contract testable without
+constructing AppKit status-bar UI.
+
+### Manual real-launch smoke check
+
+Before release candidates that change this startup path, validate the same
+startup-only behavior in the built app:
+
+1. Quit SchneeBar completely.
+2. Place one valid v1 JSON document directly in
+   `~/Library/Application Support/SchneeBar/ExternalWidgets`.
+3. Launch SchneeBar.
+4. Open Settings and confirm External Widgets reports `Loaded` with a count of
+   one.
+5. Confirm the external widget is still disabled until explicitly enabled in
+   widget preferences.
+6. Relaunch and confirm the same stable widget ID keeps its explicit
+   preference.
+7. Remove the document, relaunch, and confirm startup completes with zero
+   external widgets rather than retaining the removed provider.
+8. Separately use a malformed document and confirm Settings exposes only the
+   coarse invalid-document health state, never its filename, path, JSON, or
+   rejected value.
+
+This is a release smoke check, not a live-reload contract. Editing files while
+SchneeBar is running is intentionally outside v1 behavior.
+
 ### Settings presentation
 
 Settings renders only the sanitized startup-health presentation derived from
