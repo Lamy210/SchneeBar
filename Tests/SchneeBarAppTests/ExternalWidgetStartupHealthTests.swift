@@ -39,29 +39,23 @@ func cancellationIsNeverClassifiedAsUnavailableStartupHealth() async throws {
     }
 }
 
-@Test
-func staleRuntimeGenerationCannotPublishTerminalStartupHealth() throws {
-    var lifecycle = WidgetRuntimeLifecycle()
-    let firstGenerationCandidate = lifecycle.beginRuntime()
-    let firstGeneration = try #require(firstGenerationCandidate)
-
-    lifecycle.willSleep()
-    let currentGenerationCandidate = lifecycle.didWake()
-    let currentGeneration = try #require(currentGenerationCandidate)
-
+@Test(arguments: [
+    (
+        ExternalWidgetStartupRegistrationResult.loaded(widgetCount: 2),
+        ExternalWidgetStartupHealth.loaded(widgetCount: 2)
+    ),
+    (
+        ExternalWidgetStartupRegistrationResult.unavailable(.resourceLimit),
+        ExternalWidgetStartupHealth.unavailable(.resourceLimit)
+    ),
+])
+func terminalHealthMapsOnlySanitizedRegistrationResult(
+    result: ExternalWidgetStartupRegistrationResult,
+    expected: ExternalWidgetStartupHealth
+) {
     #expect(
-        ExternalWidgetStartupHealthPolicy.terminalHealth(
-            for: .loaded(widgetCount: 2),
-            generation: firstGeneration,
-            lifecycle: lifecycle
-        ) == nil
-    )
-    #expect(
-        ExternalWidgetStartupHealthPolicy.terminalHealth(
-            for: .loaded(widgetCount: 2),
-            generation: currentGeneration,
-            lifecycle: lifecycle
-        ) == .loaded(widgetCount: 2)
+        ExternalWidgetStartupHealthPolicy.terminalHealth(for: result)
+            == expected
     )
 }
 
