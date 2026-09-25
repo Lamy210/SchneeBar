@@ -47,7 +47,8 @@ func startupRegistrationKeepsExternalWidgetsDisabledWithoutUserPreference() asyn
         providers: [StartupNativeWidgetProvider()]
     )
 
-    try await registrar.loadAndRegister(in: engine)
+    let result = try await registrar.loadAndRegister(in: engine)
+    #expect(result == .loaded(widgetCount: 1))
 
     let descriptors = await engine.descriptors()
     let externalDescriptor = try #require(
@@ -93,9 +94,10 @@ func startupRegistrationForcesDisabledDefaultEvenForPrebuiltDefinition() async t
     )
     let engine = WidgetEngine()
 
-    try await ExternalWidgetStartupRegistrar(
+    let result = try await ExternalWidgetStartupRegistrar(
         loadDefinitions: { [definition] }
     ).loadAndRegister(in: engine)
+    #expect(result == .loaded(widgetCount: 1))
 
     let descriptors = await engine.descriptors()
     let descriptor = try #require(descriptors.first)
@@ -116,7 +118,8 @@ func startupRegistrationHonorsExistingExplicitEnablePreference() async throws {
     )
     let engine = WidgetEngine()
 
-    try await registrar.loadAndRegister(in: engine)
+    let result = try await registrar.loadAndRegister(in: engine)
+    #expect(result == .loaded(widgetCount: 1))
     let descriptors = await engine.descriptors()
     let descriptor = try #require(descriptors.first)
     await engine.setConfiguration(
@@ -180,15 +183,12 @@ func startupRegistrationCannotOverwriteNativeProviderID() async throws {
         providers: [StartupNativeWidgetProvider()]
     )
 
-    await #expect(
-        throws: WidgetProviderBatchUpdateError
-            .providerAlreadyRegistered(nativeID)
-    ) {
-        try await ExternalWidgetStartupRegistrar(
-            loadDefinitions: { [definition] }
-        ).loadAndRegister(in: engine)
-    }
+    let result = try await ExternalWidgetStartupRegistrar(
+        loadDefinitions: { [definition] },
+        classifyFailure: ExternalWidgetStartupRegistrar.classifyStartupFailure
+    ).loadAndRegister(in: engine)
 
+    #expect(result == .unavailable(.registrationConflict))
     #expect(await engine.descriptors().map(\.id) == [nativeID])
     _ = await engine.refresh(id: nativeID)
     #expect(await engine.snapshot(id: nativeID)?.content().text == "native")
@@ -204,7 +204,7 @@ func startupLoaderFailureLeavesPreviouslyRegisteredGroupUntouched() async throws
     )
     let engine = WidgetEngine()
 
-    try await oldRegistrar.loadAndRegister(in: engine)
+    _ = try await oldRegistrar.loadAndRegister(in: engine)
 
     let failingRegistrar = ExternalWidgetStartupRegistrar(
         loadDefinitions: {
@@ -212,10 +212,9 @@ func startupLoaderFailureLeavesPreviouslyRegisteredGroupUntouched() async throws
         }
     )
 
-    await #expect(throws: StartupRegistrationTestError.loadFailed) {
-        try await failingRegistrar.loadAndRegister(in: engine)
-    }
+    let result = try await failingRegistrar.loadAndRegister(in: engine)
 
+    #expect(result == .unavailable(.unknown))
     #expect(
         await engine.descriptors().map(\.id)
             == [oldDefinition.descriptor.id]
@@ -235,7 +234,7 @@ func startupCancellationDoesNotReplacePreviouslyRegisteredGroup() async throws {
     )
     let engine = WidgetEngine()
 
-    try await oldRegistrar.loadAndRegister(in: engine)
+    _ = try await oldRegistrar.loadAndRegister(in: engine)
 
     let cancelledRegistrar = ExternalWidgetStartupRegistrar(
         loadDefinitions: {
@@ -273,7 +272,7 @@ func stablePreferenceSurvivesTemporaryExternalWidgetAbsence() async throws {
         )
     )
 
-    try await ExternalWidgetStartupRegistrar(
+    _ = try await ExternalWidgetStartupRegistrar(
         loadDefinitions: { [definition] }
     ).loadAndRegister(in: engine)
     _ = await engine.refreshDue(
@@ -283,7 +282,7 @@ func stablePreferenceSurvivesTemporaryExternalWidgetAbsence() async throws {
         await engine.snapshot(id: definition.descriptor.id) != nil
     )
 
-    try await ExternalWidgetStartupRegistrar(
+    _ = try await ExternalWidgetStartupRegistrar(
         loadDefinitions: { [] }
     ).loadAndRegister(in: engine)
     #expect((await engine.descriptors()).isEmpty)
@@ -293,7 +292,7 @@ func stablePreferenceSurvivesTemporaryExternalWidgetAbsence() async throws {
             == preference
     )
 
-    try await ExternalWidgetStartupRegistrar(
+    _ = try await ExternalWidgetStartupRegistrar(
         loadDefinitions: { [definition] }
     ).loadAndRegister(in: engine)
     _ = await engine.refreshDue(
@@ -321,18 +320,96 @@ func successfulStartupReplacementRemovesDocumentsNoLongerPresent() async throws 
     )
     let engine = WidgetEngine()
 
-    try await ExternalWidgetStartupRegistrar(
+    let initialResult = try await ExternalWidgetStartupRegistrar(
         loadDefinitions: { [oldDefinition] }
     ).loadAndRegister(in: engine)
+    #expect(initialResult == .loaded(widgetCount: 1))
 
-    try await ExternalWidgetStartupRegistrar(
+    let replacementResult = try await ExternalWidgetStartupRegistrar(
         loadDefinitions: { [newDefinition] }
     ).loadAndRegister(in: engine)
+    #expect(replacementResult == .loaded(widgetCount: 1))
 
     #expect(
         await engine.descriptors().map(\.id)
             == [newDefinition.descriptor.id]
     )
+}
+
+@Test(arguments: [
+    (
+        ExternalWidgetDirectoryLoaderError.unsafeRoot,
+        ExternalWidgetStartupFailureReason.unsafeStorage
+    ),
+    (
+        ExternalWidgetDirectoryLoaderError.invalidFilename,
+        ExternalWidgetStartupFailureReason.unsafeStorage
+    ),
+    (
+        ExternalWidgetDirectoryLoaderError.unsafeDocumentEntry,
+        ExternalWidgetStartupFailureReason.unsafeStorage
+    ),
+    (
+        ExternalWidgetDirectoryLoaderError.tooManyDirectoryEntries,
+        ExternalWidgetStartupFailureReason.resourceLimit
+    ),
+    (
+        ExternalWidgetDirectoryLoaderError.tooManyDocuments,
+        ExternalWidgetStartupFailureReason.resourceLimit
+    ),
+    (
+        ExternalWidgetDirectoryLoaderError.documentTooLarge,
+        ExternalWidgetStartupFailureReason.resourceLimit
+    ),
+    (
+        ExternalWidgetDirectoryLoaderError.aggregateTooLarge,
+        ExternalWidgetStartupFailureReason.resourceLimit
+    ),
+    (
+        ExternalWidgetDirectoryLoaderError.invalidDocument,
+        ExternalWidgetStartupFailureReason.invalidDocuments
+    ),
+    (
+        ExternalWidgetDirectoryLoaderError.rootUnavailable,
+        ExternalWidgetStartupFailureReason.unreadableStorage
+    ),
+    (
+        ExternalWidgetDirectoryLoaderError.unreadableDocument,
+        ExternalWidgetStartupFailureReason.unreadableStorage
+    ),
+])
+func startupFailureClassificationIsSanitized(
+    error: ExternalWidgetDirectoryLoaderError,
+    expected: ExternalWidgetStartupFailureReason
+) {
+    #expect(
+        ExternalWidgetStartupRegistrar.classifyStartupFailure(error)
+            == expected
+    )
+}
+
+@Test
+func unknownStartupFailureDoesNotEscapeOriginalError() {
+    #expect(
+        ExternalWidgetStartupRegistrar.classifyStartupFailure(
+            StartupRegistrationTestError.loadFailed
+        ) == .unknown
+    )
+}
+
+@Test
+func successfulResultExposesOnlyNormalizedWidgetCount() async throws {
+    let definitions = [
+        startupExternalWidgetDefinition(id: "external.alpha.build"),
+        startupExternalWidgetDefinition(id: "external.beta.build"),
+    ]
+    let engine = WidgetEngine()
+
+    let result = try await ExternalWidgetStartupRegistrar(
+        loadDefinitions: { definitions }
+    ).loadAndRegister(in: engine)
+
+    #expect(result == .loaded(widgetCount: 2))
 }
 
 private func startupExternalWidgetDefinition(
