@@ -257,6 +257,9 @@ func activitySourceNamespaceUsesAnUnambiguousProviderPrefix() {
     #expect(sourceID.owns(itemID: "github-actions:42"))
     #expect(sourceID.owns(itemID: "github:review:7"))
     #expect(!sourceID.owns(itemID: "githubenterprise-actions:42"))
+    #expect(!sourceID.owns(itemID: "github"))
+    #expect(!sourceID.owns(itemID: "github-"))
+    #expect(!sourceID.owns(itemID: "github:"))
 }
 
 @Test(arguments: [
@@ -278,6 +281,33 @@ func activityAggregatorRejectsAmbiguousSourceIdentifiers(
         throws: ActivitySourceAggregationError.invalidSourceID(sourceID)
     ) {
         try await ActivitySourceAggregator(sources: [source]).load()
+    }
+}
+
+@Test(arguments: [
+    "alpha",
+    "alpha-",
+    "alpha:",
+])
+func activityAggregatorRejectsEmptyProviderItemIdentityPayload(
+    itemID: String
+) async {
+    let source = ClosureActivitySource(id: "alpha") {
+        ActivitySourceSnapshot(
+            items: [activitySourceItem(id: itemID)],
+            status: .available
+        )
+    }
+
+    await #expect(
+        throws: ActivitySourceAggregationError.invalidItemNamespace(
+            itemID: itemID,
+            sourceID: "alpha"
+        )
+    ) {
+        try await ActivitySourceAggregator(
+            sources: [source]
+        ).load()
     }
 }
 
