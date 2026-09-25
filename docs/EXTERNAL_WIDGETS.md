@@ -247,6 +247,19 @@ Startup health changes no registration semantics: it does not enable widgets,
 retry the loader, watch the filesystem, perform network requests, or add
 filesystem reads.
 
+### Settings presentation
+
+Settings renders only the sanitized startup-health presentation derived from
+the App-level enum:
+
+- not checked;
+- loading;
+- loaded, with the normalized widget count only;
+- unavailable, with one coarse reason sentence.
+
+Settings does not receive or render filesystem paths, filenames, raw JSON,
+widget/provider identifiers, rejected field values, or original error text.
+
 ## Module boundary
 
 `SchneeBarExternalWidgets` owns the external document and normalization rules.
