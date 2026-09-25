@@ -167,6 +167,7 @@ let project = Project(
                 .target(name: "SchneeBarWidgetFeature"),
                 .target(name: "SchneeBarActivityFeature"),
                 .target(name: "SchneeBarSystemProvider"),
+                .target(name: "SchneeBarExternalWidgets"),
                 .target(name: "SchneeBarPreferences"),
                 .target(name: "SchneeBarGitHub"),
                 .target(name: "SchneeBarGitHubKeychain"),
@@ -328,6 +329,7 @@ let project = Project(
             dependencies: [
                 .target(name: "SchneeBar"),
                 .target(name: "SchneeBarCore"),
+                .target(name: "SchneeBarExternalWidgets"),
                 .target(name: "SchneeBarGitHub"),
                 .target(name: "SchneeBarGitHubProfiles"),
                 .target(name: "SchneeBarGitHubFeature"),
