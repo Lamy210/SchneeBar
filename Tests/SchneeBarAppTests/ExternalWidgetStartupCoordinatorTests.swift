@@ -190,6 +190,67 @@ func wakeRetryCanSupersedeCancellationInsensitiveStaleAttempt() async throws {
 }
 
 @Test @MainActor
+func staleAttemptCleanupCannotClearNewActiveAttempt() async throws {
+    let counter = StartupCoordinatorCallCounter()
+    let firstGate = StartupCoordinatorGate()
+    let secondGate = StartupCoordinatorGate()
+    let coordinator = ExternalWidgetStartupCoordinator(
+        register: { _ in
+            let attempt = await counter.next()
+            switch attempt {
+            case 1:
+                await firstGate.waitUntilReleased()
+                return .loaded(widgetCount: 1)
+            case 2:
+                await secondGate.waitUntilReleased()
+                return .loaded(widgetCount: 2)
+            default:
+                Issue.record("Unexpected third startup registration")
+                return .loaded(widgetCount: 3)
+            }
+        }
+    )
+    let model = coordinatorRuntimeModel()
+    let engine = WidgetEngine()
+
+    let staleAttempt = Task { @MainActor in
+        try await coordinator.runIfNeeded(
+            in: engine,
+            model: model,
+            isCurrent: { true }
+        )
+    }
+    await firstGate.waitUntilStarted()
+
+    coordinator.handleSleep(model: model)
+
+    let currentAttempt = Task { @MainActor in
+        try await coordinator.runIfNeeded(
+            in: engine,
+            model: model,
+            isCurrent: { true }
+        )
+    }
+    await secondGate.waitUntilStarted()
+
+    await firstGate.release()
+    try await staleAttempt.value
+
+    try await coordinator.runIfNeeded(
+        in: engine,
+        model: model,
+        isCurrent: { true }
+    )
+    #expect(await counter.value() == 2)
+
+    await secondGate.release()
+    try await currentAttempt.value
+
+    #expect(coordinator.isFinished)
+    #expect(model.externalWidgetStartupHealth == .loaded(widgetCount: 2))
+}
+
+@Test @MainActor
 func startupCoordinatorPreservesCancellationAndAllowsWakeRetry() async {
     let coordinator = ExternalWidgetStartupCoordinator(
         register: { _ in
