@@ -4,9 +4,19 @@ import Testing
 
 private actor ServiceCredentialStore: GitHubCredentialStore {
     private var values: [GitHubCredentialKey: GitHubCredential] = [:]
+    private let loadDelayNanoseconds: UInt64
+    private var loadCount = 0
+
+    init(loadDelayNanoseconds: UInt64 = 0) {
+        self.loadDelayNanoseconds = loadDelayNanoseconds
+    }
 
     func load(for key: GitHubCredentialKey) async throws -> GitHubCredential? {
-        values[key]
+        loadCount += 1
+        if loadDelayNanoseconds > 0 {
+            try await Task.sleep(nanoseconds: loadDelayNanoseconds)
+        }
+        return values[key]
     }
 
     func save(_ credential: GitHubCredential, for key: GitHubCredentialKey) async throws {
@@ -15,6 +25,10 @@ private actor ServiceCredentialStore: GitHubCredentialStore {
 
     func delete(for key: GitHubCredentialKey) async throws {
         values.removeValue(forKey: key)
+    }
+
+    func recordedLoadCount() -> Int {
+        loadCount
     }
 }
 
@@ -208,7 +222,9 @@ func concurrentActionsPollingSharesOneRefreshRotation() async throws {
     let connection = try serviceConnection()
     let identity = GitHubAccountIdentity(id: "100", login: "octocat")
     let key = GitHubCredentialKey(connectionID: connection.id, accountID: identity.id)
-    let credentialStore = ServiceCredentialStore()
+    let credentialStore = ServiceCredentialStore(
+        loadDelayNanoseconds: 100_000_000
+    )
     try await credentialStore.save(
         GitHubCredential(
             accessToken: "old_access",
@@ -259,6 +275,7 @@ func concurrentActionsPollingSharesOneRefreshRotation() async throws {
 
     _ = try await (first, second)
 
+    #expect(await credentialStore.recordedLoadCount() == 1)
     #expect(await refreshTransport.recordedRequests().count == 1)
     let actionRequests = await actionsTransport.recordedRequests()
     #expect(actionRequests.count == 2)
