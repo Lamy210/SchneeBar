@@ -1,6 +1,6 @@
 import Foundation
 import SchneeBarCore
-import SchneeBarExternalWidgets
+@testable import SchneeBarExternalWidgets
 import Testing
 @testable import SchneeBar
 
@@ -65,6 +65,97 @@ private actor StartupCoordinatorGate {
 
 private enum StartupCoordinatorTestError: Error {
     case failed
+}
+
+@Test @MainActor
+func startupCoordinatorIntegratesJSONLoaderRegistrarAndEngine() async throws {
+    let fileManager = FileManager.default
+    let trustedParent = fileManager.temporaryDirectory
+        .appendingPathComponent(
+            "SchneeBarStartupIntegration-\(UUID().uuidString)",
+            isDirectory: true
+        )
+    let owner = trustedParent.appendingPathComponent(
+        "SchneeBar",
+        isDirectory: true
+    )
+    let root = owner.appendingPathComponent(
+        "ExternalWidgets",
+        isDirectory: true
+    )
+    try fileManager.createDirectory(
+        at: root,
+        withIntermediateDirectories: true
+    )
+    defer {
+        try? fileManager.removeItem(at: trustedParent)
+    }
+
+    let document = Data(
+        #"""
+        {
+          "schemaVersion": 1,
+          "id": "external.integration.disk",
+          "displayName": "Integration Disk",
+          "defaultEnabled": false,
+          "defaultOrder": 1200,
+          "defaultRepresentation": "normal",
+          "visibility": {"kind": "always"},
+          "refresh": {"kind": "manual"},
+          "snapshot": {
+            "severity": "nominal",
+            "priority": "normal",
+            "compact": {
+              "text": "OK",
+              "accessibilityLabel": "Integration widget okay"
+            },
+            "normal": {
+              "text": "Integration widget okay",
+              "accessibilityLabel": "Integration widget okay"
+            }
+          }
+        }
+        """#.utf8
+    )
+    try document.write(
+        to: root.appendingPathComponent("integration.json")
+    )
+
+    let loader = ExternalWidgetDirectoryLoader(rootURL: root)
+    let coordinator = ExternalWidgetStartupCoordinator(
+        register: { engine in
+            let registrar = ExternalWidgetStartupRegistrar(
+                loadDefinitions: {
+                    try await loader.load(
+                        now: Date(timeIntervalSince1970: 2_000)
+                    )
+                }
+            )
+            return try await registrar.loadAndRegister(in: engine)
+        }
+    )
+    let model = coordinatorRuntimeModel()
+    let engine = WidgetEngine()
+
+    try await coordinator.runIfNeeded(
+        in: engine,
+        model: model,
+        isCurrent: { true }
+    )
+
+    #expect(coordinator.isFinished)
+    #expect(model.externalWidgetStartupHealth == .loaded(widgetCount: 1))
+
+    let descriptors = await engine.descriptors()
+    let descriptor = try #require(descriptors.first)
+    #expect(descriptor.id == "external.integration.disk")
+    #expect(!descriptor.defaultIsEnabled)
+    #expect(descriptor.refreshPolicy == .manual)
+
+    _ = await engine.refreshDue(
+        at: Date(timeIntervalSince1970: 2_001)
+    )
+    #expect(await engine.snapshot(id: descriptor.id) == nil)
 }
 
 @Test @MainActor
