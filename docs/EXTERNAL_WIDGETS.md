@@ -247,6 +247,12 @@ Startup health changes no registration semantics: it does not enable widgets,
 retry the loader, watch the filesystem, perform network requests, or add
 filesystem reads.
 
+Settings may render this state using fixed SchneeBar-owned status and detail
+copy. The presentation receives only the sanitized health enum/count; it does
+not receive loader errors, paths, filenames, document contents, widget IDs, or
+provider values. The Settings slice intentionally exposes no retry/import/open-
+folder action.
+
 ## Module boundary
 
 `SchneeBarExternalWidgets` owns the external document and normalization rules.

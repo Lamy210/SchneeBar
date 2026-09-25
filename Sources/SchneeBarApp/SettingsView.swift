@@ -18,6 +18,20 @@ struct SettingsView: View {
                 LabeledContent("Platform", value: "macOS 15+")
             }
 
+            Section("External Widgets") {
+                LabeledContent(
+                    "Startup",
+                    value: externalWidgetHealthPresentation.status
+                )
+
+                Label(
+                    externalWidgetHealthPresentation.detail,
+                    systemImage: externalWidgetHealthPresentation.systemImage
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
+
             WidgetSettingsView(
                 descriptors: model.orderedDescriptors,
                 configuration: model.configuration,
@@ -147,6 +161,14 @@ struct SettingsView: View {
                 .frame(minWidth: 520, minHeight: 320)
             }
         }
+    }
+
+    private var externalWidgetHealthPresentation:
+        ExternalWidgetStartupHealthPresentation
+    {
+        ExternalWidgetStartupHealthPresentation.make(
+            from: model.externalWidgetStartupHealth
+        )
     }
 
     private var recoveryIsPresented: Binding<Bool> {
