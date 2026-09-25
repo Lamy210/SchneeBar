@@ -30,33 +30,6 @@ enum ExternalWidgetStartupHealth:
     case unavailable(ExternalWidgetStartupFailureReason)
 }
 
-enum ExternalWidgetStartupHealthPolicy {
-    static func terminalHealth(
-        for result: ExternalWidgetStartupRegistrationResult,
-        generation: WidgetRuntimeLifecycle.Generation,
-        lifecycle: WidgetRuntimeLifecycle
-    ) -> ExternalWidgetStartupHealth? {
-        guard lifecycle.isCurrent(generation) else {
-            return nil
-        }
-
-        switch result {
-        case let .loaded(widgetCount):
-            return .loaded(widgetCount: widgetCount)
-        case let .unavailable(reason):
-            return .unavailable(reason)
-        }
-    }
-
-    static func healthAfterSleep(
-        current: ExternalWidgetStartupHealth,
-        startupFinished: Bool
-    ) -> ExternalWidgetStartupHealth {
-        startupFinished ? current : .notAttempted
-    }
-}
-
-
 struct ExternalWidgetStartupHealthPresentation:
     Equatable,
     Sendable
