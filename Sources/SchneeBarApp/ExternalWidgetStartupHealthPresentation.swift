@@ -25,12 +25,13 @@ struct ExternalWidgetStartupHealthPresentation:
             )
 
         case let .loaded(widgetCount):
-            let detail = if widgetCount == 0 {
-                "No external widgets were found at startup."
+            let detail: String
+            if widgetCount == 0 {
+                detail = "No external widgets were found at startup."
             } else if widgetCount == 1 {
-                "1 external widget was loaded at startup."
+                detail = "1 external widget was loaded at startup."
             } else {
-                "\(widgetCount) external widgets were loaded at startup."
+                detail = "\(widgetCount) external widgets were loaded at startup."
             }
             return Self(
                 status: "Loaded",
@@ -52,17 +53,17 @@ struct ExternalWidgetStartupHealthPresentation:
     ) -> String {
         switch reason {
         case .unsafeStorage:
-            "External widget storage did not pass safety checks."
+            return "External widget storage did not pass safety checks."
         case .resourceLimit:
-            "External widget files exceed supported startup limits."
+            return "External widget files exceed supported startup limits."
         case .invalidDocuments:
-            "One or more external widget documents are invalid."
+            return "One or more external widget documents are invalid."
         case .unreadableStorage:
-            "External widget storage could not be read."
+            return "External widget storage could not be read."
         case .registrationConflict:
-            "External widgets conflict with an existing widget provider."
+            return "External widgets conflict with an existing widget provider."
         case .unknown:
-            "External widgets could not be loaded."
+            return "External widgets could not be loaded."
         }
     }
 }
