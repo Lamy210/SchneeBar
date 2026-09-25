@@ -12,11 +12,13 @@ final class MenuBarController: NSObject {
     private let popover: NSPopover
     private let runtimeModel: WidgetRuntimeModel
     private let activityRuntimeModel: ActivityRuntimeModel
+    private let externalWidgetRegistrar: ExternalWidgetStartupRegistrar?
     private let widgetEngine: WidgetEngine
     private let workspaceNotificationCenter: NotificationCenter
     private var refreshTask: Task<Void, Never>?
     private var immediateActivityRefreshTask: Task<Void, Never>?
     private var widgetRuntimeIsConfigured = false
+    private var externalWidgetStartupFinished = false
     private var activityRefreshIsPending = false
     private var runtimeLifecycle = WidgetRuntimeLifecycle()
     private var activeRuntimeGeneration: WidgetRuntimeLifecycle.Generation?
@@ -24,6 +26,7 @@ final class MenuBarController: NSObject {
     init(
         runtimeModel: WidgetRuntimeModel,
         activityRuntimeModel: ActivityRuntimeModel,
+        externalWidgetRegistrar: ExternalWidgetStartupRegistrar? = nil,
         loadActivitySnapshot:
             @escaping @Sendable () async throws -> ActivityAggregateSnapshot
     ) {
@@ -31,6 +34,7 @@ final class MenuBarController: NSObject {
         popover = NSPopover()
         self.runtimeModel = runtimeModel
         self.activityRuntimeModel = activityRuntimeModel
+        self.externalWidgetRegistrar = externalWidgetRegistrar
         widgetEngine = WidgetEngine(providers: [
             ClockWidgetProvider(),
             CPUWidgetProvider(),
@@ -192,6 +196,23 @@ final class MenuBarController: NSObject {
             if loadPreferences {
                 await model.loadPreferences()
                 guard isCurrentRuntime(generation) else { return }
+            }
+
+            if !externalWidgetStartupFinished,
+               let externalWidgetRegistrar
+            {
+                do {
+                    try await externalWidgetRegistrar.loadAndRegister(
+                        in: engine
+                    )
+                    guard isCurrentRuntime(generation) else { return }
+                    externalWidgetStartupFinished = true
+                } catch is CancellationError {
+                    return
+                } catch {
+                    guard isCurrentRuntime(generation) else { return }
+                    externalWidgetStartupFinished = true
+                }
             }
 
             await engine.setConfiguration(model.configuration)
