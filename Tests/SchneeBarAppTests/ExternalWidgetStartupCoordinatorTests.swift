@@ -19,6 +19,11 @@ private actor StartupCoordinatorCallCounter {
         count += 1
     }
 
+    func next() -> Int {
+        count += 1
+        return count
+    }
+
     func value() -> Int {
         count
     }
@@ -99,6 +104,89 @@ func startupCoordinatorRunsSuccessfulRegistrationOnlyOnce() async throws {
 
     coordinator.handleSleep(model: model)
     #expect(model.externalWidgetStartupHealth == .loaded(widgetCount: 1))
+}
+
+@Test @MainActor
+func concurrentRunInSameGenerationDoesNotRegisterTwice() async throws {
+    let counter = StartupCoordinatorCallCounter()
+    let gate = StartupCoordinatorGate()
+    let coordinator = ExternalWidgetStartupCoordinator(
+        register: { _ in
+            await counter.increment()
+            await gate.waitUntilReleased()
+            return .loaded(widgetCount: 1)
+        }
+    )
+    let model = coordinatorRuntimeModel()
+    let engine = WidgetEngine()
+
+    let first = Task { @MainActor in
+        try await coordinator.runIfNeeded(
+            in: engine,
+            model: model,
+            isCurrent: { true }
+        )
+    }
+    await gate.waitUntilStarted()
+
+    try await coordinator.runIfNeeded(
+        in: engine,
+        model: model,
+        isCurrent: { true }
+    )
+
+    #expect(await counter.value() == 1)
+
+    await gate.release()
+    try await first.value
+
+    #expect(coordinator.isFinished)
+    #expect(model.externalWidgetStartupHealth == .loaded(widgetCount: 1))
+}
+
+@Test @MainActor
+func wakeRetryCanSupersedeCancellationInsensitiveStaleAttempt() async throws {
+    let counter = StartupCoordinatorCallCounter()
+    let firstAttemptGate = StartupCoordinatorGate()
+    let coordinator = ExternalWidgetStartupCoordinator(
+        register: { _ in
+            let attempt = await counter.next()
+            if attempt == 1 {
+                await firstAttemptGate.waitUntilReleased()
+                return .loaded(widgetCount: 1)
+            }
+            return .loaded(widgetCount: 2)
+        }
+    )
+    let model = coordinatorRuntimeModel()
+    let engine = WidgetEngine()
+
+    let staleAttempt = Task { @MainActor in
+        try await coordinator.runIfNeeded(
+            in: engine,
+            model: model,
+            isCurrent: { true }
+        )
+    }
+    await firstAttemptGate.waitUntilStarted()
+
+    coordinator.handleSleep(model: model)
+    #expect(model.externalWidgetStartupHealth == .notAttempted)
+
+    try await coordinator.runIfNeeded(
+        in: engine,
+        model: model,
+        isCurrent: { true }
+    )
+
+    #expect(await counter.value() == 2)
+    #expect(coordinator.isFinished)
+    #expect(model.externalWidgetStartupHealth == .loaded(widgetCount: 2))
+
+    await firstAttemptGate.release()
+    try await staleAttempt.value
+
+    #expect(model.externalWidgetStartupHealth == .loaded(widgetCount: 2))
 }
 
 @Test @MainActor
