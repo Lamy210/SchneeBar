@@ -58,6 +58,19 @@ SchneeBar may choose its preferred supported version from that evidence-backed r
 
 Do not add a runtime `/api/v3/versions` probe until the endpoint is documented for GHES in official API documentation/OpenAPI, or verified against a reproducible real GHES fixture with defined authentication, response schema, and absence behavior.
 
+Verification on 2026-09-25 inspected the current bundled `paths` objects in
+`github/rest-api-description`:
+
+- GHES 3.20: neither `ghes-3.20.2022-11-28.json` nor the unversioned bundle contains `/versions`;
+- GHES 3.21: the `2022-11-28`, `2026-03-10`, and unversioned bundles contain no `/versions`;
+- GHES 3.22: the `2022-11-28`, `2026-03-10`, and unversioned bundles contain no `/versions`;
+- as a control, the current GitHub.com and GHEC bundles do contain `GET /versions` with operation ID `meta/get-all-versions` and documented `200` / `404` responses.
+
+The generic GHES API-versioning prose is therefore not sufficient evidence to
+probe `/api/v3/versions` on GHES 3.20-3.22. Absence from the official GHES
+OpenAPI is treated as an evidence boundary, not as permission to guess an
+undocumented endpoint.
+
 Unknown or untested GHES releases must not inherit the newest known API version by assumption.
 
 ## Consequences
