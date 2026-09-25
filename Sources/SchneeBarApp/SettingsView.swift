@@ -18,6 +18,8 @@ struct SettingsView: View {
                 LabeledContent("Platform", value: "macOS 15+")
             }
 
+            externalWidgetStartupSection
+
             WidgetSettingsView(
                 descriptors: model.orderedDescriptors,
                 configuration: model.configuration,
@@ -145,6 +147,29 @@ struct SettingsView: View {
                     description: Text("Close this sheet and refresh the GitHub connection list.")
                 )
                 .frame(minWidth: 520, minHeight: 320)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var externalWidgetStartupSection: some View {
+        let presentation = model.externalWidgetStartupHealth.presentation
+
+        Section("External Widgets") {
+            LabeledContent("Startup") {
+                VStack(alignment: .trailing, spacing: 4) {
+                    Label(
+                        presentation.title,
+                        systemImage: presentation.systemImage
+                    )
+                    .labelStyle(.titleAndIcon)
+
+                    Text(presentation.detail)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.trailing)
+                }
+                .accessibilityElement(children: .combine)
             }
         }
     }
