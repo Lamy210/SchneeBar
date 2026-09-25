@@ -219,6 +219,34 @@ Consequences:
 - native/unrelated provider IDs cannot be replaced by the external group;
 - no directory watcher or periodic filesystem polling is introduced.
 
+## Startup health diagnostics
+
+Startup registration exposes only a sanitized App-level health state:
+
+- `notAttempted`;
+- `loading`;
+- `loaded(widgetCount)`;
+- `unavailable(reason)`.
+
+Unavailable reasons are coarse and stable: unsafe storage, resource limit,
+invalid documents, unreadable storage, registration conflict, or unknown.
+
+The diagnostic state never retains:
+
+- filesystem paths or filenames;
+- raw JSON or decoding payloads;
+- widget IDs, display names, provider strings, or rejected values;
+- the original loader or registration error.
+
+Cancellation propagates instead of becoming `unavailable`. Runtime generation
+checks reject terminal results from startup work invalidated by sleep/wake. When
+sleep interrupts unfinished startup work, visible health returns to
+`notAttempted` so a wake retry cannot leave a stale `loading` state.
+
+Startup health changes no registration semantics: it does not enable widgets,
+retry the loader, watch the filesystem, perform network requests, or add
+filesystem reads.
+
 ## Module boundary
 
 `SchneeBarExternalWidgets` owns the external document and normalization rules.
