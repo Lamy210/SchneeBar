@@ -1,5 +1,3 @@
-import SchneeBarCore
-
 enum ExternalWidgetStartupFailureReason:
     Equatable,
     Sendable
@@ -32,14 +30,8 @@ enum ExternalWidgetStartupHealth:
 
 enum ExternalWidgetStartupHealthPolicy {
     static func terminalHealth(
-        for result: ExternalWidgetStartupRegistrationResult,
-        generation: WidgetRuntimeLifecycle.Generation,
-        lifecycle: WidgetRuntimeLifecycle
-    ) -> ExternalWidgetStartupHealth? {
-        guard lifecycle.isCurrent(generation) else {
-            return nil
-        }
-
+        for result: ExternalWidgetStartupRegistrationResult
+    ) -> ExternalWidgetStartupHealth {
         switch result {
         case let .loaded(widgetCount):
             return .loaded(widgetCount: widgetCount)
