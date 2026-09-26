@@ -106,6 +106,7 @@ public struct GitHubPullRequestMetadataClient: Sendable {
             .appendingPathComponent(String(number), isDirectory: false)
 
         var request = URLRequest(url: url)
+        GitHubRequestHeaderPolicy.apply(to: &request)
         request.httpMethod = "GET"
         request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")

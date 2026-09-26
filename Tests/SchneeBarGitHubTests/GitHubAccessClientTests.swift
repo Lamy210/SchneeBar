@@ -69,6 +69,7 @@ func loadsAuthenticatedAccountWithHostedAPIHeaders() async throws {
     #expect(request.url?.absoluteString == "https://api.github.com/user")
     #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer ghu_access")
     #expect(request.value(forHTTPHeaderField: "Accept") == "application/vnd.github+json")
+    #expect(request.value(forHTTPHeaderField: "User-Agent") == "SchneeBar")
     #expect(request.value(forHTTPHeaderField: "X-GitHub-Api-Version") == "2026-03-10")
 }
 

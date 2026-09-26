@@ -218,6 +218,7 @@ public struct GitHubEnvironmentClient: Sendable {
         }
 
         var request = URLRequest(url: url)
+        GitHubRequestHeaderPolicy.apply(to: &request)
         request.httpMethod = "GET"
         request.setValue(
             "application/vnd.github+json",

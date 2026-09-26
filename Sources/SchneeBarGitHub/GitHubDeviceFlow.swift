@@ -270,6 +270,7 @@ public struct GitHubDeviceFlowClient: Sendable {
         parameters: [String: String]
     ) async throws -> Response {
         var request = URLRequest(url: url)
+        GitHubRequestHeaderPolicy.apply(to: &request)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         request.setValue(

@@ -65,6 +65,7 @@ func beginsDeviceFlowWithoutClientSecret() async throws {
 
     let request = try #require(await transport.recordedRequests().last)
     #expect(request.url?.absoluteString == "https://github.com/login/device/code")
+    #expect(request.value(forHTTPHeaderField: "User-Agent") == "SchneeBar")
     let body = String(data: try #require(request.httpBody), encoding: .utf8) ?? ""
     #expect(body.contains("client_id=Iv1.public-client-id"))
     #expect(!body.contains("client_secret"))

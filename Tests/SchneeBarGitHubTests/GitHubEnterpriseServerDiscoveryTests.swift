@@ -59,6 +59,10 @@ func discoversSupportedEnterpriseServerVersionFromMetaEndpoint() async throws {
     #expect(await transport.lastRequest()?.value(forHTTPHeaderField: "Accept") == "application/vnd.github+json")
     #expect(
         await transport.lastRequest()?
+            .value(forHTTPHeaderField: "User-Agent") == "SchneeBar"
+    )
+    #expect(
+        await transport.lastRequest()?
             .value(forHTTPHeaderField: "X-GitHub-Api-Version") == nil
     )
 }

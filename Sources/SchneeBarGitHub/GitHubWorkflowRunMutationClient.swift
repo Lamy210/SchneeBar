@@ -123,6 +123,7 @@ public struct GitHubWorkflowRunMutationClient: Sendable {
             )
 
         var request = URLRequest(url: url)
+        GitHubRequestHeaderPolicy.apply(to: &request)
         request.httpMethod = "POST"
         request.setValue(
             "application/vnd.github+json",
