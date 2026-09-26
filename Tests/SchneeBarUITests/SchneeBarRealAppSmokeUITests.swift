@@ -5,6 +5,7 @@ final class SchneeBarRealAppSmokeUITests: XCTestCase {
         continueAfterFailure = false
     }
 
+    @MainActor
     func testSettingsShowsExternalWidgetStartupHealth() {
         let app = XCUIApplication()
 
