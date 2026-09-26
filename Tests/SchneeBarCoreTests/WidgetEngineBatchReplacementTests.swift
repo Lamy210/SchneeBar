@@ -104,6 +104,7 @@ func providerGroupNamespaceIsCanonicalAndBounded() {
         "external:widgets",
         "external-widgets",
         "external widgets",
+        "external\nwidgets",
         String(repeating: "a", count: 65),
     ] {
         #expect(
