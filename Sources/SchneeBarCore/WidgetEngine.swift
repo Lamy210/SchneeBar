@@ -49,11 +49,13 @@ public struct WidgetProviderGroupID: Hashable, Sendable {
 
 public enum WidgetProviderRegistrationError: Error, Equatable, Sendable {
     case invalidProviderID
+    case invalidRefreshPolicy
 }
 
 public enum WidgetProviderBatchUpdateError: Error, Equatable, Sendable {
     case invalidProviderGroupID
     case invalidProviderID
+    case invalidRefreshPolicy
     case duplicateProviderID(WidgetID)
     case providerAlreadyRegistered(WidgetID)
 }
@@ -101,6 +103,14 @@ public actor WidgetEngine {
             "Trusted WidgetEngine providers must use valid provider IDs."
         )
         precondition(
+            registrations.allSatisfy {
+                Self.hasFiniteRefreshPolicy(
+                    $0.descriptor.refreshPolicy
+                )
+            },
+            "Trusted WidgetEngine providers must use finite refresh policies."
+        )
+        precondition(
             Set(ids).count == ids.count,
             "Trusted WidgetEngine providers must use unique IDs."
         )
@@ -118,6 +128,11 @@ public actor WidgetEngine {
         let id = registration.descriptor.id
         guard id.isValidProviderID else {
             throw WidgetProviderRegistrationError.invalidProviderID
+        }
+        guard Self.hasFiniteRefreshPolicy(
+            registration.descriptor.refreshPolicy
+        ) else {
+            throw WidgetProviderRegistrationError.invalidRefreshPolicy
         }
 
         detachFromProviderGroups(id: id)
@@ -149,6 +164,13 @@ public actor WidgetEngine {
         for registration in registrations {
             guard registration.descriptor.id.isValidProviderID else {
                 throw WidgetProviderBatchUpdateError.invalidProviderID
+            }
+        }
+        for registration in registrations {
+            guard Self.hasFiniteRefreshPolicy(
+                registration.descriptor.refreshPolicy
+            ) else {
+                throw WidgetProviderBatchUpdateError.invalidRefreshPolicy
             }
         }
 
@@ -378,6 +400,19 @@ public actor WidgetEngine {
             isServingLastKnownGood: failures > 0 && hasSnapshot,
             snapshotGeneratedAt: snapshots[id]?.generatedAt
         )
+    }
+
+    private static func hasFiniteRefreshPolicy(
+        _ policy: WidgetRefreshPolicy
+    ) -> Bool {
+        switch policy {
+        case .manual:
+            return true
+        case let .interval(interval):
+            return interval.isFinite
+        case let .adaptive(active, idle):
+            return active.isFinite && idle.isFinite
+        }
     }
 
     private func detachFromProviderGroups(id: WidgetID) {
