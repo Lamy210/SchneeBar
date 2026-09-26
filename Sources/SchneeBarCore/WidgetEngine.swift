@@ -114,13 +114,14 @@ public actor WidgetEngine {
     public func register(_ provider: any WidgetProvider) throws {
         try Task.checkCancellation()
 
-        let id = provider.descriptor.id
+        let registration = RegisteredWidgetProvider(provider)
+        let id = registration.descriptor.id
         guard id.isValidProviderID else {
             throw WidgetProviderRegistrationError.invalidProviderID
         }
 
         detachFromProviderGroups(id: id)
-        providers[id] = RegisteredWidgetProvider(provider)
+        providers[id] = registration
         invalidateProviderRevision(id: id)
         resetRuntimeState(id: id)
     }
@@ -142,17 +143,19 @@ public actor WidgetEngine {
             throw WidgetProviderBatchUpdateError.invalidProviderGroupID
         }
 
-        for provider in replacements {
-            guard provider.descriptor.id.isValidProviderID else {
+        let registrations = replacements.map(
+            RegisteredWidgetProvider.init
+        )
+        for registration in registrations {
+            guard registration.descriptor.id.isValidProviderID else {
                 throw WidgetProviderBatchUpdateError.invalidProviderID
             }
         }
 
         var replacementByID: [WidgetID: RegisteredWidgetProvider] = [:]
-        replacementByID.reserveCapacity(replacements.count)
+        replacementByID.reserveCapacity(registrations.count)
 
-        for provider in replacements {
-            let registration = RegisteredWidgetProvider(provider)
+        for registration in registrations {
             let id = registration.descriptor.id
             guard replacementByID[id] == nil else {
                 throw WidgetProviderBatchUpdateError.duplicateProviderID(id)
