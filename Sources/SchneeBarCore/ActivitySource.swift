@@ -139,14 +139,13 @@ public enum ActivitySourceAggregationError: Error, Equatable, Sendable {
 }
 
 public struct ActivitySourceAggregator: Sendable {
-    private let sources: [any ActivitySource]
+    private let registrations: [RegisteredActivitySource]
 
     public init(sources: [any ActivitySource]) {
-        self.sources = sources
+        registrations = sources.map(RegisteredActivitySource.init)
     }
 
     public func load() async throws -> ActivityAggregateSnapshot {
-        let registrations = sources.map(RegisteredActivitySource.init)
         var seenSourceIDs = Set<ActivitySourceID>()
         for registration in registrations {
             guard registration.id.isValidNamespace else {
