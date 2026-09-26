@@ -58,8 +58,22 @@ public enum WidgetProviderBatchUpdateError: Error, Equatable, Sendable {
     case providerAlreadyRegistered(WidgetID)
 }
 
+private enum WidgetProviderContractViolation: Error {
+    case snapshotDescriptorMismatch
+}
+
+private struct RegisteredWidgetProvider: Sendable {
+    let provider: any WidgetProvider
+    let descriptor: WidgetDescriptor
+
+    init(_ provider: any WidgetProvider) {
+        self.provider = provider
+        descriptor = provider.descriptor
+    }
+}
+
 public actor WidgetEngine {
-    private var providers: [WidgetID: any WidgetProvider]
+    private var providers: [WidgetID: RegisteredWidgetProvider]
     private var providerGroups: [WidgetProviderGroupID: Set<WidgetID>] = [:]
     private var snapshots: [WidgetID: WidgetSnapshot] = [:]
     private var lastAttemptedAt: [WidgetID: Date] = [:]
@@ -80,7 +94,8 @@ public actor WidgetEngine {
         providers: [any WidgetProvider] = [],
         configuration: WidgetConfiguration = .init()
     ) {
-        let ids = providers.map(\.descriptor.id)
+        let registrations = providers.map(RegisteredWidgetProvider.init)
+        let ids = registrations.map(\.descriptor.id)
         precondition(
             ids.allSatisfy { $0.isValidProviderID },
             "Trusted WidgetEngine providers must use valid provider IDs."
@@ -91,7 +106,7 @@ public actor WidgetEngine {
         )
 
         self.providers = Dictionary(
-            uniqueKeysWithValues: zip(ids, providers)
+            uniqueKeysWithValues: zip(ids, registrations)
         )
         self.configuration = configuration
     }
@@ -99,13 +114,14 @@ public actor WidgetEngine {
     public func register(_ provider: any WidgetProvider) throws {
         try Task.checkCancellation()
 
-        let id = provider.descriptor.id
+        let registration = RegisteredWidgetProvider(provider)
+        let id = registration.descriptor.id
         guard id.isValidProviderID else {
             throw WidgetProviderRegistrationError.invalidProviderID
         }
 
         detachFromProviderGroups(id: id)
-        providers[id] = provider
+        providers[id] = registration
         invalidateProviderRevision(id: id)
         resetRuntimeState(id: id)
     }
@@ -127,21 +143,24 @@ public actor WidgetEngine {
             throw WidgetProviderBatchUpdateError.invalidProviderGroupID
         }
 
-        for provider in replacements {
-            guard provider.descriptor.id.isValidProviderID else {
+        let registrations = replacements.map(
+            RegisteredWidgetProvider.init
+        )
+        for registration in registrations {
+            guard registration.descriptor.id.isValidProviderID else {
                 throw WidgetProviderBatchUpdateError.invalidProviderID
             }
         }
 
-        var replacementByID: [WidgetID: any WidgetProvider] = [:]
-        replacementByID.reserveCapacity(replacements.count)
+        var replacementByID: [WidgetID: RegisteredWidgetProvider] = [:]
+        replacementByID.reserveCapacity(registrations.count)
 
-        for provider in replacements {
-            let id = provider.descriptor.id
+        for registration in registrations {
+            let id = registration.descriptor.id
             guard replacementByID[id] == nil else {
                 throw WidgetProviderBatchUpdateError.duplicateProviderID(id)
             }
-            replacementByID[id] = provider
+            replacementByID[id] = registration
         }
 
         let previousIDs = providerGroups[groupID] ?? []
@@ -179,8 +198,8 @@ public actor WidgetEngine {
         let previousConfiguration = self.configuration
         self.configuration = configuration
 
-        for (id, provider) in providers {
-            let descriptor = provider.descriptor
+        for (id, registration) in providers {
+            let descriptor = registration.descriptor
             let wasEnabled = previousConfiguration.isEnabled(descriptor)
             let isEnabled = configuration.isEnabled(descriptor)
             if !wasEnabled && isEnabled {
@@ -208,13 +227,19 @@ public actor WidgetEngine {
 
     @discardableResult
     public func refresh(id: WidgetID, at attemptedAt: Date = .now) async -> WidgetSnapshot? {
-        guard let provider = providers[id] else { return nil }
+        guard let registration = providers[id] else { return nil }
+        let provider = registration.provider
+        let registeredDescriptor = registration.descriptor
         let providerRevision = providerRevision[id] ?? 0
         let sequence = nextRefreshSequence(id: id)
         lastAttemptedAt[id] = attemptedAt
 
         do {
             let snapshot = try await provider.snapshot()
+            guard snapshot.descriptor == registeredDescriptor else {
+                throw WidgetProviderContractViolation
+                    .snapshotDescriptorMismatch
+            }
             guard isCurrentProviderRevision(providerRevision, id: id),
                   canApplyRefresh(sequence, id: id)
             else {
@@ -264,12 +289,12 @@ public actor WidgetEngine {
         at now: Date = .now,
         maximum: TimeInterval = 60
     ) -> TimeInterval {
-        let intervals = providers.compactMap { id, provider -> TimeInterval? in
-            guard configuration.isEnabled(provider.descriptor) else { return nil }
+        let intervals = providers.compactMap { id, registration -> TimeInterval? in
+            guard configuration.isEnabled(registration.descriptor) else { return nil }
             guard let lastAttempted = lastAttemptedAt[id] else { return 0 }
 
             let severity = snapshots[id]?.severity ?? .unavailable
-            guard let interval = provider.descriptor.refreshPolicy.interval(for: severity) else {
+            guard let interval = registration.descriptor.refreshPolicy.interval(for: severity) else {
                 return nil
             }
 
@@ -291,8 +316,11 @@ public actor WidgetEngine {
 
     public func diagnostics() -> [WidgetRuntimeDiagnostic] {
         providers
-            .map { id, provider in
-                makeDiagnostic(id: id, descriptor: provider.descriptor)
+            .map { id, registration in
+                makeDiagnostic(
+                    id: id,
+                    descriptor: registration.descriptor
+                )
             }
             .sorted { lhs, rhs in
                 let lhsOrder = configuration.order(for: lhs.descriptor)
@@ -409,12 +437,12 @@ public actor WidgetEngine {
     }
 
     private func isRefreshDue(id: WidgetID, at now: Date) -> Bool {
-        guard let provider = providers[id] else { return false }
-        guard configuration.isEnabled(provider.descriptor) else { return false }
+        guard let registration = providers[id] else { return false }
+        guard configuration.isEnabled(registration.descriptor) else { return false }
         guard let lastAttempted = lastAttemptedAt[id] else { return true }
 
         let severity = snapshots[id]?.severity ?? .unavailable
-        guard let interval = provider.descriptor.refreshPolicy.interval(for: severity) else {
+        guard let interval = registration.descriptor.refreshPolicy.interval(for: severity) else {
             return false
         }
 

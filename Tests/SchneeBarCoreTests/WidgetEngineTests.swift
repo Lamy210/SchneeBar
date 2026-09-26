@@ -86,6 +86,83 @@ private actor AlwaysFailingWidgetProvider: WidgetProvider {
     }
 }
 
+private actor SnapshotContractProvider: WidgetProvider {
+    nonisolated let descriptor: WidgetDescriptor
+    private var snapshots: [WidgetSnapshot]
+
+    init(
+        descriptor: WidgetDescriptor,
+        snapshots: [WidgetSnapshot]
+    ) {
+        self.descriptor = descriptor
+        self.snapshots = snapshots
+    }
+
+    func snapshot() async throws -> WidgetSnapshot {
+        guard !snapshots.isEmpty else {
+            throw SnapshotContractError.exhausted
+        }
+        return snapshots.removeFirst()
+    }
+
+    private enum SnapshotContractError: Error {
+        case exhausted
+    }
+}
+
+private final class MutableDescriptorWidgetProvider:
+    WidgetProvider,
+    @unchecked Sendable
+{
+    var descriptor: WidgetDescriptor
+
+    init(descriptor: WidgetDescriptor) {
+        self.descriptor = descriptor
+    }
+
+    func snapshot() async throws -> WidgetSnapshot {
+        makeSnapshot(
+            descriptor: descriptor,
+            severity: .nominal,
+            priority: .normal,
+            text: "current"
+        )
+    }
+}
+
+private final class SequencedDescriptorWidgetProvider:
+    WidgetProvider,
+    @unchecked Sendable
+{
+    private let firstDescriptor: WidgetDescriptor
+    private let laterDescriptor: WidgetDescriptor
+    private(set) var descriptorReadCount = 0
+
+    var descriptor: WidgetDescriptor {
+        descriptorReadCount += 1
+        return descriptorReadCount == 1
+            ? firstDescriptor
+            : laterDescriptor
+    }
+
+    init(
+        firstDescriptor: WidgetDescriptor,
+        laterDescriptor: WidgetDescriptor
+    ) {
+        self.firstDescriptor = firstDescriptor
+        self.laterDescriptor = laterDescriptor
+    }
+
+    func snapshot() async throws -> WidgetSnapshot {
+        makeSnapshot(
+            descriptor: firstDescriptor,
+            severity: .nominal,
+            priority: .normal,
+            text: "stable"
+        )
+    }
+}
+
 @Test
 func widgetVisibilityPoliciesUseSeverity() {
     #expect(WidgetVisibilityPolicy.always.isVisible(for: .nominal))
@@ -181,6 +258,228 @@ func widgetEnginePreservesLastKnownGoodSnapshotAfterProviderFailure() async {
 
     #expect(first?.content().text == "working")
     #expect(second == first)
+}
+
+@Test
+func widgetEngineRejectsSnapshotWithDifferentProviderID() async throws {
+    let descriptor = WidgetDescriptor(
+        id: "provider.status",
+        displayName: "Provider Status"
+    )
+    let mismatched = makeSnapshot(
+        descriptor: WidgetDescriptor(
+            id: "../malformed",
+            displayName: "Injected"
+        ),
+        severity: .critical,
+        priority: .critical,
+        text: "injected"
+    )
+    let provider = SnapshotContractProvider(
+        descriptor: descriptor,
+        snapshots: [mismatched]
+    )
+    let engine = WidgetEngine(providers: [provider])
+    let attemptedAt = Date(timeIntervalSince1970: 3_000)
+
+    let result = await engine.refresh(
+        id: descriptor.id,
+        at: attemptedAt
+    )
+
+    #expect(result == nil)
+    #expect(await engine.snapshot(id: descriptor.id) == nil)
+    #expect(await engine.orderedVisibleSnapshots().isEmpty)
+
+    let diagnostic = try #require(
+        await engine.diagnostic(id: descriptor.id)
+    )
+    #expect(diagnostic.descriptor == descriptor)
+    #expect(diagnostic.health == .unavailable)
+    #expect(diagnostic.lastFailureAt == attemptedAt)
+    #expect(diagnostic.consecutiveFailureCount == 1)
+    #expect(!diagnostic.isServingLastKnownGood)
+}
+
+@Test
+func widgetEngineRejectsSnapshotDescriptorPolicyDriftWithSameID() async throws {
+    let descriptor = WidgetDescriptor(
+        id: "provider.status",
+        displayName: "Provider Status",
+        defaultIsEnabled: true,
+        defaultOrder: 10,
+        visibilityPolicy: .always,
+        refreshPolicy: .interval(30)
+    )
+    let drifted = makeSnapshot(
+        descriptor: WidgetDescriptor(
+            id: descriptor.id,
+            displayName: "Changed Name",
+            defaultIsEnabled: false,
+            defaultOrder: 999,
+            visibilityPolicy: .whenNotNominal,
+            refreshPolicy: .manual
+        ),
+        severity: .nominal,
+        priority: .normal,
+        text: "drifted"
+    )
+    let provider = SnapshotContractProvider(
+        descriptor: descriptor,
+        snapshots: [drifted]
+    )
+    let engine = WidgetEngine(providers: [provider])
+
+    _ = await engine.refresh(id: descriptor.id)
+
+    #expect(await engine.snapshot(id: descriptor.id) == nil)
+    let diagnostic = try #require(
+        await engine.diagnostic(id: descriptor.id)
+    )
+    #expect(diagnostic.descriptor == descriptor)
+    #expect(diagnostic.health == .unavailable)
+}
+
+@Test
+func singleRegistrationCapturesProviderDescriptorExactlyOnce() async throws {
+    let registered = WidgetDescriptor(
+        id: "provider.single",
+        displayName: "Registered"
+    )
+    let later = WidgetDescriptor(
+        id: "../invalid",
+        displayName: "Later"
+    )
+    let provider = SequencedDescriptorWidgetProvider(
+        firstDescriptor: registered,
+        laterDescriptor: later
+    )
+    let engine = WidgetEngine()
+
+    try await engine.register(provider)
+
+    #expect(provider.descriptorReadCount == 1)
+    #expect(await engine.descriptors() == [registered])
+
+    let snapshot = await engine.refresh(id: registered.id)
+    #expect(snapshot?.descriptor == registered)
+    #expect(provider.descriptorReadCount == 1)
+}
+
+@Test
+func groupReplacementCapturesEachProviderDescriptorExactlyOnce() async throws {
+    let registered = WidgetDescriptor(
+        id: "provider.grouped",
+        displayName: "Registered"
+    )
+    let later = WidgetDescriptor(
+        id: "invalid/provider",
+        displayName: "Later"
+    )
+    let provider = SequencedDescriptorWidgetProvider(
+        firstDescriptor: registered,
+        laterDescriptor: later
+    )
+    let engine = WidgetEngine()
+
+    try await engine.replaceProviders(
+        in: WidgetProviderGroupID(rawValue: "provider.widgets"),
+        with: [provider]
+    )
+
+    #expect(provider.descriptorReadCount == 1)
+    #expect(await engine.descriptors() == [registered])
+
+    let snapshot = await engine.refresh(id: registered.id)
+    #expect(snapshot?.descriptor == registered)
+    #expect(provider.descriptorReadCount == 1)
+}
+
+@Test
+func widgetEngineKeepsRegistrationDescriptorAuthoritativeAfterProviderDrift() async throws {
+    let registered = WidgetDescriptor(
+        id: "provider.status",
+        displayName: "Registered",
+        defaultOrder: 10,
+        refreshPolicy: .interval(30)
+    )
+    let provider = MutableDescriptorWidgetProvider(
+        descriptor: registered
+    )
+    let engine = WidgetEngine(providers: [provider])
+
+    provider.descriptor = WidgetDescriptor(
+        id: registered.id,
+        displayName: "Mutated",
+        defaultOrder: 999,
+        visibilityPolicy: .whenNotNominal,
+        refreshPolicy: .manual
+    )
+
+    #expect(await engine.descriptors() == [registered])
+
+    _ = await engine.refresh(id: registered.id)
+
+    #expect(await engine.snapshot(id: registered.id) == nil)
+    let diagnostic = try #require(
+        await engine.diagnostic(id: registered.id)
+    )
+    #expect(diagnostic.descriptor == registered)
+    #expect(diagnostic.health == .unavailable)
+}
+
+@Test
+func widgetEnginePreservesLastKnownGoodAfterSnapshotDescriptorMismatch() async throws {
+    let descriptor = WidgetDescriptor(
+        id: "provider.status",
+        displayName: "Provider Status"
+    )
+    let good = makeSnapshot(
+        descriptor: descriptor,
+        severity: .active,
+        priority: .attention,
+        text: "good"
+    )
+    let mismatched = makeSnapshot(
+        descriptor: WidgetDescriptor(
+            id: "provider.other",
+            displayName: "Other Provider"
+        ),
+        severity: .critical,
+        priority: .critical,
+        text: "bad"
+    )
+    let provider = SnapshotContractProvider(
+        descriptor: descriptor,
+        snapshots: [good, mismatched]
+    )
+    let engine = WidgetEngine(providers: [provider])
+    let firstAttempt = Date(timeIntervalSince1970: 4_000)
+    let secondAttempt = Date(timeIntervalSince1970: 4_100)
+
+    let first = await engine.refresh(
+        id: descriptor.id,
+        at: firstAttempt
+    )
+    let second = await engine.refresh(
+        id: descriptor.id,
+        at: secondAttempt
+    )
+
+    #expect(first == good)
+    #expect(second == good)
+    #expect(await engine.snapshot(id: descriptor.id) == good)
+
+    let diagnostic = try #require(
+        await engine.diagnostic(id: descriptor.id)
+    )
+    #expect(diagnostic.descriptor == descriptor)
+    #expect(diagnostic.health == .degraded)
+    #expect(diagnostic.lastSucceededAt == firstAttempt)
+    #expect(diagnostic.lastFailureAt == secondAttempt)
+    #expect(diagnostic.consecutiveFailureCount == 1)
+    #expect(diagnostic.isServingLastKnownGood)
+    #expect(diagnostic.snapshotGeneratedAt == good.generatedAt)
 }
 
 @Test
