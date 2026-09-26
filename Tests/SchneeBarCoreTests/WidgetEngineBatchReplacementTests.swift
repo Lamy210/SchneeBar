@@ -192,6 +192,28 @@ func invalidProviderGroupWinsBeforeDuplicateReplacementValidation() async {
 }
 
 @Test
+func noncanonicalProviderGroupWinsBeforeProviderIDValidation() async {
+    let invalidProviderID: WidgetID = "invalid/provider"
+    let engine = WidgetEngine()
+
+    await #expect(
+        throws: WidgetProviderBatchUpdateError.invalidProviderGroupID
+    ) {
+        try await engine.replaceProviders(
+            in: WidgetProviderGroupID(rawValue: "external..widgets"),
+            with: [
+                BatchWidgetProvider(
+                    id: invalidProviderID,
+                    text: "invalid"
+                ),
+            ]
+        )
+    }
+
+    #expect(await engine.descriptors().isEmpty)
+}
+
+@Test
 func groupReplacementAtomicallyReplacesOnlyGroupOwnedProviders() async throws {
     let nativeID: WidgetID = "system.clock"
     let oldExternalID: WidgetID = "external.acme.build"
