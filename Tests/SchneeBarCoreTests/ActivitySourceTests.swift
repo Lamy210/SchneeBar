@@ -188,6 +188,58 @@ private enum ActivitySourceTestError: Error {
     case providerSpecific
 }
 
+private final class SequencedIdentityActivitySource:
+    ActivitySource,
+    @unchecked Sendable
+{
+    private let firstID: ActivitySourceID
+    private let laterID: ActivitySourceID
+    private(set) var idReadCount = 0
+
+    var id: ActivitySourceID {
+        idReadCount += 1
+        return idReadCount == 1 ? firstID : laterID
+    }
+
+    init(
+        firstID: ActivitySourceID,
+        laterID: ActivitySourceID
+    ) {
+        self.firstID = firstID
+        self.laterID = laterID
+    }
+
+    func snapshot() async throws -> ActivitySourceSnapshot {
+        ActivitySourceSnapshot(
+            items: [activitySourceItem(id: "alpha-actions:1")],
+            status: .available
+        )
+    }
+}
+
+@Test
+func activityAggregatorCapturesSourceIdentityExactlyOnce() async throws {
+    let source = SequencedIdentityActivitySource(
+        firstID: "alpha",
+        laterID: "beta"
+    )
+
+    let result = try await ActivitySourceAggregator(
+        sources: [source]
+    ).load()
+
+    #expect(source.idReadCount == 1)
+    #expect(
+        result.sources == [
+            ActivitySourceStatusRecord(
+                sourceID: "alpha",
+                status: .available
+            ),
+        ]
+    )
+    #expect(result.items.map(\.id) == ["alpha-actions:1"])
+}
+
 @Test
 func activityAggregatorContainsProviderSpecificFailure() async throws {
     let healthy = ClosureActivitySource(id: "alpha") {
