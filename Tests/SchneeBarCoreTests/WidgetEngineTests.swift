@@ -130,6 +130,39 @@ private final class MutableDescriptorWidgetProvider:
     }
 }
 
+private final class SequencedDescriptorWidgetProvider:
+    WidgetProvider,
+    @unchecked Sendable
+{
+    private let firstDescriptor: WidgetDescriptor
+    private let laterDescriptor: WidgetDescriptor
+    private(set) var descriptorReadCount = 0
+
+    var descriptor: WidgetDescriptor {
+        descriptorReadCount += 1
+        return descriptorReadCount == 1
+            ? firstDescriptor
+            : laterDescriptor
+    }
+
+    init(
+        firstDescriptor: WidgetDescriptor,
+        laterDescriptor: WidgetDescriptor
+    ) {
+        self.firstDescriptor = firstDescriptor
+        self.laterDescriptor = laterDescriptor
+    }
+
+    func snapshot() async throws -> WidgetSnapshot {
+        makeSnapshot(
+            descriptor: firstDescriptor,
+            severity: .nominal,
+            priority: .normal,
+            text: "stable"
+        )
+    }
+}
+
 @Test
 func widgetVisibilityPoliciesUseSeverity() {
     #expect(WidgetVisibilityPolicy.always.isVisible(for: .nominal))
@@ -305,6 +338,61 @@ func widgetEngineRejectsSnapshotDescriptorPolicyDriftWithSameID() async throws {
     )
     #expect(diagnostic.descriptor == descriptor)
     #expect(diagnostic.health == .unavailable)
+}
+
+@Test
+func singleRegistrationCapturesProviderDescriptorExactlyOnce() async throws {
+    let registered = WidgetDescriptor(
+        id: "provider.single",
+        displayName: "Registered"
+    )
+    let later = WidgetDescriptor(
+        id: "../invalid",
+        displayName: "Later"
+    )
+    let provider = SequencedDescriptorWidgetProvider(
+        firstDescriptor: registered,
+        laterDescriptor: later
+    )
+    let engine = WidgetEngine()
+
+    try await engine.register(provider)
+
+    #expect(provider.descriptorReadCount == 1)
+    #expect(await engine.descriptors() == [registered])
+
+    let snapshot = await engine.refresh(id: registered.id)
+    #expect(snapshot?.descriptor == registered)
+    #expect(provider.descriptorReadCount == 1)
+}
+
+@Test
+func groupReplacementCapturesEachProviderDescriptorExactlyOnce() async throws {
+    let registered = WidgetDescriptor(
+        id: "provider.grouped",
+        displayName: "Registered"
+    )
+    let later = WidgetDescriptor(
+        id: "invalid/provider",
+        displayName: "Later"
+    )
+    let provider = SequencedDescriptorWidgetProvider(
+        firstDescriptor: registered,
+        laterDescriptor: later
+    )
+    let engine = WidgetEngine()
+
+    try await engine.replaceProviders(
+        in: WidgetProviderGroupID(rawValue: "provider.widgets"),
+        with: [provider]
+    )
+
+    #expect(provider.descriptorReadCount == 1)
+    #expect(await engine.descriptors() == [registered])
+
+    let snapshot = await engine.refresh(id: registered.id)
+    #expect(snapshot?.descriptor == registered)
+    #expect(provider.descriptorReadCount == 1)
 }
 
 @Test
