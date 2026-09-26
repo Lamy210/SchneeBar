@@ -412,7 +412,7 @@ func singleProviderRegistrationTransfersOwnershipOutOfGroup() async throws {
         ]
     )
 
-    await engine.register(
+    try await engine.register(
         BatchWidgetProvider(id: id, text: "independent")
     )
     try await engine.replaceProviders(

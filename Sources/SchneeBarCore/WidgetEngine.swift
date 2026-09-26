@@ -26,8 +26,13 @@ public struct WidgetProviderGroupID: Hashable, Sendable {
     }
 }
 
+public enum WidgetProviderRegistrationError: Error, Equatable, Sendable {
+    case invalidProviderID
+}
+
 public enum WidgetProviderBatchUpdateError: Error, Equatable, Sendable {
     case invalidProviderGroupID
+    case invalidProviderID
     case duplicateProviderID(WidgetID)
     case providerAlreadyRegistered(WidgetID)
 }
@@ -45,18 +50,39 @@ public actor WidgetEngine {
     private var lastAppliedRefreshSequence: [WidgetID: UInt64] = [:]
     private var configuration: WidgetConfiguration
 
+    /// Creates the engine from trusted, App-composed bootstrap providers.
+    ///
+    /// Dynamic or externally sourced providers must use the throwing mutation
+    /// APIs below. Persisted WidgetPreference IDs remain permissively decoded
+    /// and never become registration capability by themselves.
     public init(
         providers: [any WidgetProvider] = [],
         configuration: WidgetConfiguration = .init()
     ) {
+        let ids = providers.map(\.descriptor.id)
+        precondition(
+            ids.allSatisfy { $0.isValidProviderID },
+            "Trusted WidgetEngine providers must use valid provider IDs."
+        )
+        precondition(
+            Set(ids).count == ids.count,
+            "Trusted WidgetEngine providers must use unique IDs."
+        )
+
         self.providers = Dictionary(
-            uniqueKeysWithValues: providers.map { ($0.descriptor.id, $0) }
+            uniqueKeysWithValues: zip(ids, providers)
         )
         self.configuration = configuration
     }
 
-    public func register(_ provider: any WidgetProvider) {
+    public func register(_ provider: any WidgetProvider) throws {
+        try Task.checkCancellation()
+
         let id = provider.descriptor.id
+        guard id.isValidProviderID else {
+            throw WidgetProviderRegistrationError.invalidProviderID
+        }
+
         detachFromProviderGroups(id: id)
         providers[id] = provider
         invalidateProviderRevision(id: id)
@@ -78,6 +104,12 @@ public actor WidgetEngine {
 
         guard groupID.isValidNamespace else {
             throw WidgetProviderBatchUpdateError.invalidProviderGroupID
+        }
+
+        for provider in replacements {
+            guard provider.descriptor.id.isValidProviderID else {
+                throw WidgetProviderBatchUpdateError.invalidProviderID
+            }
         }
 
         var replacementByID: [WidgetID: any WidgetProvider] = [:]

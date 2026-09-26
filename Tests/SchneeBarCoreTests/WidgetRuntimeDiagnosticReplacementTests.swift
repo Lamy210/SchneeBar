@@ -132,7 +132,7 @@ func replacingProviderClearsSnapshotAndRuntimeDiagnosticHistory() async throws {
     #expect(healthy.health == .healthy)
     #expect(await engine.snapshot(id: "diagnostic-replacement") != nil)
 
-    await engine.register(ReplacementDiagnosticProvider(succeeds: false))
+    try await engine.register(ReplacementDiagnosticProvider(succeeds: false))
 
     let reset = try #require(await engine.diagnostic(id: "diagnostic-replacement"))
     #expect(reset.health == .notLoaded)
@@ -167,7 +167,7 @@ func inFlightSnapshotFromReplacedProviderIsDiscarded() async throws {
         await Task.yield()
     }
 
-    await engine.register(ReplacementDiagnosticProvider(succeeds: false))
+    try await engine.register(ReplacementDiagnosticProvider(succeeds: false))
     await oldProvider.finish()
     _ = await oldRefresh.value
 

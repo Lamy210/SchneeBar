@@ -1,6 +1,8 @@
 import Foundation
 
 public struct WidgetID: RawRepresentable, Hashable, Codable, Sendable, ExpressibleByStringLiteral {
+    public static let maximumProviderUTF8Bytes = 128
+
     public let rawValue: String
 
     public init(rawValue: String) {
@@ -9,6 +11,44 @@ public struct WidgetID: RawRepresentable, Hashable, Codable, Sendable, Expressib
 
     public init(stringLiteral value: String) {
         rawValue = value
+    }
+
+    public var isValidProviderID: Bool {
+        guard !rawValue.isEmpty,
+              rawValue.utf8.count <= Self.maximumProviderUTF8Bytes
+        else {
+            return false
+        }
+
+        let segments = rawValue.split(
+            separator: ".",
+            omittingEmptySubsequences: false
+        )
+        return segments.allSatisfy { segment in
+            guard !segment.isEmpty,
+                  let first = segment.unicodeScalars.first,
+                  let last = segment.unicodeScalars.last,
+                  Self.isASCIILowercaseLetterOrDigit(first),
+                  Self.isASCIILowercaseLetterOrDigit(last)
+            else {
+                return false
+            }
+
+            return segment.unicodeScalars.allSatisfy { scalar in
+                let value = scalar.value
+                return Self.isASCIILowercaseLetterOrDigit(scalar)
+                    || value == 45
+                    || value == 95
+            }
+        }
+    }
+
+    private static func isASCIILowercaseLetterOrDigit(
+        _ scalar: Unicode.Scalar
+    ) -> Bool {
+        let value = scalar.value
+        return (value >= 48 && value <= 57)
+            || (value >= 97 && value <= 122)
     }
 }
 
