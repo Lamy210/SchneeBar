@@ -159,6 +159,7 @@ public struct GitHubEnterpriseServerDiscoveryClient: Sendable {
         )
         let metaURL = endpoints.restBaseURL.appendingPathComponent("meta", isDirectory: false)
         var request = URLRequest(url: metaURL)
+        GitHubRequestHeaderPolicy.apply(to: &request)
         request.httpMethod = "GET"
         request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
         // Version discovery is the bootstrap for choosing an API version.
