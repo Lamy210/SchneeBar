@@ -49,12 +49,14 @@ public struct WidgetProviderGroupID: Hashable, Sendable {
 
 public enum WidgetProviderRegistrationError: Error, Equatable, Sendable {
     case invalidProviderID
+    case invalidDisplayName
     case invalidRefreshPolicy
 }
 
 public enum WidgetProviderBatchUpdateError: Error, Equatable, Sendable {
     case invalidProviderGroupID
     case invalidProviderID
+    case invalidDisplayName
     case invalidRefreshPolicy
     case duplicateProviderID(WidgetID)
     case providerAlreadyRegistered(WidgetID)
@@ -104,6 +106,14 @@ public actor WidgetEngine {
         )
         precondition(
             registrations.allSatisfy {
+                Self.hasValidDisplayName(
+                    $0.descriptor.displayName
+                )
+            },
+            "Trusted WidgetEngine providers must use canonical display names."
+        )
+        precondition(
+            registrations.allSatisfy {
                 Self.hasFiniteRefreshPolicy(
                     $0.descriptor.refreshPolicy
                 )
@@ -128,6 +138,11 @@ public actor WidgetEngine {
         let id = registration.descriptor.id
         guard id.isValidProviderID else {
             throw WidgetProviderRegistrationError.invalidProviderID
+        }
+        guard Self.hasValidDisplayName(
+            registration.descriptor.displayName
+        ) else {
+            throw WidgetProviderRegistrationError.invalidDisplayName
         }
         guard Self.hasFiniteRefreshPolicy(
             registration.descriptor.refreshPolicy
@@ -164,6 +179,13 @@ public actor WidgetEngine {
         for registration in registrations {
             guard registration.descriptor.id.isValidProviderID else {
                 throw WidgetProviderBatchUpdateError.invalidProviderID
+            }
+        }
+        for registration in registrations {
+            guard Self.hasValidDisplayName(
+                registration.descriptor.displayName
+            ) else {
+                throw WidgetProviderBatchUpdateError.invalidDisplayName
             }
         }
         for registration in registrations {
@@ -400,6 +422,24 @@ public actor WidgetEngine {
             isServingLastKnownGood: failures > 0 && hasSnapshot,
             snapshotGeneratedAt: snapshots[id]?.generatedAt
         )
+    }
+
+    private static func hasValidDisplayName(
+        _ displayName: String
+    ) -> Bool {
+        guard !displayName.isEmpty,
+              displayName.count <= 64,
+              displayName.utf8.count <= 256,
+              displayName == displayName.trimmingCharacters(
+                  in: .whitespacesAndNewlines
+              ),
+              !displayName.unicodeScalars.contains(where: {
+                  CharacterSet.controlCharacters.contains($0)
+              })
+        else {
+            return false
+        }
+        return true
     }
 
     private static func hasFiniteRefreshPolicy(
