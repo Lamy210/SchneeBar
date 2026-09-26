@@ -16,13 +16,34 @@ public struct WidgetProviderGroupID: Hashable, Sendable {
             return false
         }
 
-        return rawValue.unicodeScalars.allSatisfy { scalar in
-            let value = scalar.value
-            return (value >= 48 && value <= 57)
-                || (value >= 97 && value <= 122)
-                || value == 46
-                || value == 95
+        let segments = rawValue.split(
+            separator: ".",
+            omittingEmptySubsequences: false
+        )
+        return segments.allSatisfy { segment in
+            guard !segment.isEmpty,
+                  let first = segment.unicodeScalars.first,
+                  let last = segment.unicodeScalars.last,
+                  Self.isASCIILowercaseLetterOrDigit(first),
+                  Self.isASCIILowercaseLetterOrDigit(last)
+            else {
+                return false
+            }
+
+            return segment.unicodeScalars.allSatisfy { scalar in
+                let value = scalar.value
+                return Self.isASCIILowercaseLetterOrDigit(scalar)
+                    || value == 95
+            }
         }
+    }
+
+    private static func isASCIILowercaseLetterOrDigit(
+        _ scalar: Unicode.Scalar
+    ) -> Bool {
+        let value = scalar.value
+        return (value >= 48 && value <= 57)
+            || (value >= 97 && value <= 122)
     }
 }
 
