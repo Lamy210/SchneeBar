@@ -71,6 +71,28 @@ func singleRegistrationRejectsInvalidDisplayName(
     #expect(await engine.descriptors().isEmpty)
 }
 
+@Test
+func singleRegistrationRejectsDisplayNameOverUTF8ByteLimitWithinCharacterLimit() async {
+    let displayName = String(
+        repeating: "👨‍👩‍👧‍👦",
+        count: 11
+    )
+    #expect(displayName.count <= 64)
+    #expect(displayName.utf8.count > 256)
+
+    let engine = WidgetEngine()
+    await #expect(
+        throws: WidgetProviderRegistrationError.invalidDisplayName
+    ) {
+        try await engine.register(
+            DisplayNameValidationProvider(
+                id: "provider.display",
+                displayName: displayName
+            )
+        )
+    }
+}
+
 @Test(arguments: [
     "Provider Status",
     "Build 1",
