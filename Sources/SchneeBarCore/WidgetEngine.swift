@@ -1,14 +1,33 @@
 import Foundation
 
 public struct WidgetProviderGroupID: Hashable, Sendable {
+    public static let maximumUTF8Bytes = 64
+
     public let rawValue: String
 
     public init(rawValue: String) {
         self.rawValue = rawValue
     }
+
+    public var isValidNamespace: Bool {
+        guard !rawValue.isEmpty,
+              rawValue.utf8.count <= Self.maximumUTF8Bytes
+        else {
+            return false
+        }
+
+        return rawValue.unicodeScalars.allSatisfy { scalar in
+            let value = scalar.value
+            return (value >= 48 && value <= 57)
+                || (value >= 97 && value <= 122)
+                || value == 46
+                || value == 95
+        }
+    }
 }
 
 public enum WidgetProviderBatchUpdateError: Error, Equatable, Sendable {
+    case invalidProviderGroupID
     case duplicateProviderID(WidgetID)
     case providerAlreadyRegistered(WidgetID)
 }
@@ -56,6 +75,10 @@ public actor WidgetEngine {
         with replacements: [any WidgetProvider]
     ) throws {
         try Task.checkCancellation()
+
+        guard groupID.isValidNamespace else {
+            throw WidgetProviderBatchUpdateError.invalidProviderGroupID
+        }
 
         var replacementByID: [WidgetID: any WidgetProvider] = [:]
         replacementByID.reserveCapacity(replacements.count)
