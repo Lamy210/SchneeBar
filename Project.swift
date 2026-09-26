@@ -320,6 +320,17 @@ let project = Project(
             ]
         ),
         .target(
+            name: "SchneeBarUITests",
+            destinations: .macOS,
+            product: .uiTests,
+            bundleId: "dev.lamy.schneebar.ui-tests",
+            deploymentTargets: deploymentTarget,
+            sources: ["Tests/SchneeBarUITests/**"],
+            dependencies: [
+                .target(name: "SchneeBar"),
+            ]
+        ),
+        .target(
             name: "SchneeBarAppTests",
             destinations: .macOS,
             product: .unitTests,
