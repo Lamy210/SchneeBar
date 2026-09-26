@@ -391,11 +391,199 @@ func cancellationWinsBeforeSnapshotContentValidation() async throws {
     #expect(diagnostic.consecutiveFailureCount == 0)
 }
 
+
+@Test
+func snapshotContentRejectsInvalidTextAcrossEveryRepresentation() async {
+    let descriptor = snapshotContentDescriptor()
+    let commonInvalidValues = [
+        "",
+        " leading",
+        "trailing ",
+        "line\nbreak",
+        "nul\0value",
+    ]
+
+    for kind in WidgetRepresentationKind.allCases {
+        let maximumCharacters = kind == .compact ? 32 : 128
+        let byteHeavyCount = kind == .compact ? 8 : 24
+        let invalidValues = commonInvalidValues + [
+            String(repeating: "a", count: maximumCharacters + 1),
+            String(
+                repeating: "👨‍👩‍👧‍👦",
+                count: byteHeavyCount
+            ),
+        ]
+
+        for value in invalidValues {
+            let content = WidgetContent(
+                text: value,
+                accessibilityLabel: "Valid label"
+            )
+            let snapshot = makeSnapshot(
+                descriptor: descriptor,
+                replacing: kind,
+                with: content
+            )
+            let engine = WidgetEngine(
+                providers: [
+                    SnapshotContentProvider(
+                        descriptor: descriptor,
+                        snapshots: [snapshot]
+                    ),
+                ]
+            )
+
+            _ = await engine.refresh(id: descriptor.id)
+            #expect(await engine.snapshot(id: descriptor.id) == nil)
+        }
+    }
+}
+
+@Test
+func snapshotContentRejectsInvalidAccessibilityAcrossEveryRepresentation() async {
+    let descriptor = snapshotContentDescriptor()
+    let invalidLabels = [
+        "",
+        " leading",
+        "trailing ",
+        "line\nbreak",
+        "nul\0value",
+        String(repeating: "a", count: 161),
+        String(repeating: "👨‍👩‍👧‍👦", count: 30),
+    ]
+
+    for kind in WidgetRepresentationKind.allCases {
+        for label in invalidLabels {
+            let content = WidgetContent(
+                text: "OK",
+                accessibilityLabel: label
+            )
+            let snapshot = makeSnapshot(
+                descriptor: descriptor,
+                replacing: kind,
+                with: content
+            )
+            let engine = WidgetEngine(
+                providers: [
+                    SnapshotContentProvider(
+                        descriptor: descriptor,
+                        snapshots: [snapshot]
+                    ),
+                ]
+            )
+
+            _ = await engine.refresh(id: descriptor.id)
+            #expect(await engine.snapshot(id: descriptor.id) == nil)
+        }
+    }
+}
+
+@Test
+func snapshotContentRejectsInvalidSystemImageAcrossEveryRepresentation() async {
+    let descriptor = snapshotContentDescriptor()
+    let invalidSystemImages = [
+        "hammer\n",
+        "nul\0symbol",
+        String(repeating: "a", count: 65),
+    ]
+
+    for kind in WidgetRepresentationKind.allCases {
+        for systemImage in invalidSystemImages {
+            let content = WidgetContent(
+                text: "OK",
+                systemImage: systemImage,
+                accessibilityLabel: "Valid label"
+            )
+            let snapshot = makeSnapshot(
+                descriptor: descriptor,
+                replacing: kind,
+                with: content
+            )
+            let engine = WidgetEngine(
+                providers: [
+                    SnapshotContentProvider(
+                        descriptor: descriptor,
+                        snapshots: [snapshot]
+                    ),
+                ]
+            )
+
+            _ = await engine.refresh(id: descriptor.id)
+            #expect(await engine.snapshot(id: descriptor.id) == nil)
+        }
+    }
+}
+
+@Test
+func descriptorMismatchRemainsRejectedWhenSnapshotContentIsAlsoInvalid() async throws {
+    let descriptor = snapshotContentDescriptor()
+    let mismatchedDescriptor = WidgetDescriptor(
+        id: descriptor.id,
+        displayName: "Different Descriptor"
+    )
+    let invalid = makeSnapshot(
+        descriptor: mismatchedDescriptor,
+        compact: .init(
+            text: "",
+            accessibilityLabel: ""
+        )
+    )
+    let attemptedAt = Date(timeIntervalSince1970: 3_100)
+    let engine = WidgetEngine(
+        providers: [
+            SnapshotContentProvider(
+                descriptor: descriptor,
+                snapshots: [invalid]
+            ),
+        ]
+    )
+
+    #expect(
+        await engine.refresh(
+            id: descriptor.id,
+            at: attemptedAt
+        ) == nil
+    )
+    #expect(await engine.snapshot(id: descriptor.id) == nil)
+
+    let diagnostic = try #require(
+        await engine.diagnostic(id: descriptor.id)
+    )
+    #expect(diagnostic.health == .unavailable)
+    #expect(diagnostic.lastFailureAt == attemptedAt)
+    #expect(diagnostic.consecutiveFailureCount == 1)
+}
+
 private func snapshotContentDescriptor() -> WidgetDescriptor {
     WidgetDescriptor(
         id: "provider.snapshot_content",
         displayName: "Snapshot Content"
     )
+}
+
+
+private func makeSnapshot(
+    descriptor: WidgetDescriptor,
+    replacing kind: WidgetRepresentationKind,
+    with content: WidgetContent
+) -> WidgetSnapshot {
+    switch kind {
+    case .compact:
+        return makeSnapshot(
+            descriptor: descriptor,
+            compact: content
+        )
+    case .normal:
+        return makeSnapshot(
+            descriptor: descriptor,
+            normal: content
+        )
+    case .critical:
+        return makeSnapshot(
+            descriptor: descriptor,
+            critical: content
+        )
+    }
 }
 
 private func makeSnapshot(
