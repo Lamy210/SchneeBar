@@ -47,7 +47,7 @@ SchneeBar App
 
 ## Current module boundaries
 
-- `SchneeBarCore`: provider-neutral domain/application primitives only. It owns the normalized `ActivitySource` port and deterministic multi-source aggregation contract; provider-specific polling and failures stay outside Core.
+- `SchneeBarCore`: provider-neutral domain/application primitives only. It owns the normalized `ActivitySource` port, bounded/privacy-minimized provider identity rules, and deterministic multi-source aggregation contract; provider-specific polling and failures stay outside Core.
 - `SchneeBarDesignSystem`: reusable visual primitives and surfaces; it must not know Developer Activity domain types.
 - `SchneeBarActivityFeature`: Developer Activity presentation. Depends on Core + DesignSystem.
 - `SchneeBarExternalWidgets`: strict external-widget document adapter plus bounded read-only Application Support loader. Depends on Core, normalizes into existing widget models, and adds no execution, network, credential, or direct WidgetEngine mutation capability.
