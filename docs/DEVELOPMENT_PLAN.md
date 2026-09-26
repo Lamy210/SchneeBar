@@ -38,6 +38,7 @@ Implemented:
 - provider-neutral runtime diagnostics and stale/failed provider health state
 - race-safe provider replacement and overlapping refresh handling
 - bounded canonical provider `WidgetID` validation at Engine registration/replacement boundaries while preserving legacy persisted preference decoding
+- registration-bound Widget descriptors captured once by the Engine, with mismatched provider snapshots rejected as provider-neutral refresh failures
 - macOS sleep/wake lifecycle handling with stale async-work rejection
 
 Deferred intentionally:
