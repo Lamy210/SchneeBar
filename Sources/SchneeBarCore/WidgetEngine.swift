@@ -249,7 +249,11 @@ public actor WidgetEngine {
 
     @discardableResult
     public func refresh(id: WidgetID, at attemptedAt: Date = .now) async -> WidgetSnapshot? {
+        guard !Task.isCancelled else {
+            return snapshots[id]
+        }
         guard let registration = providers[id] else { return nil }
+
         let provider = registration.provider
         let registeredDescriptor = registration.descriptor
         let providerRevision = providerRevision[id] ?? 0
@@ -258,6 +262,9 @@ public actor WidgetEngine {
 
         do {
             let snapshot = try await provider.snapshot()
+            guard !Task.isCancelled else {
+                return snapshots[id]
+            }
             guard snapshot.descriptor == registeredDescriptor else {
                 throw WidgetProviderContractViolation
                     .snapshotDescriptorMismatch
@@ -273,7 +280,12 @@ public actor WidgetEngine {
             lastSucceededAt[id] = attemptedAt
             consecutiveFailureCount[id] = 0
             return snapshot
+        } catch is CancellationError {
+            return snapshots[id]
         } catch {
+            guard !Task.isCancelled else {
+                return snapshots[id]
+            }
             guard isCurrentProviderRevision(providerRevision, id: id),
                   canApplyRefresh(sequence, id: id)
             else {
@@ -294,6 +306,7 @@ public actor WidgetEngine {
     @discardableResult
     public func refreshAll(at attemptedAt: Date = .now) async -> [WidgetSnapshot] {
         for id in orderedEnabledProviderIDs() {
+            guard !Task.isCancelled else { break }
             _ = await refresh(id: id, at: attemptedAt)
         }
         return orderedVisibleSnapshots()
@@ -302,6 +315,7 @@ public actor WidgetEngine {
     @discardableResult
     public func refreshDue(at now: Date = .now) async -> [WidgetSnapshot] {
         for id in orderedEnabledProviderIDs() where isRefreshDue(id: id, at: now) {
+            guard !Task.isCancelled else { break }
             _ = await refresh(id: id, at: now)
         }
         return orderedVisibleSnapshots()

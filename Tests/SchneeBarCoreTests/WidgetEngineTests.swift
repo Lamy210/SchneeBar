@@ -163,6 +163,64 @@ private final class SequencedDescriptorWidgetProvider:
     }
 }
 
+private enum CancellationWidgetBehavior: Sendable {
+    case success(WidgetSnapshot)
+    case throwCancellation
+    case cancelThenSuccess(WidgetSnapshot)
+    case cancelThenFailure
+}
+
+private enum CancellationWidgetTestError: Error {
+    case expected
+    case exhausted
+}
+
+private actor CancellationWidgetProvider: WidgetProvider {
+    nonisolated let descriptor: WidgetDescriptor
+    private var behaviors: [CancellationWidgetBehavior]
+    private var calls = 0
+
+    init(
+        descriptor: WidgetDescriptor,
+        behaviors: [CancellationWidgetBehavior]
+    ) {
+        self.descriptor = descriptor
+        self.behaviors = behaviors
+    }
+
+    func snapshot() async throws -> WidgetSnapshot {
+        calls += 1
+        guard !behaviors.isEmpty else {
+            throw CancellationWidgetTestError.exhausted
+        }
+
+        let behavior = behaviors.removeFirst()
+        switch behavior {
+        case let .success(snapshot):
+            return snapshot
+
+        case .throwCancellation:
+            throw CancellationError()
+
+        case let .cancelThenSuccess(snapshot):
+            withUnsafeCurrentTask { task in
+                task?.cancel()
+            }
+            return snapshot
+
+        case .cancelThenFailure:
+            withUnsafeCurrentTask { task in
+                task?.cancel()
+            }
+            throw CancellationWidgetTestError.expected
+        }
+    }
+
+    func callCount() -> Int {
+        calls
+    }
+}
+
 @Test
 func widgetVisibilityPoliciesUseSeverity() {
     #expect(WidgetVisibilityPolicy.always.isVisible(for: .nominal))
@@ -480,6 +538,279 @@ func widgetEnginePreservesLastKnownGoodAfterSnapshotDescriptorMismatch() async t
     #expect(diagnostic.consecutiveFailureCount == 1)
     #expect(diagnostic.isServingLastKnownGood)
     #expect(diagnostic.snapshotGeneratedAt == good.generatedAt)
+}
+
+@Test
+func widgetRefreshSkipsProviderWhenTaskIsAlreadyCancelled() async throws {
+    let descriptor = WidgetDescriptor(
+        id: "provider.cancel.preflight",
+        displayName: "Preflight Cancellation"
+    )
+    let snapshot = makeSnapshot(
+        descriptor: descriptor,
+        severity: .nominal,
+        priority: .normal,
+        text: "should not load"
+    )
+    let provider = CancellationWidgetProvider(
+        descriptor: descriptor,
+        behaviors: [.success(snapshot)]
+    )
+    let engine = WidgetEngine(providers: [provider])
+
+    let result = await Task {
+        withUnsafeCurrentTask { task in
+            task?.cancel()
+        }
+        return await engine.refresh(
+            id: descriptor.id,
+            at: Date(timeIntervalSince1970: 5_000)
+        )
+    }.value
+
+    #expect(result == nil)
+    #expect(await provider.callCount() == 0)
+
+    let diagnostic = try #require(
+        await engine.diagnostic(id: descriptor.id)
+    )
+    #expect(diagnostic.health == .notLoaded)
+    #expect(diagnostic.lastAttemptedAt == nil)
+    #expect(diagnostic.lastFailureAt == nil)
+    #expect(diagnostic.consecutiveFailureCount == 0)
+}
+
+@Test
+func widgetRefreshTreatsCancellationErrorAsNeutral() async throws {
+    let descriptor = WidgetDescriptor(
+        id: "provider.cancel.error",
+        displayName: "Cancellation Error"
+    )
+    let provider = CancellationWidgetProvider(
+        descriptor: descriptor,
+        behaviors: [.throwCancellation]
+    )
+    let engine = WidgetEngine(providers: [provider])
+    let attemptedAt = Date(timeIntervalSince1970: 5_100)
+
+    let result = await engine.refresh(
+        id: descriptor.id,
+        at: attemptedAt
+    )
+
+    #expect(result == nil)
+    #expect(await provider.callCount() == 1)
+
+    let diagnostic = try #require(
+        await engine.diagnostic(id: descriptor.id)
+    )
+    #expect(diagnostic.health == .notLoaded)
+    #expect(diagnostic.lastAttemptedAt == attemptedAt)
+    #expect(diagnostic.lastFailureAt == nil)
+    #expect(diagnostic.consecutiveFailureCount == 0)
+}
+
+@Test
+func widgetRefreshCancellationPreservesHealthyLastKnownGood() async throws {
+    let descriptor = WidgetDescriptor(
+        id: "provider.cancel.last_good",
+        displayName: "Cancellation Last Good"
+    )
+    let good = makeSnapshot(
+        descriptor: descriptor,
+        severity: .active,
+        priority: .attention,
+        text: "good"
+    )
+    let provider = CancellationWidgetProvider(
+        descriptor: descriptor,
+        behaviors: [.success(good), .throwCancellation]
+    )
+    let engine = WidgetEngine(providers: [provider])
+    let firstAttempt = Date(timeIntervalSince1970: 5_200)
+    let cancelledAttempt = Date(timeIntervalSince1970: 5_300)
+
+    let first = await engine.refresh(
+        id: descriptor.id,
+        at: firstAttempt
+    )
+    let second = await engine.refresh(
+        id: descriptor.id,
+        at: cancelledAttempt
+    )
+
+    #expect(first == good)
+    #expect(second == good)
+    #expect(await engine.snapshot(id: descriptor.id) == good)
+
+    let diagnostic = try #require(
+        await engine.diagnostic(id: descriptor.id)
+    )
+    #expect(diagnostic.health == .healthy)
+    #expect(diagnostic.lastAttemptedAt == cancelledAttempt)
+    #expect(diagnostic.lastSucceededAt == firstAttempt)
+    #expect(diagnostic.lastFailureAt == nil)
+    #expect(diagnostic.consecutiveFailureCount == 0)
+    #expect(!diagnostic.isServingLastKnownGood)
+}
+
+@Test
+func widgetRefreshTaskCancellationWinsOverConcurrentFailure() async throws {
+    let descriptor = WidgetDescriptor(
+        id: "provider.cancel.failure",
+        displayName: "Cancellation Failure"
+    )
+    let provider = CancellationWidgetProvider(
+        descriptor: descriptor,
+        behaviors: [.cancelThenFailure]
+    )
+    let engine = WidgetEngine(providers: [provider])
+    let attemptedAt = Date(timeIntervalSince1970: 5_400)
+
+    let result = await Task {
+        await engine.refresh(
+            id: descriptor.id,
+            at: attemptedAt
+        )
+    }.value
+
+    #expect(result == nil)
+    let diagnostic = try #require(
+        await engine.diagnostic(id: descriptor.id)
+    )
+    #expect(diagnostic.health == .notLoaded)
+    #expect(diagnostic.lastAttemptedAt == attemptedAt)
+    #expect(diagnostic.lastFailureAt == nil)
+    #expect(diagnostic.consecutiveFailureCount == 0)
+}
+
+@Test
+func widgetRefreshDoesNotApplySnapshotReturnedAfterTaskCancellation() async throws {
+    let descriptor = WidgetDescriptor(
+        id: "provider.cancel.success",
+        displayName: "Cancellation Success"
+    )
+    let snapshot = makeSnapshot(
+        descriptor: descriptor,
+        severity: .critical,
+        priority: .critical,
+        text: "must not apply"
+    )
+    let provider = CancellationWidgetProvider(
+        descriptor: descriptor,
+        behaviors: [.cancelThenSuccess(snapshot)]
+    )
+    let engine = WidgetEngine(providers: [provider])
+    let attemptedAt = Date(timeIntervalSince1970: 5_500)
+
+    let result = await Task {
+        await engine.refresh(
+            id: descriptor.id,
+            at: attemptedAt
+        )
+    }.value
+
+    #expect(result == nil)
+    #expect(await engine.snapshot(id: descriptor.id) == nil)
+
+    let diagnostic = try #require(
+        await engine.diagnostic(id: descriptor.id)
+    )
+    #expect(diagnostic.health == .notLoaded)
+    #expect(diagnostic.lastFailureAt == nil)
+    #expect(diagnostic.consecutiveFailureCount == 0)
+}
+
+@Test
+func refreshAllStopsBeforeLaterProvidersAfterCancellation() async {
+    let firstDescriptor = WidgetDescriptor(
+        id: "provider.cancel.first",
+        displayName: "First",
+        defaultOrder: 0
+    )
+    let secondDescriptor = WidgetDescriptor(
+        id: "provider.cancel.second",
+        displayName: "Second",
+        defaultOrder: 1
+    )
+    let firstSnapshot = makeSnapshot(
+        descriptor: firstDescriptor,
+        severity: .nominal,
+        priority: .normal,
+        text: "first"
+    )
+    let secondSnapshot = makeSnapshot(
+        descriptor: secondDescriptor,
+        severity: .nominal,
+        priority: .normal,
+        text: "second"
+    )
+    let first = CancellationWidgetProvider(
+        descriptor: firstDescriptor,
+        behaviors: [.cancelThenSuccess(firstSnapshot)]
+    )
+    let second = CancellationWidgetProvider(
+        descriptor: secondDescriptor,
+        behaviors: [.success(secondSnapshot)]
+    )
+    let engine = WidgetEngine(providers: [first, second])
+
+    let snapshots = await Task {
+        await engine.refreshAll(
+            at: Date(timeIntervalSince1970: 5_600)
+        )
+    }.value
+
+    #expect(snapshots.isEmpty)
+    #expect(await first.callCount() == 1)
+    #expect(await second.callCount() == 0)
+}
+
+@Test
+func refreshDueStopsBeforeLaterProvidersAfterCancellation() async {
+    let firstDescriptor = WidgetDescriptor(
+        id: "provider.cancel.due_first",
+        displayName: "Due First",
+        defaultOrder: 0,
+        refreshPolicy: .interval(10)
+    )
+    let secondDescriptor = WidgetDescriptor(
+        id: "provider.cancel.due_second",
+        displayName: "Due Second",
+        defaultOrder: 1,
+        refreshPolicy: .interval(10)
+    )
+    let firstSnapshot = makeSnapshot(
+        descriptor: firstDescriptor,
+        severity: .nominal,
+        priority: .normal,
+        text: "first"
+    )
+    let secondSnapshot = makeSnapshot(
+        descriptor: secondDescriptor,
+        severity: .nominal,
+        priority: .normal,
+        text: "second"
+    )
+    let first = CancellationWidgetProvider(
+        descriptor: firstDescriptor,
+        behaviors: [.cancelThenSuccess(firstSnapshot)]
+    )
+    let second = CancellationWidgetProvider(
+        descriptor: secondDescriptor,
+        behaviors: [.success(secondSnapshot)]
+    )
+    let engine = WidgetEngine(providers: [first, second])
+
+    let snapshots = await Task {
+        await engine.refreshDue(
+            at: Date(timeIntervalSince1970: 5_700)
+        )
+    }.value
+
+    #expect(snapshots.isEmpty)
+    #expect(await first.callCount() == 1)
+    #expect(await second.callCount() == 0)
 }
 
 @Test

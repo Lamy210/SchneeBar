@@ -39,6 +39,7 @@ Implemented:
 - race-safe provider replacement and overlapping refresh handling
 - bounded canonical provider `WidgetID` validation at Engine registration/replacement boundaries while preserving legacy persisted preference decoding
 - immutable registered `WidgetDescriptor` authority with snapshot-descriptor contract enforcement and last-known-good fallback on provider drift
+- cancellation-neutral Widget refresh semantics that preserve diagnostics/last-known-good state and stop batch refreshes after task cancellation
 - macOS sleep/wake lifecycle handling with stale async-work rejection
 
 Deferred intentionally:
@@ -202,7 +203,7 @@ Evidence-bound / deferred pending upstream support:
 ## Phase 6 — Interaction and extensibility
 
 - opt-in workflow re-run/cancel actions (Actions-write capability gate, provider mutations, explicit confirmation, action-state handling, and post-mutation refresh implemented)
-- provider/plugin contracts (provider-neutral Developer Activity source contract, deterministic multi-source aggregator, bounded/privacy-minimized Activity/provider-group identities, canonical Widget provider-ID mutation boundary, registered-descriptor authority, and finite refresh-policy validation implemented with persisted-preference compatibility; external plugin surface pending)
+- provider/plugin contracts (provider-neutral Developer Activity source contract, deterministic multi-source aggregator, bounded/privacy-minimized Activity/provider-group identities, canonical Widget provider-ID mutation boundary, registered-descriptor authority, finite refresh-policy validation, and cancellation-neutral refresh semantics implemented with persisted-preference compatibility; external plugin surface pending)
 - declarative external widgets (v1 strict data-only document + normalization contract, bounded read-only Application Support loader, startup-only atomic registration, reentrancy-safe App startup coordinator, sanitized startup-health model, and coarse Settings status surface implemented; watch/install UX deferred)
 - additional CI providers after GitHub architecture proves stable
 
