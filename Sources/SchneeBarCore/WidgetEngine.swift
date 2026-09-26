@@ -58,6 +58,10 @@ public enum WidgetProviderBatchUpdateError: Error, Equatable, Sendable {
     case providerAlreadyRegistered(WidgetID)
 }
 
+private enum WidgetProviderContractViolation: Error {
+    case snapshotDescriptorMismatch
+}
+
 public actor WidgetEngine {
     private var providers: [WidgetID: any WidgetProvider]
     private var providerGroups: [WidgetProviderGroupID: Set<WidgetID>] = [:]
@@ -215,6 +219,10 @@ public actor WidgetEngine {
 
         do {
             let snapshot = try await provider.snapshot()
+            guard snapshot.descriptor == provider.descriptor else {
+                throw WidgetProviderContractViolation
+                    .snapshotDescriptorMismatch
+            }
             guard isCurrentProviderRevision(providerRevision, id: id),
                   canApplyRefresh(sequence, id: id)
             else {
