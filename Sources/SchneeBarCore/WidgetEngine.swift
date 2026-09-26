@@ -64,6 +64,7 @@ public enum WidgetProviderBatchUpdateError: Error, Equatable, Sendable {
 
 private enum WidgetProviderContractViolation: Error {
     case snapshotDescriptorMismatch
+    case invalidSnapshotTimestamp
     case invalidSnapshotContent
 }
 
@@ -291,6 +292,10 @@ public actor WidgetEngine {
             guard snapshot.descriptor == registeredDescriptor else {
                 throw WidgetProviderContractViolation
                     .snapshotDescriptorMismatch
+            }
+            guard snapshot.generatedAt.timeIntervalSinceReferenceDate.isFinite else {
+                throw WidgetProviderContractViolation
+                    .invalidSnapshotTimestamp
             }
             guard Self.hasValidSnapshotContent(snapshot) else {
                 throw WidgetProviderContractViolation.invalidSnapshotContent
