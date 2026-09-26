@@ -88,6 +88,88 @@ private actor InFlightBatchWidgetProvider: WidgetProvider {
 }
 
 @Test
+func providerGroupNamespaceIsCanonicalAndBounded() {
+    #expect(externalWidgetGroup.isValidNamespace)
+    #expect(secondaryWidgetGroup.isValidNamespace)
+    #expect(
+        WidgetProviderGroupID(
+            rawValue: String(repeating: "a", count: 64)
+        ).isValidNamespace
+    )
+
+    for rawValue in [
+        "",
+        "External.widgets",
+        "external/widgets",
+        "external:widgets",
+        "external-widgets",
+        "external widgets",
+        String(repeating: "a", count: 65),
+    ] {
+        #expect(
+            !WidgetProviderGroupID(rawValue: rawValue)
+                .isValidNamespace
+        )
+    }
+}
+
+@Test
+func invalidProviderGroupIsRejectedWithoutMutation() async throws {
+    let existingID: WidgetID = "external.acme.build"
+    let replacementID: WidgetID = "external.team.deploy"
+    let engine = WidgetEngine()
+
+    try await engine.replaceProviders(
+        in: externalWidgetGroup,
+        with: [
+            BatchWidgetProvider(id: existingID, text: "existing"),
+        ]
+    )
+    _ = await engine.refresh(id: existingID)
+
+    await #expect(
+        throws: WidgetProviderBatchUpdateError.invalidProviderGroupID
+    ) {
+        try await engine.replaceProviders(
+            in: WidgetProviderGroupID(rawValue: "invalid/group"),
+            with: [
+                BatchWidgetProvider(
+                    id: replacementID,
+                    text: "replacement"
+                ),
+            ]
+        )
+    }
+
+    #expect(await engine.descriptors().map(\.id) == [existingID])
+    #expect(
+        await engine.snapshot(id: existingID)?.content().text
+            == "existing"
+    )
+    #expect(await engine.snapshot(id: replacementID) == nil)
+}
+
+@Test
+func invalidProviderGroupWinsBeforeDuplicateReplacementValidation() async {
+    let id: WidgetID = "external.acme.build"
+    let engine = WidgetEngine()
+
+    await #expect(
+        throws: WidgetProviderBatchUpdateError.invalidProviderGroupID
+    ) {
+        try await engine.replaceProviders(
+            in: WidgetProviderGroupID(rawValue: ""),
+            with: [
+                BatchWidgetProvider(id: id, text: "first"),
+                BatchWidgetProvider(id: id, text: "second"),
+            ]
+        )
+    }
+
+    #expect(await engine.descriptors().isEmpty)
+}
+
+@Test
 func groupReplacementAtomicallyReplacesOnlyGroupOwnedProviders() async throws {
     let nativeID: WidgetID = "system.clock"
     let oldExternalID: WidgetID = "external.acme.build"
