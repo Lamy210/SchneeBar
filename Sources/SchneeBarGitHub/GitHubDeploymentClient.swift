@@ -258,6 +258,7 @@ public struct GitHubDeploymentClient: Sendable {
             .trimmingCharacters(in: .whitespacesAndNewlines)
 
         var request = URLRequest(url: url)
+        GitHubRequestHeaderPolicy.apply(to: &request)
         request.httpMethod = "GET"
         request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")

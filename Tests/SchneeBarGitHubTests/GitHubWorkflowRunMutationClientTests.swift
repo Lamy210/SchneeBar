@@ -78,6 +78,7 @@ func rerunsHostedWorkflowWithExactMutationRequest() async throws {
         request.value(forHTTPHeaderField: "Authorization")
             == "Bearer ghu_write"
     )
+    #expect(request.value(forHTTPHeaderField: "User-Agent") == "SchneeBar")
     #expect(
         request.value(forHTTPHeaderField: "X-GitHub-Api-Version")
             == GitHubRESTAPIVersionPolicy.currentVersion
