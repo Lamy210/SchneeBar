@@ -59,6 +59,7 @@ Implemented foundation:
 - REST API version policy
 - centralized REST API request-version selection across GitHub clients, including explicit overrides and evidence-backed GHES 3.20-3.22 release mapping without guessing untested releases
 - GitHub.com / enterprise-aware request construction boundaries
+- explicit provider-owned `User-Agent: SchneeBar` on GitHub HTTP requests instead of relying on URLSession defaults
 - session-scoped, repository-aware capability assessment for Actions, Pull Requests, Checks, and Deployments
 - conservative public-repository and untested/unknown-GHES capability evidence handling
 - fresh capability recomputation from access inventory on session establish/restore, with App-local normalized assessment caching
