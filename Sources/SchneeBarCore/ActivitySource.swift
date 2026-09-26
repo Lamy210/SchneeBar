@@ -17,8 +17,13 @@ public struct ActivitySourceID:
         rawValue = value
     }
 
+    public static let maximumNamespaceUTF8Bytes = 64
+    public static let maximumItemIDUTF8Bytes = 256
+
     public var isValidNamespace: Bool {
-        guard !rawValue.isEmpty else {
+        guard !rawValue.isEmpty,
+              rawValue.utf8.count <= Self.maximumNamespaceUTF8Bytes
+        else {
             return false
         }
         return rawValue.unicodeScalars.allSatisfy { scalar in
@@ -32,6 +37,10 @@ public struct ActivitySourceID:
 
     public func owns(itemID: String) -> Bool {
         guard isValidNamespace,
+              itemID.utf8.count <= Self.maximumItemIDUTF8Bytes,
+              !itemID.unicodeScalars.contains(where: {
+                  CharacterSet.controlCharacters.contains($0)
+              }),
               let separator = itemID.firstIndex(where: {
                   $0 == "-" || $0 == ":"
               }),
@@ -122,16 +131,10 @@ public struct ActivityAggregateSnapshot: Equatable, Sendable {
 }
 
 public enum ActivitySourceAggregationError: Error, Equatable, Sendable {
-    case invalidSourceID(ActivitySourceID)
+    case invalidSourceID
     case duplicateSourceID(ActivitySourceID)
-    case invalidItemNamespace(
-        itemID: String,
-        sourceID: ActivitySourceID
-    )
-    case duplicateItemID(
-        itemID: String,
-        sourceID: ActivitySourceID
-    )
+    case invalidItemNamespace(sourceID: ActivitySourceID)
+    case duplicateItemID(sourceID: ActivitySourceID)
     case noUsableSources([ActivitySourceStatusRecord])
 }
 
@@ -146,9 +149,7 @@ public struct ActivitySourceAggregator: Sendable {
         var seenSourceIDs = Set<ActivitySourceID>()
         for source in sources {
             guard source.id.isValidNamespace else {
-                throw ActivitySourceAggregationError.invalidSourceID(
-                    source.id
-                )
+                throw ActivitySourceAggregationError.invalidSourceID
             }
             guard seenSourceIDs.insert(source.id).inserted else {
                 throw ActivitySourceAggregationError.duplicateSourceID(
@@ -215,17 +216,11 @@ public struct ActivitySourceAggregator: Sendable {
             for item in source.snapshot.items {
                 guard source.id.owns(itemID: item.id) else {
                     throw ActivitySourceAggregationError
-                        .invalidItemNamespace(
-                            itemID: item.id,
-                            sourceID: source.id
-                        )
+                        .invalidItemNamespace(sourceID: source.id)
                 }
                 guard seenItemIDs.insert(item.id).inserted else {
                     throw ActivitySourceAggregationError
-                        .duplicateItemID(
-                            itemID: item.id,
-                            sourceID: source.id
-                        )
+                        .duplicateItemID(sourceID: source.id)
                 }
                 items.append(item)
             }
