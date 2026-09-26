@@ -110,6 +110,26 @@ private actor SnapshotContractProvider: WidgetProvider {
     }
 }
 
+private final class MutableDescriptorWidgetProvider:
+    WidgetProvider,
+    @unchecked Sendable
+{
+    var descriptor: WidgetDescriptor
+
+    init(descriptor: WidgetDescriptor) {
+        self.descriptor = descriptor
+    }
+
+    func snapshot() async throws -> WidgetSnapshot {
+        makeSnapshot(
+            descriptor: descriptor,
+            severity: .nominal,
+            priority: .normal,
+            text: "current"
+        )
+    }
+}
+
 @Test
 func widgetVisibilityPoliciesUseSeverity() {
     #expect(WidgetVisibilityPolicy.always.isVisible(for: .nominal))
@@ -284,6 +304,39 @@ func widgetEngineRejectsSnapshotDescriptorPolicyDriftWithSameID() async throws {
         await engine.diagnostic(id: descriptor.id)
     )
     #expect(diagnostic.descriptor == descriptor)
+    #expect(diagnostic.health == .unavailable)
+}
+
+@Test
+func widgetEngineKeepsRegistrationDescriptorAuthoritativeAfterProviderDrift() async throws {
+    let registered = WidgetDescriptor(
+        id: "provider.status",
+        displayName: "Registered",
+        defaultOrder: 10,
+        refreshPolicy: .interval(30)
+    )
+    let provider = MutableDescriptorWidgetProvider(
+        descriptor: registered
+    )
+    let engine = WidgetEngine(providers: [provider])
+
+    provider.descriptor = WidgetDescriptor(
+        id: registered.id,
+        displayName: "Mutated",
+        defaultOrder: 999,
+        visibilityPolicy: .whenNotNominal,
+        refreshPolicy: .manual
+    )
+
+    #expect(await engine.descriptors() == [registered])
+
+    _ = await engine.refresh(id: registered.id)
+
+    #expect(await engine.snapshot(id: registered.id) == nil)
+    let diagnostic = try #require(
+        await engine.diagnostic(id: registered.id)
+    )
+    #expect(diagnostic.descriptor == registered)
     #expect(diagnostic.health == .unavailable)
 }
 
