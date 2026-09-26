@@ -64,6 +64,7 @@ public enum WidgetProviderBatchUpdateError: Error, Equatable, Sendable {
 
 private enum WidgetProviderContractViolation: Error {
     case snapshotDescriptorMismatch
+    case invalidSnapshotContent
 }
 
 private struct RegisteredWidgetProvider: Sendable {
@@ -291,6 +292,9 @@ public actor WidgetEngine {
                 throw WidgetProviderContractViolation
                     .snapshotDescriptorMismatch
             }
+            guard Self.hasValidSnapshotContent(snapshot) else {
+                throw WidgetProviderContractViolation.invalidSnapshotContent
+            }
             guard isCurrentProviderRevision(providerRevision, id: id),
                   canApplyRefresh(sequence, id: id)
             else {
@@ -448,6 +452,82 @@ public actor WidgetEngine {
                   in: .whitespacesAndNewlines
               ),
               !displayName.unicodeScalars.contains(where: {
+                  CharacterSet.controlCharacters.contains($0)
+              })
+        else {
+            return false
+        }
+        return true
+    }
+
+    private static func hasValidSnapshotContent(
+        _ snapshot: WidgetSnapshot
+    ) -> Bool {
+        guard isValidContent(
+            snapshot.representations.compact,
+            maximumTextCharacters: 32,
+            maximumTextUTF8Bytes: 128
+        ),
+        isValidContent(
+            snapshot.representations.normal,
+            maximumTextCharacters: 128,
+            maximumTextUTF8Bytes: 512
+        )
+        else {
+            return false
+        }
+
+        if let critical = snapshot.representations.critical {
+            return isValidContent(
+                critical,
+                maximumTextCharacters: 128,
+                maximumTextUTF8Bytes: 512
+            )
+        }
+        return true
+    }
+
+    private static func isValidContent(
+        _ content: WidgetContent,
+        maximumTextCharacters: Int,
+        maximumTextUTF8Bytes: Int
+    ) -> Bool {
+        guard isCanonicalBoundedText(
+            content.text,
+            maximumCharacters: maximumTextCharacters,
+            maximumUTF8Bytes: maximumTextUTF8Bytes
+        ),
+        isCanonicalBoundedText(
+            content.accessibilityLabel,
+            maximumCharacters: 160,
+            maximumUTF8Bytes: 640
+        )
+        else {
+            return false
+        }
+
+        guard let systemImage = content.systemImage else {
+            return true
+        }
+
+        return systemImage.utf8.count <= 64
+            && !systemImage.unicodeScalars.contains(where: {
+                CharacterSet.controlCharacters.contains($0)
+            })
+    }
+
+    private static func isCanonicalBoundedText(
+        _ value: String,
+        maximumCharacters: Int,
+        maximumUTF8Bytes: Int
+    ) -> Bool {
+        guard !value.isEmpty,
+              value == value.trimmingCharacters(
+                  in: .whitespacesAndNewlines
+              ),
+              value.count <= maximumCharacters,
+              value.utf8.count <= maximumUTF8Bytes,
+              !value.unicodeScalars.contains(where: {
                   CharacterSet.controlCharacters.contains($0)
               })
         else {
