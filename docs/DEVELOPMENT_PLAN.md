@@ -37,6 +37,7 @@ Implemented:
 - persisted widget configuration
 - provider-neutral runtime diagnostics and stale/failed provider health state
 - race-safe provider replacement and overlapping refresh handling
+- bounded canonical provider `WidgetID` validation at Engine registration/replacement boundaries while preserving legacy persisted preference decoding
 - macOS sleep/wake lifecycle handling with stale async-work rejection
 
 Deferred intentionally:
@@ -200,7 +201,7 @@ Evidence-bound / deferred pending upstream support:
 ## Phase 6 — Interaction and extensibility
 
 - opt-in workflow re-run/cancel actions (Actions-write capability gate, provider mutations, explicit confirmation, action-state handling, and post-mutation refresh implemented)
-- provider/plugin contracts (provider-neutral Developer Activity source contract, deterministic multi-source aggregator, and bounded/privacy-minimized provider identity boundary implemented; external plugin surface pending)
+- provider/plugin contracts (provider-neutral Developer Activity source contract, deterministic multi-source aggregator, bounded/privacy-minimized Activity/provider-group identities, and canonical Widget provider-ID mutation boundary with persisted-preference compatibility implemented; external plugin surface pending)
 - declarative external widgets (v1 strict data-only document + normalization contract, bounded read-only Application Support loader, startup-only atomic registration, reentrancy-safe App startup coordinator, sanitized startup-health model, and coarse Settings status surface implemented; watch/install UX deferred)
 - additional CI providers after GitHub architecture proves stable
 

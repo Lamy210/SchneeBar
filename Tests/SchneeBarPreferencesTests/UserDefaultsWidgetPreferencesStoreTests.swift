@@ -72,3 +72,76 @@ func widgetPreferencesStoreMigratesLegacyUnversionedConfiguration() async throws
 
     #expect(loaded == expected)
 }
+
+
+@Test
+func widgetPreferencesStoreKeepsMalformedPersistedWidgetIDsReadable() async throws {
+    let suite = "dev.lamy.schneebar.tests.\(UUID().uuidString)"
+    let defaults = try #require(UserDefaults(suiteName: suite))
+    defer { defaults.removePersistentDomain(forName: suite) }
+
+    let malformedID = WidgetID(rawValue: "../stale-widget")
+    let store = UserDefaultsWidgetPreferencesStore(suiteName: suite)
+    let expected = WidgetConfiguration(
+        preferences: [
+            WidgetPreference(
+                id: malformedID,
+                isEnabled: true,
+                order: 1,
+                representation: .compact
+            ),
+            WidgetPreference(
+                id: "system.clock",
+                isEnabled: false,
+                order: 2,
+                representation: .normal
+            ),
+        ]
+    )
+
+    try await store.save(expected)
+    let loaded = try await store.load()
+
+    #expect(loaded == expected)
+    #expect(!malformedID.isValidProviderID)
+    #expect(
+        loaded.preference(for: "system.clock")?.isEnabled == false
+    )
+}
+
+@Test
+func legacyUnversionedMalformedWidgetIDRemainsReadable() async throws {
+    let suite = "dev.lamy.schneebar.tests.\(UUID().uuidString)"
+    let defaults = try #require(UserDefaults(suiteName: suite))
+    defer { defaults.removePersistentDomain(forName: suite) }
+
+    let key = "legacy-malformed-widget-configuration"
+    let malformedID = WidgetID(rawValue: "legacy/widget")
+    let expected = WidgetConfiguration(
+        preferences: [
+            WidgetPreference(
+                id: malformedID,
+                isEnabled: true,
+                order: 9
+            ),
+            WidgetPreference(
+                id: "system.cpu",
+                isEnabled: false,
+                order: 10
+            ),
+        ]
+    )
+    defaults.set(try JSONEncoder().encode(expected), forKey: key)
+
+    let store = UserDefaultsWidgetPreferencesStore(
+        suiteName: suite,
+        key: key
+    )
+    let loaded = try await store.load()
+
+    #expect(loaded == expected)
+    #expect(!malformedID.isValidProviderID)
+    #expect(
+        loaded.preference(for: "system.cpu")?.isEnabled == false
+    )
+}
