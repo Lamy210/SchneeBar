@@ -105,6 +105,12 @@ func providerGroupNamespaceIsCanonicalAndBounded() {
         "external-widgets",
         "external widgets",
         "external\nwidgets",
+        ".external",
+        "external.",
+        "external..widgets",
+        "_external.widgets",
+        "external._widgets",
+        "external.widgets_",
         String(repeating: "a", count: 65),
     ] {
         #expect(
@@ -112,6 +118,21 @@ func providerGroupNamespaceIsCanonicalAndBounded() {
                 .isValidNamespace
         )
     }
+}
+
+@Test(arguments: [
+    "external.widgets",
+    "secondary.widgets",
+    "provider_2.widgets",
+    "v2.widgets_2",
+])
+func providerGroupNamespaceAcceptsCanonicalSegments(
+    rawValue: String
+) {
+    #expect(
+        WidgetProviderGroupID(rawValue: rawValue)
+            .isValidNamespace
+    )
 }
 
 @Test
@@ -163,6 +184,28 @@ func invalidProviderGroupWinsBeforeDuplicateReplacementValidation() async {
             with: [
                 BatchWidgetProvider(id: id, text: "first"),
                 BatchWidgetProvider(id: id, text: "second"),
+            ]
+        )
+    }
+
+    #expect(await engine.descriptors().isEmpty)
+}
+
+@Test
+func noncanonicalProviderGroupWinsBeforeProviderIDValidation() async {
+    let invalidProviderID: WidgetID = "invalid/provider"
+    let engine = WidgetEngine()
+
+    await #expect(
+        throws: WidgetProviderBatchUpdateError.invalidProviderGroupID
+    ) {
+        try await engine.replaceProviders(
+            in: WidgetProviderGroupID(rawValue: "external..widgets"),
+            with: [
+                BatchWidgetProvider(
+                    id: invalidProviderID,
+                    text: "invalid"
+                ),
             ]
         )
     }
