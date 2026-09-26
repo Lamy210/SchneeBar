@@ -170,6 +170,9 @@ struct SettingsView: View {
                         .multilineTextAlignment(.trailing)
                 }
                 .accessibilityElement(children: .combine)
+                .accessibilityIdentifier(
+                    "external-widget-startup-status"
+                )
             }
         }
     }
