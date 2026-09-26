@@ -179,6 +179,27 @@ func providerIDValidationPrecedesRefreshPolicyValidation() async {
 }
 
 @Test
+func providerGroupValidationPrecedesRefreshPolicyValidation() async {
+    let engine = WidgetEngine()
+
+    await #expect(
+        throws: WidgetProviderBatchUpdateError.invalidProviderGroupID
+    ) {
+        try await engine.replaceProviders(
+            in: WidgetProviderGroupID(rawValue: "invalid/group"),
+            with: [
+                RefreshPolicyValidationProvider(
+                    id: "provider.valid",
+                    refreshPolicy: .interval(.nan)
+                ),
+            ]
+        )
+    }
+
+    #expect(await engine.descriptors().isEmpty)
+}
+
+@Test
 func finiteZeroAndNegativeIntervalsRetainOneSecondFloor() async throws {
     let zeroID: WidgetID = "provider.zero"
     let negativeID: WidgetID = "provider.negative"
