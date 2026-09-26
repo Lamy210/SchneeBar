@@ -262,6 +262,42 @@ func activitySourceNamespaceUsesAnUnambiguousProviderPrefix() {
     #expect(!sourceID.owns(itemID: "github:"))
 }
 
+@Test
+func activitySourceNamespaceIsBoundedByUTF8Bytes() {
+    let maximum = ActivitySourceID(
+        rawValue: String(repeating: "a", count: 64)
+    )
+    let oversized = ActivitySourceID(
+        rawValue: String(repeating: "a", count: 65)
+    )
+
+    #expect(maximum.isValidNamespace)
+    #expect(!oversized.isValidNamespace)
+}
+
+@Test
+func activityItemIdentityIsBoundedAndRejectsControlCharacters() {
+    let sourceID: ActivitySourceID = "alpha"
+    let maximum = "alpha-" + String(repeating: "x", count: 250)
+    let oversized = "alpha-" + String(repeating: "x", count: 251)
+
+    #expect(maximum.utf8.count == 256)
+    #expect(sourceID.owns(itemID: maximum))
+    #expect(oversized.utf8.count == 257)
+    #expect(!sourceID.owns(itemID: oversized))
+    #expect(!sourceID.owns(itemID: "alpha-actions:\n1"))
+    #expect(!sourceID.owns(itemID: "alpha-actions:\u{0000}1"))
+}
+
+@Test
+func currentGitHubStyleActivityIdentifiersRemainValid() {
+    let sourceID: ActivitySourceID = "github"
+
+    #expect(sourceID.owns(itemID: "github-actions:123:456"))
+    #expect(sourceID.owns(itemID: "github-review:123:42"))
+    #expect(sourceID.owns(itemID: "github-check:123:789"))
+}
+
 @Test(arguments: [
     ActivitySourceID(rawValue: ""),
     ActivitySourceID(rawValue: "git-hub"),
@@ -278,7 +314,7 @@ func activityAggregatorRejectsAmbiguousSourceIdentifiers(
     }
 
     await #expect(
-        throws: ActivitySourceAggregationError.invalidSourceID(sourceID)
+        throws: ActivitySourceAggregationError.invalidSourceID
     ) {
         try await ActivitySourceAggregator(sources: [source]).load()
     }
@@ -301,7 +337,6 @@ func activityAggregatorRejectsEmptyProviderItemIdentityPayload(
 
     await #expect(
         throws: ActivitySourceAggregationError.invalidItemNamespace(
-            itemID: itemID,
             sourceID: "alpha"
         )
     ) {
@@ -322,13 +357,69 @@ func activityAggregatorRejectsItemOutsideSourceNamespace() async {
 
     await #expect(
         throws: ActivitySourceAggregationError.invalidItemNamespace(
-            itemID: "beta-actions:1",
             sourceID: "alpha"
         )
     ) {
         try await ActivitySourceAggregator(
             sources: [source]
         ).load()
+    }
+}
+
+@Test
+func activityAggregatorRejectsOversizedItemWithoutRetainingRawValue() async {
+    let oversized = "alpha-" + String(repeating: "x", count: 251)
+    let source = ClosureActivitySource(id: "alpha") {
+        ActivitySourceSnapshot(
+            items: [activitySourceItem(id: oversized)],
+            status: .available
+        )
+    }
+
+    await #expect(
+        throws: ActivitySourceAggregationError.invalidItemNamespace(
+            sourceID: "alpha"
+        )
+    ) {
+        try await ActivitySourceAggregator(
+            sources: [source]
+        ).load()
+    }
+}
+
+@Test
+func activityAggregatorRejectsControlCharacterItemWithoutRetainingRawValue() async {
+    let source = ClosureActivitySource(id: "alpha") {
+        ActivitySourceSnapshot(
+            items: [activitySourceItem(id: "alpha-actions:\n1")],
+            status: .available
+        )
+    }
+
+    await #expect(
+        throws: ActivitySourceAggregationError.invalidItemNamespace(
+            sourceID: "alpha"
+        )
+    ) {
+        try await ActivitySourceAggregator(
+            sources: [source]
+        ).load()
+    }
+}
+
+@Test
+func activityAggregatorRejectsOversizedSourceWithoutRetainingRawValue() async {
+    let sourceID = ActivitySourceID(
+        rawValue: String(repeating: "a", count: 65)
+    )
+    let source = ClosureActivitySource(id: sourceID) {
+        .init(items: [], status: .available)
+    }
+
+    await #expect(
+        throws: ActivitySourceAggregationError.invalidSourceID
+    ) {
+        try await ActivitySourceAggregator(sources: [source]).load()
     }
 }
 
@@ -346,7 +437,6 @@ func activityAggregatorRejectsDuplicateItemIdentity() async {
 
     await #expect(
         throws: ActivitySourceAggregationError.duplicateItemID(
-            itemID: "alpha-actions:1",
             sourceID: "alpha"
         )
     ) {
