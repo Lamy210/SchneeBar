@@ -224,20 +224,24 @@ func activityAggregatorCapturesSourceIdentityExactlyOnce() async throws {
         laterID: "beta"
     )
 
-    let result = try await ActivitySourceAggregator(
+    let aggregator = ActivitySourceAggregator(
         sources: [source]
-    ).load()
+    )
+    let first = try await aggregator.load()
+    let second = try await aggregator.load()
 
     #expect(source.idReadCount == 1)
-    #expect(
-        result.sources == [
-            ActivitySourceStatusRecord(
-                sourceID: "alpha",
-                status: .available
-            ),
-        ]
-    )
-    #expect(result.items.map(\.id) == ["alpha-actions:1"])
+    for result in [first, second] {
+        #expect(
+            result.sources == [
+                ActivitySourceStatusRecord(
+                    sourceID: "alpha",
+                    status: .available
+                ),
+            ]
+        )
+        #expect(result.items.map(\.id) == ["alpha-actions:1"])
+    }
 }
 
 @Test
