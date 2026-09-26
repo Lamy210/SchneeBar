@@ -9,10 +9,27 @@ public protocol GitHubHTTPTransport: Sendable {
 }
 
 public struct URLSessionGitHubHTTPTransport: GitHubHTTPTransport {
+    private static let defaultSession = URLSession(
+        configuration: defaultConfiguration()
+    )
+
     private let session: URLSession
 
-    public init(session: URLSession = .shared) {
+    public init() {
+        self.init(session: Self.defaultSession)
+    }
+
+    public init(session: URLSession) {
         self.session = session
+    }
+
+    static func defaultConfiguration() -> URLSessionConfiguration {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.httpShouldSetCookies = false
+        configuration.httpCookieStorage = nil
+        configuration.urlCredentialStorage = nil
+        configuration.urlCache = nil
+        return configuration
     }
 
     public func data(for request: URLRequest) async throws -> (Data, HTTPURLResponse) {
