@@ -14,7 +14,7 @@ struct SettingsView: View {
     var body: some View {
         Form {
             Section("SchneeBar") {
-                LabeledContent("Status", value: "Phase 2")
+                LabeledContent("Status", value: "Development")
                 LabeledContent("Platform", value: "macOS 15+")
             }
 
