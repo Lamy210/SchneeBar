@@ -160,3 +160,31 @@ func aggregateSnapshotFeedsWidgetWithoutProviderSpecificTypes() async throws {
     #expect(snapshot.severity == .critical)
     #expect(snapshot.content(for: .normal).text == "Alert 1")
 }
+
+@Test
+func truncatedAggregateKeepsVisibleSummaryAndMarksAccessibility() async throws {
+    let provider = ActivityWidgetProvider(loadSnapshot: {
+        ActivityAggregateSnapshot(
+            items: [
+                ActivityItem(
+                    id: "github-actions:1:1",
+                    repository: "snow/app",
+                    context: "CI",
+                    detail: "Running",
+                    state: .running
+                ),
+            ],
+            sources: [],
+            isTruncated: true
+        )
+    })
+
+    let snapshot = try await provider.snapshot()
+    let normal = snapshot.content(for: .normal)
+
+    #expect(normal.text == "Running 1")
+    #expect(
+        normal.accessibilityLabel
+            == "Running 1, partial activity list showing highest-priority recent activity"
+    )
+}
