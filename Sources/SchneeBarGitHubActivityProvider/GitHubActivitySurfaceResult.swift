@@ -244,9 +244,11 @@ public struct GitHubActivityLoadResult: Equatable, Sendable {
     }
 
     public func boundedForRetention(
-        maximumItemsPerSurface: Int
+        maximumItemsPerSurface: Int,
+        maximumFailuresPerSurface: Int
     ) -> GitHubActivityLoadResult {
-        let maximum = max(0, maximumItemsPerSurface)
+        let maximumItems = max(0, maximumItemsPerSurface)
+        let maximumFailures = max(0, maximumFailuresPerSurface)
         let boundedSurfaces = Dictionary(
             uniqueKeysWithValues: GitHubActivitySurface.allCases.map {
                 surface in
@@ -255,8 +257,12 @@ public struct GitHubActivityLoadResult: Equatable, Sendable {
                     surface,
                     GitHubActivitySurfaceResult(
                         surface: surface,
-                        items: Array(current.items.prefix(maximum)),
-                        failures: current.failures,
+                        items: Array(
+                            current.items.prefix(maximumItems)
+                        ),
+                        failures: Array(
+                            current.failures.prefix(maximumFailures)
+                        ),
                         successfulTargetCount:
                             current.successfulTargetCount,
                         attemptedTargetCount:
