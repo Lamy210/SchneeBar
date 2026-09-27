@@ -13,6 +13,8 @@ SchneeBar is public. Pull-request code from forks must be treated as untrusted.
 - Actions are pinned to full immutable commit SHAs, with version comments for reviewability.
 - Dependabot tracks Action updates.
 - Release signing/notarization must live in a separate protected workflow/environment.
+- The manual preview-release workflow may request `contents: write` only for GitHub prerelease/tag publication; it must not receive Apple signing/notarization secrets.
+- Release publication must bind to an explicit full expected commit SHA and refuse a moving/unreviewed `main` head.
 
 ## CodeQL merge gate
 
