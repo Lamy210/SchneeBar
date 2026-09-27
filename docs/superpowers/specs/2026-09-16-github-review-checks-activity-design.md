@@ -386,6 +386,8 @@ Review polling reserves at least one cold repository slot when eligible reposito
 
 Check polling is demand-driven from current/cached review/workflow evidence and has no independent cold-repository scan.
 
+The global Check request budget controls which valid candidates are polled in one refresh; it does not define cache validity. A Check cache entry remains last-known-good when its repository/ref is still within that repository's current candidate set but another repository consumes the global request budget. Cache pruning uses the bounded per-repository candidate set independently of global poll selection. A candidate is removed when it leaves that per-repository set, its repository leaves monitoring scope/becomes capability-blocked, or the connection is reset. A successful poll still replaces that exact target cache, including with an empty result.
+
 ## Provider State
 
 Retain one connection-level generation counter for stale async-work rejection.
