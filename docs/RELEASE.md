@@ -26,6 +26,23 @@ Do not publish a preview as a stable release.
 
 The repository has not yet selected stable source/binary distribution terms. Preview release notes must point testers back to the repository's current license-status statement rather than implying an open-source or stable binary license. Stable terms are tracked separately in #215.
 
+### Opening an unsigned preview
+
+Because preview artifacts are not Developer ID signed or notarized, macOS Gatekeeper can block the first launch.
+
+For a preview obtained from the official SchneeBar GitHub Release:
+
+1. verify the downloaded ZIP against the attached SHA-256 file;
+2. extract `SchneeBar.app`;
+3. attempt to open the app normally;
+4. if macOS blocks it and you have independently verified the release source/checksum, open **System Settings → Privacy & Security** and use **Open Anyway** for SchneeBar.
+
+Do not disable Gatekeeper globally and do not instruct users to remove quarantine metadata as the normal installation path.
+
+Apple guidance:
+- https://support.apple.com/ja-jp/102445
+- https://support.apple.com/ja-jp/guide/security/sec5599b66df/web
+
 ## 2. Stable release
 
 A stable release must not use the unsigned preview workflow as-is.
