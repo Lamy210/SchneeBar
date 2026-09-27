@@ -349,7 +349,7 @@ final class GitHubConnectionsRuntimeModel {
         do {
             let items = try await loadActivityItems()
             try Task.checkCancellation()
-            return ActivitySourceSnapshot(
+            return ActivitySourceSnapshot.bounded(
                 items: items,
                 status: .available
             )
