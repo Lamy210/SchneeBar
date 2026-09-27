@@ -99,7 +99,7 @@ Then run **Release Preview** from the GitHub Actions UI on the `main` branch and
 - a prerelease tag such as `v0.1.0-alpha.1`;
 - the full 40-character reviewed `main` commit SHA as `expected_sha`.
 
-The workflow requires that exact SHA to still be the dispatched `main` head, verifies the exact commit's push `CI` and `CodeQL` workflows are successful, reruns the full test suite, and renders the deterministic visual smoke before packaging.
+The workflow requires that exact SHA to still be the dispatched `main` head, verifies the exact commit's push `CI` and `CodeQL` workflows are successful, reruns the full test suite, and renders the deterministic visual smoke before packaging. Build/test/package runs with read-only repository permissions. The resulting ZIP, checksum, and release notes are transferred as a bounded Actions artifact to a separate checkout-free publish job; only that publish job receives `contents: write`, and it re-verifies payload shape, checksum, archive integrity, release tag, and embedded release SHA before creating the GitHub prerelease.
 
 The workflow rejects:
 
