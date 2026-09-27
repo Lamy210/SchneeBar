@@ -95,9 +95,15 @@ final class WidgetRuntimeModel {
         let latestConfiguration = configuration
         onConfigurationChanged?(latestConfiguration)
 
-        persistenceTask?.cancel()
+        let previousTask = persistenceTask
+        previousTask?.cancel()
+
         let store = preferencesStore
         persistenceTask = Task {
+            if let previousTask {
+                await previousTask.value
+            }
+
             do {
                 try await Task.sleep(for: .milliseconds(150))
                 try Task.checkCancellation()
