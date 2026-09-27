@@ -195,6 +195,13 @@ final class ActivityRuntimeModel {
                     deliveryHistoryIsLoading = false
                     return
                 }
+                guard ActivityPresentationTextPolicy.allows(loaded) else {
+                    deliveryHistory = nil
+                    deliveryHistoryErrorMessage =
+                        "Could not load delivery history."
+                    deliveryHistoryIsLoading = false
+                    return
+                }
                 deliveryHistory = loaded
                 deliveryHistoryErrorMessage = nil
                 deliveryHistoryIsLoading = false
@@ -241,6 +248,13 @@ final class ActivityRuntimeModel {
                 try Task.checkCancellation()
                 guard selectedItem?.id == item.id else { return }
                 guard ActivityDestinationURLPolicy.allows(loaded) else {
+                    detail = nil
+                    detailErrorMessage =
+                        "Could not load workflow job details."
+                    detailIsLoading = false
+                    return
+                }
+                guard ActivityPresentationTextPolicy.allows(loaded) else {
                     detail = nil
                     detailErrorMessage =
                         "Could not load workflow job details."
