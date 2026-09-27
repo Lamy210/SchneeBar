@@ -141,7 +141,8 @@ func widgetRuntimeFlushWaitsForOlderSaveBeforeFinalWrite() async throws {
     )
 
     try await Task.sleep(for: .milliseconds(250))
-    #expect(await store.savedConfigurations() == saved)
+    let savedAfterDebounceWindow = await store.savedConfigurations()
+    #expect(savedAfterDebounceWindow == saved)
 }
 
 @Test @MainActor
