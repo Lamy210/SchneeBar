@@ -39,7 +39,7 @@ final class SchneeBarRealAppSmokeUITests: XCTestCase {
         let app = XCUIApplication()
 
         app.terminate()
-        try prepareEmptyExternalWidgetRoot(
+        let createdRoot = try prepareEmptyExternalWidgetRoot(
             rootURL,
             fileManager: fileManager
         )
@@ -48,10 +48,12 @@ final class SchneeBarRealAppSmokeUITests: XCTestCase {
         defer {
             app.terminate()
             try? fileManager.removeItem(at: fixtureURL)
-            removeDirectoryIfEmpty(
-                rootURL,
-                fileManager: fileManager
-            )
+            if createdRoot {
+                removeDirectoryIfEmpty(
+                    rootURL,
+                    fileManager: fileManager
+                )
+            }
         }
 
         launchAndOpenSettings(app)
@@ -186,8 +188,20 @@ final class SchneeBarRealAppSmokeUITests: XCTestCase {
     private func prepareEmptyExternalWidgetRoot(
         _ rootURL: URL,
         fileManager: FileManager
-    ) throws {
+    ) throws -> Bool {
         if fileManager.fileExists(atPath: rootURL.path) {
+            let values = try rootURL.resourceValues(
+                forKeys: [
+                    .isDirectoryKey,
+                    .isSymbolicLinkKey,
+                ]
+            )
+            guard values.isDirectory == true,
+                  values.isSymbolicLink != true
+            else {
+                throw ExternalWidgetRealAppSmokeError.unsafeExistingStorage
+            }
+
             let entries = try fileManager.contentsOfDirectory(
                 at: rootURL,
                 includingPropertiesForKeys: nil
@@ -195,12 +209,29 @@ final class SchneeBarRealAppSmokeUITests: XCTestCase {
             guard entries.isEmpty else {
                 throw ExternalWidgetRealAppSmokeError.nonEmptyStorage
             }
+            return false
+        }
+
+        let ownerURL = rootURL.deletingLastPathComponent()
+        if fileManager.fileExists(atPath: ownerURL.path) {
+            let values = try ownerURL.resourceValues(
+                forKeys: [
+                    .isDirectoryKey,
+                    .isSymbolicLinkKey,
+                ]
+            )
+            guard values.isDirectory == true,
+                  values.isSymbolicLink != true
+            else {
+                throw ExternalWidgetRealAppSmokeError.unsafeExistingStorage
+            }
         }
 
         try fileManager.createDirectory(
             at: rootURL,
             withIntermediateDirectories: true
         )
+        return true
     }
 
     private func removeDirectoryIfEmpty(
@@ -256,4 +287,5 @@ final class SchneeBarRealAppSmokeUITests: XCTestCase {
 
 private enum ExternalWidgetRealAppSmokeError: Error {
     case nonEmptyStorage
+    case unsafeExistingStorage
 }
