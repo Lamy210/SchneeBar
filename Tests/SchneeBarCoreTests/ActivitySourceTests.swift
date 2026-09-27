@@ -184,6 +184,80 @@ func activityAggregatorUsesGlobalInboxOrdering() async throws {
     )
 }
 
+@Test(arguments: [
+    Double.nan,
+    Double.infinity,
+    -Double.infinity,
+])
+func activityAggregatorRejectsNonFiniteItemTimestamp(
+    timeIntervalSinceReferenceDate: Double
+) async {
+    let source = ClosureActivitySource(id: "alpha") {
+        ActivitySourceSnapshot(
+            items: [
+                ActivityItem(
+                    id: "alpha-actions:1",
+                    repository: "snow/repo",
+                    context: "CI",
+                    detail: "Activity",
+                    state: .success,
+                    updatedAt: Date(
+                        timeIntervalSinceReferenceDate:
+                            timeIntervalSinceReferenceDate
+                    )
+                ),
+            ],
+            status: .available
+        )
+    }
+
+    await #expect(
+        throws: ActivitySourceAggregationError.invalidItemTimestamp(
+            sourceID: "alpha"
+        )
+    ) {
+        try await ActivitySourceAggregator(
+            sources: [source]
+        ).load()
+    }
+}
+
+@Test(arguments: [
+    -1_000_000_000.0,
+    0.0,
+    10_000_000_000.0,
+])
+func activityAggregatorAcceptsFiniteItemTimestamp(
+    timeIntervalSinceReferenceDate: Double
+) async throws {
+    let timestamp = Date(
+        timeIntervalSinceReferenceDate:
+            timeIntervalSinceReferenceDate
+    )
+    let source = ClosureActivitySource(id: "alpha") {
+        ActivitySourceSnapshot(
+            items: [
+                ActivityItem(
+                    id: "alpha-actions:1",
+                    repository: "snow/repo",
+                    context: "CI",
+                    detail: "Activity",
+                    state: .success,
+                    updatedAt: timestamp
+                ),
+            ],
+            status: .available
+        )
+    }
+
+    let result = try await ActivitySourceAggregator(
+        sources: [source]
+    ).load()
+
+    #expect(result.items.count == 1)
+    #expect(result.items.first?.updatedAt == timestamp)
+}
+
 private enum ActivitySourceTestError: Error {
     case providerSpecific
 }
