@@ -257,6 +257,39 @@ func startupCancellationDoesNotReplacePreviouslyRegisteredGroup() async throws {
 }
 
 @Test
+func startupCancellationAfterSuccessfulLoadDoesNotReplaceGroup() async throws {
+    let oldDefinition = startupExternalWidgetDefinition(
+        id: "external.old.build"
+    )
+    let newDefinition = startupExternalWidgetDefinition(
+        id: "external.new.build"
+    )
+    let engine = WidgetEngine()
+
+    _ = try await ExternalWidgetStartupRegistrar(
+        loadDefinitions: { [oldDefinition] }
+    ).loadAndRegister(in: engine)
+
+    let cancelledRegistrar = ExternalWidgetStartupRegistrar(
+        loadDefinitions: {
+            withUnsafeCurrentTask { task in
+                task?.cancel()
+            }
+            return [newDefinition]
+        }
+    )
+
+    await #expect(throws: CancellationError.self) {
+        try await cancelledRegistrar.loadAndRegister(in: engine)
+    }
+
+    #expect(
+        await engine.descriptors().map(\.id)
+            == [oldDefinition.descriptor.id]
+    )
+}
+
+@Test
 func stablePreferenceSurvivesTemporaryExternalWidgetAbsence() async throws {
     let definition = startupExternalWidgetDefinition(
         id: "external.acme.build"
