@@ -221,6 +221,7 @@ private func activityRoot(
 
         ActivityPopoverView(
             items: scenario.items,
+            isTruncated: scenario.isTruncated,
             surfaceStyle: .deterministic
         )
         .padding(24)
