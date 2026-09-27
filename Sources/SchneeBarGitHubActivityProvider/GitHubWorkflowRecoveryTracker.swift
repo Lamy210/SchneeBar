@@ -5,11 +5,14 @@ import SchneeBarGitHub
 public struct GitHubWorkflowRecoveryTracker: Sendable {
     private var states: [LaneKey: LaneState] = [:]
     private let mapper: GitHubWorkflowActivityMapper
+    private let maximumLanes: Int
 
     public init(
-        mapper: GitHubWorkflowActivityMapper = GitHubWorkflowActivityMapper()
+        mapper: GitHubWorkflowActivityMapper = GitHubWorkflowActivityMapper(),
+        maximumLanes: Int = 100
     ) {
         self.mapper = mapper
+        self.maximumLanes = max(1, maximumLanes)
     }
 
     public mutating func observe(
@@ -70,6 +73,7 @@ public struct GitHubWorkflowRecoveryTracker: Sendable {
             states[lane] = state
         }
 
+        pruneStatesIfNeeded()
         return events.sorted(by: recoveryEventPrecedes)
     }
 
@@ -79,6 +83,30 @@ public struct GitHubWorkflowRecoveryTracker: Sendable {
 
     public mutating func reset() {
         states.removeAll(keepingCapacity: false)
+    }
+
+    private mutating func pruneStatesIfNeeded() {
+        guard states.count > maximumLanes else { return }
+
+        let retained = Set(
+            states.keys.sorted { lhs, rhs in
+                guard let lhsState = states[lhs],
+                      let rhsState = states[rhs]
+                else {
+                    return lhs.sortKey < rhs.sortKey
+                }
+                if lhsState.failureIsArmed != rhsState.failureIsArmed {
+                    return lhsState.failureIsArmed
+                }
+                if lhsState.latestUpdatedAt != rhsState.latestUpdatedAt {
+                    return lhsState.latestUpdatedAt
+                        > rhsState.latestUpdatedAt
+                }
+                return lhs.sortKey < rhs.sortKey
+            }
+            .prefix(maximumLanes)
+        )
+        states = states.filter { retained.contains($0.key) }
     }
 
     private func newestRunsByLane(
