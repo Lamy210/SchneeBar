@@ -219,15 +219,15 @@ public struct ActivitySourceAggregator: Sendable {
                     throw ActivitySourceAggregationError
                         .invalidItemNamespace(sourceID: source.id)
                 }
+                guard seenItemIDs.insert(item.id).inserted else {
+                    throw ActivitySourceAggregationError
+                        .duplicateItemID(sourceID: source.id)
+                }
                 if let updatedAt = item.updatedAt,
                    !updatedAt.timeIntervalSinceReferenceDate.isFinite
                 {
                     throw ActivitySourceAggregationError
                         .invalidItemTimestamp(sourceID: source.id)
-                }
-                guard seenItemIDs.insert(item.id).inserted else {
-                    throw ActivitySourceAggregationError
-                        .duplicateItemID(sourceID: source.id)
                 }
                 items.append(item)
             }
