@@ -27,7 +27,7 @@ final class SchneeBarRealAppSmokeUITests: XCTestCase {
     }
 
     @MainActor
-    func testExternalWidgetRegistersFromApplicationSupportOnCI() throws {
+    func testExternalWidgetRegistersFromApplicationSupportOnCI() async throws {
         let fileManager = FileManager.default
         let rootURL = try externalWidgetRootURL(fileManager: fileManager)
         try requirePreparedCIExternalWidgetSmoke(
@@ -76,6 +76,61 @@ final class SchneeBarRealAppSmokeUITests: XCTestCase {
             false,
             "External widgets must remain disabled by default."
         )
+
+        widgetToggle.click()
+        XCTAssertTrue(
+            await waitForToggleState(
+                widgetToggle,
+                expected: true
+            ),
+            "Expected the external widget to become enabled through Settings."
+        )
+        try await Task.sleep(for: .milliseconds(500))
+
+        app.terminate()
+        launchAndOpenSettings(app)
+
+        let relaunchedStartupStatus = externalWidgetStartupStatus(in: app)
+        XCTAssertTrue(
+            relaunchedStartupStatus.waitForExistence(timeout: 10),
+            "Expected External Widgets startup health after relaunch.\n"
+                + app.debugDescription
+        )
+        XCTAssertTrue(
+            waitForLoadedExternalWidgetStatus(
+                relaunchedStartupStatus
+            ),
+            "Expected the external widget to load again after relaunch.\n"
+                + app.debugDescription
+        )
+
+        let relaunchedToggle = app
+            .descendants(matching: .any)
+            .matching(
+                identifier:
+                    "widget-enabled-\(Self.externalWidgetID)"
+            )
+            .firstMatch
+        XCTAssertTrue(
+            relaunchedToggle.waitForExistence(timeout: 10),
+            "Expected the external widget preference row after relaunch.\n"
+                + app.debugDescription
+        )
+        XCTAssertEqual(
+            toggleState(relaunchedToggle),
+            true,
+            "Expected the explicit external-widget enable preference to persist."
+        )
+
+        relaunchedToggle.click()
+        XCTAssertTrue(
+            await waitForToggleState(
+                relaunchedToggle,
+                expected: false
+            ),
+            "Expected the test to restore the external widget to disabled."
+        )
+        try await Task.sleep(for: .milliseconds(500))
     }
 
     @MainActor
@@ -113,6 +168,20 @@ final class SchneeBarRealAppSmokeUITests: XCTestCase {
             for: [expectation],
             timeout: 10
         ) == .completed
+    }
+
+    @MainActor
+    private func waitForToggleState(
+        _ element: XCUIElement,
+        expected: Bool
+    ) async -> Bool {
+        for _ in 0 ..< 100 {
+            if toggleState(element) == expected {
+                return true
+            }
+            try? await Task.sleep(for: .milliseconds(50))
+        }
+        return toggleState(element) == expected
     }
 
     @MainActor
