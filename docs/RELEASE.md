@@ -50,14 +50,15 @@ A stable release must not use the unsigned preview workflow as-is.
 Before the first stable release, add a protected release workflow/environment that performs:
 
 1. Release build from an exact reviewed `main` commit.
-2. Developer ID Application signing.
-3. Signature verification with `codesign --verify --deep --strict`.
-4. Apple notarization with `notarytool`.
-5. Notarization stapling with `stapler`.
-6. Gatekeeper assessment with `spctl --assess --type execute`.
-7. Archive packaging after signing/notarization.
-8. SHA-256 generation.
-9. GitHub Release creation from the exact tested commit.
+2. Hardened Runtime enabled for the distributed app/executable targets with only required runtime exceptions.
+3. Developer ID Application signing with a secure timestamp.
+4. Signature and entitlement verification with `codesign --verify --deep --strict` plus explicit signature inspection.
+5. Apple notarization with `notarytool`.
+6. Notarization stapling and validation with `stapler`.
+7. Gatekeeper assessment with `spctl --assess --type execute`.
+8. Archive packaging after signing/notarization.
+9. SHA-256 generation and verification.
+10. GitHub Release creation from the exact tested commit.
 
 Signing certificates, private keys, App Store Connect API credentials, and notarization credentials must exist only in the protected release environment. They must never be available to pull-request jobs.
 
