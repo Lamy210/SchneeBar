@@ -222,6 +222,69 @@ func activityAggregatorRejectsNonFiniteItemTimestamp(
     }
 }
 
+@Test
+func activityAggregatorKeepsNamespaceErrorAheadOfTimestampValidation() async {
+    let source = ClosureActivitySource(id: "alpha") {
+        ActivitySourceSnapshot(
+            items: [
+                ActivityItem(
+                    id: "beta-actions:1",
+                    repository: "snow/repo",
+                    context: "CI",
+                    detail: "Activity",
+                    state: .success,
+                    updatedAt: Date(
+                        timeIntervalSinceReferenceDate: .nan
+                    )
+                ),
+            ],
+            status: .available
+        )
+    }
+
+    await #expect(
+        throws: ActivitySourceAggregationError.invalidItemNamespace(
+            sourceID: "alpha"
+        )
+    ) {
+        try await ActivitySourceAggregator(
+            sources: [source]
+        ).load()
+    }
+}
+
+@Test
+func activityAggregatorKeepsDuplicateErrorAheadOfTimestampValidation() async {
+    let source = ClosureActivitySource(id: "alpha") {
+        ActivitySourceSnapshot(
+            items: [
+                activitySourceItem(id: "alpha-actions:1"),
+                ActivityItem(
+                    id: "alpha-actions:1",
+                    repository: "snow/repo",
+                    context: "CI",
+                    detail: "Activity",
+                    state: .success,
+                    updatedAt: Date(
+                        timeIntervalSinceReferenceDate: .infinity
+                    )
+                ),
+            ],
+            status: .available
+        )
+    }
+
+    await #expect(
+        throws: ActivitySourceAggregationError.duplicateItemID(
+            sourceID: "alpha"
+        )
+    ) {
+        try await ActivitySourceAggregator(
+            sources: [source]
+        ).load()
+    }
+}
+
 @Test(arguments: [
     -1_000_000_000.0,
     0.0,
