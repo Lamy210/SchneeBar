@@ -205,13 +205,13 @@ Evidence-bound / deferred pending upstream support:
 
 - opt-in workflow re-run/cancel actions (Actions-write capability gate, provider mutations, explicit confirmation, action-state handling, and post-mutation refresh implemented)
 - provider/plugin contracts (provider-neutral Developer Activity source contract, deterministic multi-source aggregator, bounded/privacy-minimized Activity/provider-group identities, canonical Widget provider-ID mutation boundary, registered-descriptor authority, canonical bounded display-name validation, finite refresh-policy validation, cancellation-neutral refresh semantics, finite provider snapshot timestamp validation, and bounded provider snapshot presentation-content validation implemented with persisted-preference compatibility; external plugin surface pending)
-- declarative external widgets (v1 strict data-only document + normalization contract, bounded read-only Application Support loader, startup-only atomic registration, reentrancy-safe App startup coordinator, sanitized startup-health model, and coarse Settings status surface implemented; watch/install UX deferred)
+- declarative external widgets (v1 strict data-only document + normalization contract, bounded read-only Application Support loader, startup-only atomic registration, reentrancy-safe App startup coordinator, sanitized startup-health model, coarse Settings status surface, and CI-only real-app Application Support registration smoke implemented; watch/install UX deferred)
 - additional CI providers after GitHub architecture proves stable
 
 ## Current implementation priority
 
 1. Stabilize the provider-neutral Developer Activity source boundary and the strict external-widget document + startup-registration contract.
-2. Validate startup-only external widget registration on real app launches, keeping live reload/watch and install UX explicitly deferred.
+2. Extend real-app external-widget coverage only where it adds release confidence; keep live reload/watch and install UX explicitly deferred.
 3. Revisit standalone/paginated Environment browsing, local history-row drill-down, custom protection-rule details, and additional providers only when product usage or authoritative upstream evidence justifies the extra scope.
 
 ## Engineering constraints
