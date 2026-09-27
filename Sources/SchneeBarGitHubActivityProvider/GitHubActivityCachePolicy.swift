@@ -6,6 +6,7 @@ public struct GitHubActivityCachePolicy: Equatable, Sendable {
     public let maximumCheckTargets: Int
     public let maximumRecoveryLanesPerRepository: Int
     public let maximumRetainedItemsPerSurface: Int
+    public let maximumRetainedFailuresPerSurface: Int
 
     public init(
         maximumWorkflowRepositories: Int = 20,
@@ -13,6 +14,8 @@ public struct GitHubActivityCachePolicy: Equatable, Sendable {
         maximumCheckTargets: Int = 20,
         maximumRecoveryLanesPerRepository: Int = 100,
         maximumRetainedItemsPerSurface: Int =
+            ActivitySourceCollectionPolicy.maximumItemsPerSource,
+        maximumRetainedFailuresPerSurface: Int =
             ActivitySourceCollectionPolicy.maximumItemsPerSource
     ) {
         self.maximumWorkflowRepositories = max(
@@ -34,6 +37,10 @@ public struct GitHubActivityCachePolicy: Equatable, Sendable {
         self.maximumRetainedItemsPerSurface = max(
             1,
             maximumRetainedItemsPerSurface
+        )
+        self.maximumRetainedFailuresPerSurface = max(
+            1,
+            maximumRetainedFailuresPerSurface
         )
     }
 }
