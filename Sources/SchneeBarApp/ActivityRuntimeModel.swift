@@ -188,6 +188,13 @@ final class ActivityRuntimeModel {
                 else {
                     return
                 }
+                guard ActivityDestinationURLPolicy.allows(loaded) else {
+                    deliveryHistory = nil
+                    deliveryHistoryErrorMessage =
+                        "Could not load delivery history."
+                    deliveryHistoryIsLoading = false
+                    return
+                }
                 deliveryHistory = loaded
                 deliveryHistoryErrorMessage = nil
                 deliveryHistoryIsLoading = false
@@ -233,6 +240,13 @@ final class ActivityRuntimeModel {
                 let loaded = try await detailLoader(item)
                 try Task.checkCancellation()
                 guard selectedItem?.id == item.id else { return }
+                guard ActivityDestinationURLPolicy.allows(loaded) else {
+                    detail = nil
+                    detailErrorMessage =
+                        "Could not load workflow job details."
+                    detailIsLoading = false
+                    return
+                }
                 detail = loaded
                 detailErrorMessage = nil
                 detailIsLoading = false

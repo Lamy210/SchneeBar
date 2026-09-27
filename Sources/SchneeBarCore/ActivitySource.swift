@@ -230,9 +230,9 @@ public struct ActivitySourceAggregator: Sendable {
                     throw ActivitySourceAggregationError
                         .invalidItemTimestamp(sourceID: source.id)
                 }
-                if let destinationURL = item.destinationURL,
-                   !Self.isValidDestinationURL(destinationURL)
-                {
+                if !ActivityDestinationURLPolicy.allows(
+                    item.destinationURL
+                ) {
                     throw ActivitySourceAggregationError
                         .invalidDestinationURL(sourceID: source.id)
                 }
@@ -246,13 +246,6 @@ public struct ActivitySourceAggregator: Sendable {
             ),
             sources: statuses
         )
-    }
-
-    private static func isValidDestinationURL(_ url: URL) -> Bool {
-        url.scheme?.lowercased() == "https"
-            && url.host?.isEmpty == false
-            && url.user == nil
-            && url.password == nil
     }
 }
 
