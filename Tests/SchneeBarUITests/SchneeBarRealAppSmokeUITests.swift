@@ -102,9 +102,8 @@ final class SchneeBarRealAppSmokeUITests: XCTestCase {
         _ element: XCUIElement
     ) -> Bool {
         let predicate = NSPredicate(
-            format: "label == %@ AND value == %@",
-            "External widget startup Loaded",
-            "1 external widget loaded."
+            format: "label == %@",
+            "External widget startup Loaded. 1 external widget loaded."
         )
         let expectation = XCTNSPredicateExpectation(
             predicate: predicate,
