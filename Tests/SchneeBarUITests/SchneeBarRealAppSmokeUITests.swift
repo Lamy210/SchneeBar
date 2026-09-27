@@ -177,11 +177,7 @@ final class SchneeBarRealAppSmokeUITests: XCTestCase {
                 includingPropertiesForKeys: nil
             )
             guard entries.isEmpty else {
-                XCTFail(
-                    "Refusing to overwrite non-empty external-widget storage "
-                        + "during CI smoke: \(rootURL.path)"
-                )
-                return
+                throw ExternalWidgetRealAppSmokeError.nonEmptyStorage
             }
         }
 
@@ -239,4 +235,9 @@ final class SchneeBarRealAppSmokeUITests: XCTestCase {
         }
         """#.utf8
     )
+}
+
+
+private enum ExternalWidgetRealAppSmokeError: Error {
+    case nonEmptyStorage
 }
