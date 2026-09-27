@@ -21,6 +21,7 @@ public actor GitHubActivityProvider {
     private let maximumCheckTargetsPerRepository: Int
     private let minimumColdRepositoriesPerRefresh: Int
     private let minimumColdReviewRepositoriesPerRefresh: Int
+    private let cachePolicy: GitHubActivityCachePolicy
     private let now: @Sendable () -> Date
 
     private var workflowPollState: [RepositoryPollKey: RepositoryPollState] = [:]
@@ -50,6 +51,7 @@ public actor GitHubActivityProvider {
         maximumCheckTargetsPerRepository: Int = 2,
         minimumColdRepositoriesPerRefresh: Int = 2,
         minimumColdReviewRepositoriesPerRefresh: Int = 1,
+        cachePolicy: GitHubActivityCachePolicy = .init(),
         now: @escaping @Sendable () -> Date = { .now }
     ) {
         self.workflowRunLoader = workflowRunLoader
@@ -68,6 +70,7 @@ public actor GitHubActivityProvider {
         self.maximumCheckTargetsPerRepository = max(1, maximumCheckTargetsPerRepository)
         self.minimumColdRepositoriesPerRefresh = max(0, minimumColdRepositoriesPerRefresh)
         self.minimumColdReviewRepositoriesPerRefresh = max(0, minimumColdReviewRepositoriesPerRefresh)
+        self.cachePolicy = cachePolicy
         self.now = now
     }
 
@@ -194,12 +197,23 @@ public actor GitHubActivityProvider {
                     connectionID: profile.id,
                     repositoryID: repository.id
                 )
-                cachedWorkflowActivities[key] = activities
-                workflowEvidence[key] = evidence
+                if activities.isEmpty {
+                    cachedWorkflowActivities.removeValue(forKey: key)
+                } else {
+                    cachedWorkflowActivities[key] = activities
+                }
+                if evidence.isEmpty {
+                    workflowEvidence.removeValue(forKey: key)
+                } else {
+                    workflowEvidence[key] = evidence
+                }
                 workflowPollState[key, default: RepositoryPollState()].isHot = !activities.isEmpty
 
                 var tracker = workflowRecoveryTrackers[key]
-                    ?? GitHubWorkflowRecoveryTracker()
+                    ?? GitHubWorkflowRecoveryTracker(
+                        maximumLanes:
+                            cachePolicy.maximumRecoveryLanesPerRepository
+                    )
                 recoveryEvents.append(
                     contentsOf: tracker.observe(
                         runs: runs,
@@ -218,7 +232,11 @@ public actor GitHubActivityProvider {
             case let .success(repositoryID, requests):
                 successfulReviewCount += 1
                 let key = RepositoryPollKey(connectionID: profile.id, repositoryID: repositoryID)
-                cachedReviewRequests[key] = requests
+                if requests.isEmpty {
+                    cachedReviewRequests.removeValue(forKey: key)
+                } else {
+                    cachedReviewRequests[key] = requests
+                }
                 reviewPollState[key, default: RepositoryPollState()].isHot = !requests.isEmpty
             case let .failure(failure):
                 reviewFailures.append(failure)
@@ -291,7 +309,11 @@ public actor GitHubActivityProvider {
             switch outcome {
             case let .success(key, activities):
                 successfulCheckCount += 1
-                cachedCheckActivities[key] = activities
+                if activities.isEmpty {
+                    cachedCheckActivities.removeValue(forKey: key)
+                } else {
+                    cachedCheckActivities[key] = activities
+                }
             case let .failure(_, failure):
                 checkFailures.append(failure)
             }
@@ -328,7 +350,11 @@ public actor GitHubActivityProvider {
             surfaces: surfaces,
             recoveryEvents: recoveryEvents
         )
-        lastResultByConnectionID[profile.id] = result.droppingRecoveryEvents()
+        enforceRetainedCacheBudget(connectionID: profile.id)
+        lastResultByConnectionID[profile.id] = result.boundedForRetention(
+            maximumItemsPerSurface:
+                cachePolicy.maximumRetainedItemsPerSurface
+        )
         return result
     }
 
@@ -525,6 +551,11 @@ public actor GitHubActivityProvider {
         }
         workflowEvidence = workflowEvidence.filter { key, _ in
             key.connectionID != connectionID || !repositoryIDs.contains(key.repositoryID)
+        }
+        workflowRecoveryTrackers = workflowRecoveryTrackers.filter {
+            key, _ in
+            key.connectionID != connectionID
+                || !repositoryIDs.contains(key.repositoryID)
         }
     }
 
