@@ -167,6 +167,9 @@ func retainedRepositoryCacheProjectsIntoBoundedSourceSnapshot() async throws {
         perRepositoryRunLimit: 20,
         maximumRepositoriesPerRefresh: 52,
         minimumColdRepositoriesPerRefresh: 52,
+        cachePolicy: GitHubActivityCachePolicy(
+            maximumWorkflowRepositories: 103
+        ),
         now: { Date(timeIntervalSince1970: 100) }
     )
     let profile = try budgetProfile()
