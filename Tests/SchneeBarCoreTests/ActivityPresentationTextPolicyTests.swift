@@ -105,6 +105,28 @@ func activityPresentationPolicyRejectsBlankOrControlContent(
 }
 
 @Test
+func activityPresentationPolicyAllowsNonBlankSurroundingWhitespace() {
+    #expect(
+        ActivityPresentationTextPolicy.allows(
+            " snow-labs/frost ",
+            role: .repository
+        )
+    )
+    #expect(
+        ActivityPresentationTextPolicy.allows(
+            " CI ",
+            role: .title
+        )
+    )
+    #expect(
+        ActivityPresentationTextPolicy.allows(
+            " Activity ",
+            role: .detail
+        )
+    )
+}
+
+@Test
 func activityPresentationPolicyAllowsMissingOptionalContentOnly() {
     #expect(
         ActivityPresentationTextPolicy.allowsOptional(
