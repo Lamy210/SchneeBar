@@ -45,8 +45,104 @@ jobs:
       - name: Build
         run: tuist build -- -skipMacroValidation CODE_SIGNING_ALLOWED=NO
 
+      - name: Prepare isolated external widget smoke fixture
+        if: runner.environment == 'github-hosted'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          owner="$HOME/Library/Application Support/SchneeBar"
+          root="$owner/ExternalWidgets"
+          fixture="$root/schneebar-ci-smoke.json"
+          sentinel="$root/.schneebar-ci-smoke-ready"
+          owner_state="$RUNNER_TEMP/schneebar-ci-created-owner"
+          root_state="$RUNNER_TEMP/schneebar-ci-created-root"
+
+          rm -f -- "$owner_state" "$root_state"
+
+          if [[ -L "$owner" || -L "$root" ]]; then
+            echo "Refusing symlinked SchneeBar Application Support storage." >&2
+            exit 1
+          fi
+
+          if [[ -e "$root" ]]; then
+            [[ -d "$root" ]] || {
+              echo "ExternalWidgets exists but is not a directory." >&2
+              exit 1
+            }
+            if [[ -n "$(find "$root" -mindepth 1 -maxdepth 1 -print -quit)" ]]; then
+              echo "Refusing to overwrite non-empty ExternalWidgets storage." >&2
+              exit 1
+            fi
+          else
+            if [[ ! -e "$owner" ]]; then
+              mkdir -p -- "$owner"
+              : > "$owner_state"
+            elif [[ ! -d "$owner" ]]; then
+              echo "SchneeBar Application Support owner is not a directory." >&2
+              exit 1
+            fi
+
+            mkdir -- "$root"
+            : > "$root_state"
+          fi
+
+          umask 077
+          cat > "$fixture" <<'JSON'
+          {
+            "schemaVersion": 1,
+            "id": "external.ci.smoke",
+            "displayName": "CI External Widget",
+            "defaultEnabled": false,
+            "defaultOrder": 1200,
+            "defaultRepresentation": "normal",
+            "visibility": {
+              "kind": "always"
+            },
+            "refresh": {
+              "kind": "manual"
+            },
+            "snapshot": {
+              "severity": "nominal",
+              "priority": "normal",
+              "compact": {
+                "text": "CI",
+                "systemImage": "checkmark.circle",
+                "accessibilityLabel": "CI external widget"
+              },
+              "normal": {
+                "text": "CI smoke",
+                "systemImage": "checkmark.circle",
+                "accessibilityLabel": "CI external widget smoke"
+              }
+            }
+          }
+          JSON
+          : > "$sentinel"
+
       - name: Test
-        env:
-          SCHNEEBAR_REAL_EXTERNAL_WIDGET_SMOKE: "1"
-          SCHNEEBAR_RUNNER_ENVIRONMENT: "${{ runner.environment }}"
         run: tuist test -- -skipMacroValidation CODE_SIGNING_ALLOWED=NO
+
+      - name: Clean isolated external widget smoke fixture
+        if: always() && runner.environment == 'github-hosted'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          owner="$HOME/Library/Application Support/SchneeBar"
+          root="$owner/ExternalWidgets"
+          fixture="$root/schneebar-ci-smoke.json"
+          sentinel="$root/.schneebar-ci-smoke-ready"
+          owner_state="$RUNNER_TEMP/schneebar-ci-created-owner"
+          root_state="$RUNNER_TEMP/schneebar-ci-created-root"
+
+          rm -f -- "$fixture" "$sentinel"
+
+          if [[ -f "$root_state" ]]; then
+            rmdir -- "$root" 2>/dev/null || true
+          fi
+          if [[ -f "$owner_state" ]]; then
+            rmdir -- "$owner" 2>/dev/null || true
+          fi
+
+          rm -f -- "$owner_state" "$root_state"
