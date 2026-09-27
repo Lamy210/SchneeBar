@@ -48,9 +48,14 @@ final class SchneeBarRealAppSmokeUITests: XCTestCase {
             "Expected External Widgets startup health in Settings.\n"
                 + app.debugDescription
         )
+        let loadedExternalWidget = waitForLoadedExternalWidgetStatus(
+            startupStatus
+        )
         XCTAssertTrue(
-            waitForLoadedExternalWidgetStatus(startupStatus),
-            "Expected one external widget to finish loading.\n"
+            loadedExternalWidget,
+            "Expected one external widget to finish loading. "
+                + "Observed label=\(startupStatus.label), "
+                + "value=\(String(describing: startupStatus.value)).\n"
                 + app.debugDescription
         )
 
