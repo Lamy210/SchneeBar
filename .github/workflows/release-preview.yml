@@ -395,7 +395,7 @@ jobs:
 
           (
             cd release-payload
-            shasum -a 256 -c "$(basename "${checksum}")"
+            sha256sum -c "$(basename "${checksum}")"
             unzip -t "$(basename "${archive}")"
           )
 
