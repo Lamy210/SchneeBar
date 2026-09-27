@@ -136,6 +136,7 @@ public enum ActivitySourceAggregationError: Error, Equatable, Sendable {
     case invalidItemNamespace(sourceID: ActivitySourceID)
     case invalidItemTimestamp(sourceID: ActivitySourceID)
     case invalidDestinationURL(sourceID: ActivitySourceID)
+    case invalidItemPresentation(sourceID: ActivitySourceID)
     case duplicateItemID(sourceID: ActivitySourceID)
     case noUsableSources([ActivitySourceStatusRecord])
 }
@@ -235,6 +236,22 @@ public struct ActivitySourceAggregator: Sendable {
                 ) {
                     throw ActivitySourceAggregationError
                         .invalidDestinationURL(sourceID: source.id)
+                }
+                guard ActivityPresentationTextPolicy.allows(
+                    item.repository,
+                    role: .repository
+                ),
+                ActivityPresentationTextPolicy.allows(
+                    item.context,
+                    role: .title
+                ),
+                ActivityPresentationTextPolicy.allows(
+                    item.detail,
+                    role: .detail
+                )
+                else {
+                    throw ActivitySourceAggregationError
+                        .invalidItemPresentation(sourceID: source.id)
                 }
                 items.append(item)
             }
