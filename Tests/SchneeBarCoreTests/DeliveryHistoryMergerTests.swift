@@ -48,6 +48,56 @@ func deliveryHistoryMergerSortsEqualTimestampsByID() {
     #expect(merged.entries.map(\.id) == ["a", "z"])
 }
 
+@Test(arguments: [
+    Double.nan,
+    Double.infinity,
+    -Double.infinity,
+])
+func deliveryHistoryMergerOrdersNonFiniteDatesAfterFiniteEntries(
+    occurredAt: Double
+) {
+    let live = DeliveryHistorySnapshot(
+        repository: "snow/repo",
+        entries: [
+            historyEntry(
+                id: "non-finite",
+                title: "Non-finite",
+                occurredAt: occurredAt
+            ),
+            historyEntry(
+                id: "finite",
+                title: "Finite",
+                occurredAt: 100
+            ),
+        ]
+    )
+
+    let merged = DeliveryHistoryMerger(maximumEntries: 200).merge(
+        cached: nil,
+        live: live
+    )
+
+    #expect(merged.entries.map(\.id) == ["finite", "non-finite"])
+}
+
+@Test
+func deliveryHistoryMergerOrdersNonFiniteTiesByID() {
+    let live = DeliveryHistorySnapshot(
+        repository: "snow/repo",
+        entries: [
+            historyEntry(id: "z", title: "Z", occurredAt: .nan),
+            historyEntry(id: "a", title: "A", occurredAt: .infinity),
+        ]
+    )
+
+    let merged = DeliveryHistoryMerger(maximumEntries: 200).merge(
+        cached: nil,
+        live: live
+    )
+
+    #expect(merged.entries.map(\.id) == ["a", "z"])
+}
+
 @Test
 func deliveryHistoryMergerCapsEntries() {
     let live = DeliveryHistorySnapshot(
