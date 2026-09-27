@@ -39,6 +39,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let deliveryRecoveryNotifier: any DeliveryRecoveryNotifying
 
     private var menuBarController: MenuBarController?
+    private var terminationFlushTask: Task<Void, Never>?
 
     override init() {
         let credentialStore = KeychainGitHubCredentialStore()
@@ -84,6 +85,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             deliveryHistoryStore: deliveryHistoryStore
         )
         super.init()
+    }
+
+    func applicationShouldTerminate(
+        _ sender: NSApplication
+    ) -> NSApplication.TerminateReply {
+        guard terminationFlushTask == nil else {
+            return .terminateLater
+        }
+
+        let runtimeModel = runtimeModel
+        terminationFlushTask = Task { @MainActor [weak self] in
+            await runtimeModel.flushPreferences()
+            self?.terminationFlushTask = nil
+            sender.reply(toApplicationShouldTerminate: true)
+        }
+        return .terminateLater
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
