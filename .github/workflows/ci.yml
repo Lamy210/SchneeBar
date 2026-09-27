@@ -48,4 +48,5 @@ jobs:
       - name: Test
         env:
           SCHNEEBAR_REAL_EXTERNAL_WIDGET_SMOKE: "1"
+          SCHNEEBAR_RUNNER_ENVIRONMENT: "${{ runner.environment }}"
         run: tuist test -- -skipMacroValidation CODE_SIGNING_ALLOWED=NO
