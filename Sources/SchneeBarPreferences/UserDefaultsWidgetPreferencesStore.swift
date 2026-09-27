@@ -47,6 +47,15 @@ public actor UserDefaultsWidgetPreferencesStore: WidgetPreferencesStore {
         )
         let data = try JSONEncoder().encode(payload)
         defaults.set(data, forKey: key)
+
+        // A successful save is a durability boundary. Most preference writes
+        // can rely on UserDefaults' normal asynchronous propagation, but
+        // SchneeBar also flushes pending changes while the process is
+        // terminating. Synchronize here so returning from save means a
+        // subsequent process can observe the committed configuration.
+        guard defaults.synchronize() else {
+            throw StoreError.synchronizationFailed
+        }
     }
 }
 
@@ -59,4 +68,5 @@ private struct PersistedWidgetConfiguration: Codable {
 
 private enum StoreError: Error {
     case unsupportedSchemaVersion(Int)
+    case synchronizationFailed
 }
