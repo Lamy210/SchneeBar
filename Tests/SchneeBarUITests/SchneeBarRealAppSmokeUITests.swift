@@ -4,6 +4,8 @@ import XCTest
 final class SchneeBarRealAppSmokeUITests: XCTestCase {
     private static let realExternalWidgetSmokeFlag =
         "SCHNEEBAR_REAL_EXTERNAL_WIDGET_SMOKE"
+    private static let runnerEnvironmentFlag =
+        "SCHNEEBAR_RUNNER_ENVIRONMENT"
     private static let externalWidgetID = "external.ci.smoke"
 
     override func setUpWithError() throws {
@@ -153,11 +155,12 @@ final class SchneeBarRealAppSmokeUITests: XCTestCase {
         let environment = ProcessInfo.processInfo.environment
         guard environment["GITHUB_ACTIONS"] == "true",
               environment["CI"] == "true",
-              environment[Self.realExternalWidgetSmokeFlag] == "1"
+              environment[Self.realExternalWidgetSmokeFlag] == "1",
+              environment[Self.runnerEnvironmentFlag] == "github-hosted"
         else {
             throw XCTSkip(
                 "Filesystem-backed external-widget smoke runs only "
-                    + "on explicitly opted-in GitHub Actions CI."
+                    + "on explicitly opted-in GitHub-hosted Actions CI."
             )
         }
     }
