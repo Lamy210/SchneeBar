@@ -53,6 +53,9 @@ public struct WidgetSettingsView: View {
                         set: { onSetEnabled(descriptor, $0) }
                     )
                 )
+                .accessibilityIdentifier(
+                    "widget-enabled-\(descriptor.id.rawValue)"
+                )
 
                 Spacer(minLength: 12)
 
