@@ -90,8 +90,9 @@ final class SchneeBarRealAppSmokeUITests: XCTestCase {
         // Quit immediately after the UI state flips. Command-Q exercises
         // AppKit's normal termination request, including applicationShouldTerminate,
         // instead of XCUIApplication.terminate()'s forceful test-process shutdown.
+        let terminatedGracefully = await quitApplicationGracefully(app)
         XCTAssertTrue(
-            await quitApplicationGracefully(app),
+            terminatedGracefully,
             "Expected SchneeBar to complete its graceful termination flush."
         )
         launchAndOpenSettings(app)
