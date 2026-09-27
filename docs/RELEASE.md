@@ -24,6 +24,8 @@ An ad-hoc signature verifies bundle integrity only. It does not establish Apple 
 
 Do not publish a preview as a stable release.
 
+The repository has not yet selected stable source/binary distribution terms. Preview release notes must point testers back to the repository's current license-status statement rather than implying an open-source or stable binary license. Stable terms are tracked separately in #215.
+
 ## 2. Stable release
 
 A stable release must not use the unsigned preview workflow as-is.
