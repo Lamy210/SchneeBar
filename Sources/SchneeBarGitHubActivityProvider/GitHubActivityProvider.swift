@@ -353,7 +353,9 @@ public actor GitHubActivityProvider {
         enforceRetainedCacheBudget(connectionID: profile.id)
         lastResultByConnectionID[profile.id] = result.boundedForRetention(
             maximumItemsPerSurface:
-                cachePolicy.maximumRetainedItemsPerSurface
+                cachePolicy.maximumRetainedItemsPerSurface,
+            maximumFailuresPerSurface:
+                cachePolicy.maximumRetainedFailuresPerSurface
         )
         return result
     }
