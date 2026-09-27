@@ -21,7 +21,6 @@ private actor WidgetRuntimePersistenceStore: WidgetPreferencesStore {
 private actor BlockingWidgetRuntimePersistenceStore: WidgetPreferencesStore {
     private var saved: [WidgetConfiguration] = []
     private var firstSaveStarted = false
-    private var firstSaveStartedWaiters: [CheckedContinuation<Void, Never>] = []
     private var firstSaveReleaseContinuation: CheckedContinuation<Void, Never>?
 
     func load() async throws -> WidgetConfiguration {
@@ -31,12 +30,6 @@ private actor BlockingWidgetRuntimePersistenceStore: WidgetPreferencesStore {
     func save(_ configuration: WidgetConfiguration) async throws {
         if !firstSaveStarted {
             firstSaveStarted = true
-            let waiters = firstSaveStartedWaiters
-            firstSaveStartedWaiters.removeAll()
-            for waiter in waiters {
-                waiter.resume()
-            }
-
             await withCheckedContinuation { continuation in
                 firstSaveReleaseContinuation = continuation
             }
@@ -45,14 +38,8 @@ private actor BlockingWidgetRuntimePersistenceStore: WidgetPreferencesStore {
         saved.append(configuration)
     }
 
-    func waitForFirstSaveToStart() async {
-        if firstSaveStarted {
-            return
-        }
-
-        await withCheckedContinuation { continuation in
-            firstSaveStartedWaiters.append(continuation)
-        }
+    func hasFirstSaveStarted() -> Bool {
+        firstSaveStarted
     }
 
     func releaseFirstSave() {
@@ -109,7 +96,19 @@ func widgetRuntimeFlushWaitsForOlderSaveBeforeFinalWrite() async throws {
     )
 
     model.setEnabled(false, for: descriptor)
-    await store.waitForFirstSaveToStart()
+
+    var firstSaveStarted = false
+    for _ in 0 ..< 100 {
+        if await store.hasFirstSaveStarted() {
+            firstSaveStarted = true
+            break
+        }
+        try await Task.sleep(for: .milliseconds(10))
+    }
+    #expect(firstSaveStarted)
+    guard firstSaveStarted else {
+        return
+    }
 
     model.setRepresentation(.compact, for: descriptor)
 
