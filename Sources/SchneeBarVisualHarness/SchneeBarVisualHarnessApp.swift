@@ -136,7 +136,10 @@ private struct VisualHarnessView: View {
                     WidgetOverviewView(snapshots: widgetScenario.snapshots)
                         .frame(maxWidth: 400)
 
-                    ActivityPopoverView(items: activityScenario.items)
+                    ActivityPopoverView(
+                        items: activityScenario.items,
+                        isTruncated: activityScenario.isTruncated
+                    )
                         .frame(maxWidth: 400)
 
                     ActivityDetailView(

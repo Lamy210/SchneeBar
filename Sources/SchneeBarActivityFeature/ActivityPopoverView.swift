@@ -6,20 +6,40 @@ func supportsLocalDetail(kind: ActivityKind) -> Bool {
     kind == .workflowRun
 }
 
+struct ActivityPartialStatePresentation: Equatable, Sendable {
+    let text: String
+    let accessibilityLabel: String
+}
+
+func activityPartialStatePresentation(
+    isTruncated: Bool
+) -> ActivityPartialStatePresentation? {
+    guard isTruncated else { return nil }
+
+    return ActivityPartialStatePresentation(
+        text: "Showing highest-priority recent activity",
+        accessibilityLabel:
+            "Activity list is partial. Showing highest-priority recent activity."
+    )
+}
+
 public struct ActivityPopoverView: View {
     private let title: String
     private let items: [ActivityItem]
+    private let isTruncated: Bool
     private let onInspect: ((ActivityItem) -> Void)?
     private let surfaceStyle: SchneeSurfaceStyle
 
     public init(
         title: String = "Developer Activity",
         items: [ActivityItem],
+        isTruncated: Bool = false,
         onInspect: ((ActivityItem) -> Void)? = nil,
         surfaceStyle: SchneeSurfaceStyle = .adaptive
     ) {
         self.title = title
         self.items = items
+        self.isTruncated = isTruncated
         self.onInspect = onInspect
         self.surfaceStyle = surfaceStyle
     }
@@ -29,6 +49,19 @@ public struct ActivityPopoverView: View {
 
         VStack(alignment: .leading, spacing: 14) {
             header(summary: summary)
+
+            if let partialState = activityPartialStatePresentation(
+                isTruncated: isTruncated
+            ) {
+                Label(
+                    partialState.text,
+                    systemImage: "line.3.horizontal.decrease.circle"
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .accessibilityLabel(partialState.accessibilityLabel)
+                .accessibilityIdentifier("activity-partial-state")
+            }
 
             Divider()
 

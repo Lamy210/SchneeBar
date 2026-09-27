@@ -8,6 +8,7 @@ public enum ActivityFixtureScenario: String, CaseIterable, Identifiable, Sendabl
     case waiting
     case enterprise
     case overflow
+    case truncated
     case mixedInbox
     case reviewOnly
 
@@ -21,9 +22,14 @@ public enum ActivityFixtureScenario: String, CaseIterable, Identifiable, Sendabl
         case .waiting: "Waiting"
         case .enterprise: "Enterprise"
         case .overflow: "Overflow"
+        case .truncated: "Truncated"
         case .mixedInbox: "GitHub Mixed Inbox"
         case .reviewOnly: "GitHub Review Only"
         }
+    }
+
+    public var isTruncated: Bool {
+        self == .truncated
     }
 
     public var items: [ActivityItem] {
@@ -101,6 +107,8 @@ public enum ActivityFixtureScenario: String, CaseIterable, Identifiable, Sendabl
                     state: index == 3 ? .failed : index.isMultiple(of: 3) ? .running : .success
                 )
             }
+        case .truncated:
+            ActivityFixtureScenario.mixedInbox.items
         case .mixedInbox:
             [
                 ActivityItem(
