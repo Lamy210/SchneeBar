@@ -569,6 +569,209 @@ func activityAggregatorCancellationWinsBeforeDestinationValidation() async throw
     }
 }
 
+@Test(arguments: [
+    ("", "CI", "Activity"),
+    ("   ", "CI", "Activity"),
+    ("snow/repo", "", "Activity"),
+    ("snow/repo", "   ", "Activity"),
+    ("snow/repo", "CI", ""),
+    ("snow/repo", "CI", "   "),
+    ("snow/repo\nrepo", "CI", "Activity"),
+    ("snow/repo", "CI\tInjected", "Activity"),
+    ("snow/repo", "CI", "Activity\nInjected"),
+])
+func activityAggregatorRejectsInvalidPresentationContent(
+    repository: String,
+    context: String,
+    detail: String
+) async {
+    let source = ClosureActivitySource(id: "alpha") {
+        ActivitySourceSnapshot(
+            items: [
+                ActivityItem(
+                    id: "alpha-actions:1",
+                    repository: repository,
+                    context: context,
+                    detail: detail,
+                    state: .success,
+                    updatedAt: Date(timeIntervalSince1970: 100)
+                ),
+            ],
+            status: .available
+        )
+    }
+
+    await #expect(
+        throws: ActivitySourceAggregationError.invalidItemPresentation(
+            sourceID: "alpha"
+        )
+    ) {
+        try await ActivitySourceAggregator(
+            sources: [source]
+        ).load()
+    }
+}
+
+@Test
+func activityAggregatorRejectsPresentationCharacterBounds() async {
+    let cases = [
+        ActivityItem(
+            id: "alpha-actions:1",
+            repository: String(repeating: "r", count: 513),
+            context: "CI",
+            detail: "Activity",
+            state: .success
+        ),
+        ActivityItem(
+            id: "alpha-actions:2",
+            repository: "snow/repo",
+            context: String(repeating: "c", count: 1_025),
+            detail: "Activity",
+            state: .success
+        ),
+        ActivityItem(
+            id: "alpha-actions:3",
+            repository: "snow/repo",
+            context: "CI",
+            detail: String(repeating: "d", count: 2_049),
+            state: .success
+        ),
+    ]
+
+    for item in cases {
+        let source = ClosureActivitySource(id: "alpha") {
+            ActivitySourceSnapshot(
+                items: [item],
+                status: .available
+            )
+        }
+
+        await #expect(
+            throws: ActivitySourceAggregationError.invalidItemPresentation(
+                sourceID: "alpha"
+            )
+        ) {
+            try await ActivitySourceAggregator(
+                sources: [source]
+            ).load()
+        }
+    }
+}
+
+@Test
+func activityAggregatorRejectsPresentationUTF8BoundsSeparately() async {
+    let cases = [
+        ActivityItem(
+            id: "alpha-actions:1",
+            repository: String(repeating: "😀", count: 385),
+            context: "CI",
+            detail: "Activity",
+            state: .success
+        ),
+        ActivityItem(
+            id: "alpha-actions:2",
+            repository: "snow/repo",
+            context: String(repeating: "😀", count: 769),
+            detail: "Activity",
+            state: .success
+        ),
+        ActivityItem(
+            id: "alpha-actions:3",
+            repository: "snow/repo",
+            context: "CI",
+            detail: String(repeating: "😀", count: 1_537),
+            state: .success
+        ),
+    ]
+
+    #expect(cases[0].repository.count <= 512)
+    #expect(cases[1].context.count <= 1_024)
+    #expect(cases[2].detail.count <= 2_048)
+
+    for item in cases {
+        let source = ClosureActivitySource(id: "alpha") {
+            ActivitySourceSnapshot(
+                items: [item],
+                status: .available
+            )
+        }
+
+        await #expect(
+            throws: ActivitySourceAggregationError.invalidItemPresentation(
+                sourceID: "alpha"
+            )
+        ) {
+            try await ActivitySourceAggregator(
+                sources: [source]
+            ).load()
+        }
+    }
+}
+
+@Test
+func activityAggregatorAcceptsBoundedUnicodePresentationContent() async throws {
+    let repository = String(repeating: "雪", count: 512)
+    let context = String(repeating: "開", count: 1_024)
+    let detail = String(repeating: "発", count: 2_048)
+    #expect(repository.utf8.count == 1_536)
+    #expect(context.utf8.count == 3_072)
+    #expect(detail.utf8.count == 6_144)
+
+    let item = ActivityItem(
+        id: "alpha-actions:1",
+        repository: repository,
+        context: context,
+        detail: detail,
+        state: .success,
+        updatedAt: Date(timeIntervalSince1970: 100)
+    )
+    let source = ClosureActivitySource(id: "alpha") {
+        ActivitySourceSnapshot(
+            items: [item],
+            status: .available
+        )
+    }
+
+    let result = try await ActivitySourceAggregator(
+        sources: [source]
+    ).load()
+
+    #expect(result.items == [item])
+}
+
+@Test
+func activityAggregatorKeepsDestinationErrorAheadOfPresentationValidation() async throws {
+    let unsafeURL = try #require(
+        URL(string: "file:///tmp/activity")
+    )
+    let source = ClosureActivitySource(id: "alpha") {
+        ActivitySourceSnapshot(
+            items: [
+                ActivityItem(
+                    id: "alpha-actions:1",
+                    repository: "",
+                    context: "",
+                    detail: "",
+                    state: .success,
+                    destinationURL: unsafeURL,
+                    updatedAt: Date(timeIntervalSince1970: 100)
+                ),
+            ],
+            status: .available
+        )
+    }
+
+    await #expect(
+        throws: ActivitySourceAggregationError.invalidDestinationURL(
+            sourceID: "alpha"
+        )
+    ) {
+        try await ActivitySourceAggregator(
+            sources: [source]
+        ).load()
+    }
+}
+
 private enum ActivitySourceTestError: Error {
     case providerSpecific
 }
