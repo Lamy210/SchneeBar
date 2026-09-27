@@ -19,7 +19,7 @@ public struct ActivityInboxOrdering: Sendable {
             return lhsState < rhsState
         }
 
-        switch (lhs.updatedAt, rhs.updatedAt) {
+        switch (finiteDate(lhs.updatedAt), finiteDate(rhs.updatedAt)) {
         case let (lhsDate?, rhsDate?):
             if lhsDate != rhsDate {
                 return lhsDate > rhsDate
@@ -39,6 +39,15 @@ public struct ActivityInboxOrdering: Sendable {
             return lhs.kind.rawValue < rhs.kind.rawValue
         }
         return lhs.id < rhs.id
+    }
+
+    private func finiteDate(_ date: Date?) -> Date? {
+        guard let date,
+              date.timeIntervalSinceReferenceDate.isFinite
+        else {
+            return nil
+        }
+        return date
     }
 
     private func attentionRank(_ attention: ActivityAttention) -> Int {
