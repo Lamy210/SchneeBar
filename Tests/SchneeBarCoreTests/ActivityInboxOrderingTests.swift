@@ -42,6 +42,54 @@ func datedItemsPrecedeUndatedItemsWithinSamePriority() {
     #expect(sorted.map(\.id) == ["dated", "undated"])
 }
 
+@Test(arguments: [
+    Double.nan,
+    Double.infinity,
+    -Double.infinity,
+])
+func nonFiniteDatesBehaveAsUndated(
+    timeIntervalSinceReferenceDate: Double
+) {
+    let finite = ActivityItem(
+        id: "finite",
+        repository: "snow/a",
+        context: "CI",
+        detail: "Running",
+        state: .running,
+        updatedAt: Date(timeIntervalSinceReferenceDate: 100)
+    )
+    let nonFinite = ActivityItem(
+        id: "non-finite",
+        repository: "snow/b",
+        context: "CI",
+        detail: "Running",
+        state: .running,
+        updatedAt: Date(
+            timeIntervalSinceReferenceDate:
+                timeIntervalSinceReferenceDate
+        )
+    )
+    let undated = ActivityItem(
+        id: "undated",
+        repository: "snow/c",
+        context: "CI",
+        detail: "Running",
+        state: .running
+    )
+
+    let sorted = [nonFinite, undated, finite].sorted(
+        by: ActivityInboxOrdering().areInIncreasingOrder
+    )
+
+    #expect(
+        sorted.map(\.id) == [
+            "finite",
+            "non-finite",
+            "undated",
+        ]
+    )
+}
+
 @Test
 func stableFieldsBreakExactPriorityTiesDeterministically() {
     let date = Date(timeIntervalSince1970: 100)
