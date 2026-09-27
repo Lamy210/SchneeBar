@@ -258,6 +258,32 @@ func activityAggregatorAcceptsFiniteItemTimestamp(
     #expect(result.items.first?.updatedAt == timestamp)
 }
 
+@Test
+func activityAggregatorAcceptsMissingItemTimestamp() async throws {
+    let source = ClosureActivitySource(id: "alpha") {
+        ActivitySourceSnapshot(
+            items: [
+                ActivityItem(
+                    id: "alpha-actions:1",
+                    repository: "snow/repo",
+                    context: "CI",
+                    detail: "Activity",
+                    state: .success,
+                    updatedAt: nil
+                ),
+            ],
+            status: .available
+        )
+    }
+
+    let result = try await ActivitySourceAggregator(
+        sources: [source]
+    ).load()
+
+    #expect(result.items.count == 1)
+    #expect(result.items.first?.updatedAt == nil)
+}
+
 private enum ActivitySourceTestError: Error {
     case providerSpecific
 }
