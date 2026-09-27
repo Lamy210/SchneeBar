@@ -136,6 +136,7 @@ public enum ActivitySourceAggregationError: Error, Equatable, Sendable {
     case invalidItemNamespace(sourceID: ActivitySourceID)
     case invalidItemTimestamp(sourceID: ActivitySourceID)
     case invalidDestinationURL(sourceID: ActivitySourceID)
+    case invalidItemPresentation(sourceID: ActivitySourceID)
     case duplicateItemID(sourceID: ActivitySourceID)
     case noUsableSources([ActivitySourceStatusRecord])
 }
@@ -236,6 +237,10 @@ public struct ActivitySourceAggregator: Sendable {
                     throw ActivitySourceAggregationError
                         .invalidDestinationURL(sourceID: source.id)
                 }
+                guard Self.hasValidPresentationContent(item) else {
+                    throw ActivitySourceAggregationError
+                        .invalidItemPresentation(sourceID: source.id)
+                }
                 items.append(item)
             }
         }
@@ -246,6 +251,44 @@ public struct ActivitySourceAggregator: Sendable {
             ),
             sources: statuses
         )
+    }
+    private static func hasValidPresentationContent(
+        _ item: ActivityItem
+    ) -> Bool {
+        isValidPresentationText(
+            item.repository,
+            maximumCharacters: 512,
+            maximumUTF8Bytes: 1_536
+        )
+            && isValidPresentationText(
+                item.context,
+                maximumCharacters: 1_024,
+                maximumUTF8Bytes: 3_072
+            )
+            && isValidPresentationText(
+                item.detail,
+                maximumCharacters: 2_048,
+                maximumUTF8Bytes: 6_144
+            )
+    }
+
+    private static func isValidPresentationText(
+        _ value: String,
+        maximumCharacters: Int,
+        maximumUTF8Bytes: Int
+    ) -> Bool {
+        guard !value.trimmingCharacters(
+            in: .whitespacesAndNewlines
+        ).isEmpty,
+        value.count <= maximumCharacters,
+        value.utf8.count <= maximumUTF8Bytes,
+        !value.unicodeScalars.contains(where: {
+            CharacterSet.controlCharacters.contains($0)
+        })
+        else {
+            return false
+        }
+        return true
     }
 }
 
