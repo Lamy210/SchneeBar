@@ -72,9 +72,22 @@ public struct DeliveryHistoryMerger: Sendable {
         _ lhs: DeliveryHistoryEntry,
         _ rhs: DeliveryHistoryEntry
     ) -> Bool {
-        if lhs.occurredAt != rhs.occurredAt {
-            return lhs.occurredAt > rhs.occurredAt
+        switch (finiteDate(lhs.occurredAt), finiteDate(rhs.occurredAt)) {
+        case let (lhsDate?, rhsDate?):
+            if lhsDate != rhsDate {
+                return lhsDate > rhsDate
+            }
+        case (_?, nil):
+            return true
+        case (nil, _?):
+            return false
+        case (nil, nil):
+            break
         }
         return lhs.id < rhs.id
+    }
+
+    private func finiteDate(_ date: Date) -> Date? {
+        date.timeIntervalSinceReferenceDate.isFinite ? date : nil
     }
 }
