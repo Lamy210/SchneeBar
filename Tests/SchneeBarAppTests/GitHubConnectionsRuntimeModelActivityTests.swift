@@ -167,6 +167,61 @@ func activityRuntimeUsesGlobalInboxOrderingAcrossSources() async throws {
     #expect(items.map(\.id) == ["github-review:1:7", "github-actions:1:11"])
 }
 
+@Test @MainActor
+func activityRuntimeBoundsLargeRetainedActivitySnapshotWithoutDowngradingSource() async throws {
+    let maximum = ActivitySourceCollectionPolicy.maximumItemsPerSource
+    let repositoryURL = try #require(
+        URL(string: "https://github.com/snow/app")
+    )
+    let runs = (0 ... maximum).map { index in
+        GitHubWorkflowRun(
+            id: Int64(index + 1),
+            workflowID: Int64(index + 1),
+            name: "CI",
+            displayTitle: "Build \(index)",
+            event: "push",
+            status: .completed,
+            conclusion: .success,
+            runNumber: index + 1,
+            headBranch: "main",
+            headSHA: String(
+                format: "%040llx",
+                Int64(index + 1)
+            ),
+            webURL: repositoryURL.appendingPathComponent(
+                "actions/runs/\(index + 1)"
+            ),
+            pullRequestNumbers: [],
+            createdAt: Date(
+                timeIntervalSince1970: TimeInterval(index)
+            ),
+            updatedAt: Date(
+                timeIntervalSince1970: TimeInterval(index + 1)
+            )
+        )
+    }
+    let fixture = try activityRuntimeFixture(
+        installationPermissions: [
+            "actions": "read",
+            "pull_requests": "read",
+            "checks": "read",
+        ],
+        workflowRuns: runs,
+        reviewRequests: []
+    )
+
+    await fixture.model.refresh(profileID: fixture.profile.id)
+    let snapshot = try await fixture.model.loadActivitySourceSnapshot()
+
+    #expect(snapshot.status == .available)
+    #expect(snapshot.items.count == maximum)
+    #expect(snapshot.isTruncated)
+    #expect(
+        snapshot.items.first?.id
+            == "github-actions:1:\(maximum + 1)"
+    )
+}
+
 @MainActor
 private struct ActivityRuntimeFixture {
     let model: GitHubConnectionsRuntimeModel
