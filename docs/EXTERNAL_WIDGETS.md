@@ -275,6 +275,13 @@ startup-only behavior in the built app:
    coarse invalid-document health state, never its filename, path, JSON, or
    rejected value.
 
+The GitHub-hosted real-app smoke now automates the valid-document launch path,
+the default-disabled assertion, and the explicit-enable preference surviving a
+real application relaunch. The test restores that preference to disabled before
+it exits. Removed-document and malformed-document release checks remain manual
+until they can be isolated without weakening the workflow-owned filesystem
+fixture boundary.
+
 This is a release smoke check, not a live-reload contract. Editing files while
 SchneeBar is running is intentionally outside v1 behavior.
 
