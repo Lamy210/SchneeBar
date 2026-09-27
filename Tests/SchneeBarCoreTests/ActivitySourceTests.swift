@@ -347,6 +347,228 @@ func activityAggregatorAcceptsMissingItemTimestamp() async throws {
     #expect(result.items.first?.updatedAt == nil)
 }
 
+@Test(arguments: [
+    "http://example.com/activity",
+    "file:///tmp/activity",
+    "mailto:dev@example.com",
+    "schneebar://example.com/activity",
+    "/relative/path",
+    "https:///missing-host",
+    "https://user@example.com/activity",
+    "https://user:password@example.com/activity",
+])
+func activityAggregatorRejectsUnsafeDestinationURL(
+    rawValue: String
+) async throws {
+    let destinationURL = try #require(URL(string: rawValue))
+    let source = ClosureActivitySource(id: "alpha") {
+        ActivitySourceSnapshot(
+            items: [
+                ActivityItem(
+                    id: "alpha-actions:1",
+                    repository: "snow/repo",
+                    context: "CI",
+                    detail: "Activity",
+                    state: .success,
+                    destinationURL: destinationURL,
+                    updatedAt: Date(timeIntervalSince1970: 100)
+                ),
+            ],
+            status: .available
+        )
+    }
+
+    await #expect(
+        throws: ActivitySourceAggregationError.invalidDestinationURL(
+            sourceID: "alpha"
+        )
+    ) {
+        try await ActivitySourceAggregator(
+            sources: [source]
+        ).load()
+    }
+}
+
+@Test(arguments: [
+    "https://github.com/snow/repo/actions/runs/1",
+    "https://company.ghe.com/acme/repo/pull/2?tab=checks#summary",
+    "https://github.internal.example:8443/acme/repo/actions/runs/3",
+])
+func activityAggregatorAcceptsHTTPSDestinationURL(
+    rawValue: String
+) async throws {
+    let destinationURL = try #require(URL(string: rawValue))
+    let source = ClosureActivitySource(id: "alpha") {
+        ActivitySourceSnapshot(
+            items: [
+                ActivityItem(
+                    id: "alpha-actions:1",
+                    repository: "snow/repo",
+                    context: "CI",
+                    detail: "Activity",
+                    state: .success,
+                    destinationURL: destinationURL,
+                    updatedAt: Date(timeIntervalSince1970: 100)
+                ),
+            ],
+            status: .available
+        )
+    }
+
+    let result = try await ActivitySourceAggregator(
+        sources: [source]
+    ).load()
+
+    #expect(result.items.first?.destinationURL == destinationURL)
+}
+
+@Test
+func activityAggregatorAcceptsMissingDestinationURL() async throws {
+    let source = ClosureActivitySource(id: "alpha") {
+        ActivitySourceSnapshot(
+            items: [activitySourceItem(id: "alpha-actions:1")],
+            status: .available
+        )
+    }
+
+    let result = try await ActivitySourceAggregator(
+        sources: [source]
+    ).load()
+
+    #expect(result.items.first?.destinationURL == nil)
+}
+
+@Test
+func activityAggregatorKeepsNamespaceErrorAheadOfDestinationValidation() async throws {
+    let destinationURL = try #require(
+        URL(string: "file:///tmp/activity")
+    )
+    let source = ClosureActivitySource(id: "alpha") {
+        ActivitySourceSnapshot(
+            items: [
+                ActivityItem(
+                    id: "beta-actions:1",
+                    repository: "snow/repo",
+                    context: "CI",
+                    detail: "Activity",
+                    state: .success,
+                    destinationURL: destinationURL
+                ),
+            ],
+            status: .available
+        )
+    }
+
+    await #expect(
+        throws: ActivitySourceAggregationError.invalidItemNamespace(
+            sourceID: "alpha"
+        )
+    ) {
+        try await ActivitySourceAggregator(
+            sources: [source]
+        ).load()
+    }
+}
+
+@Test
+func activityAggregatorKeepsDuplicateErrorAheadOfDestinationValidation() async throws {
+    let destinationURL = try #require(
+        URL(string: "file:///tmp/activity")
+    )
+    let source = ClosureActivitySource(id: "alpha") {
+        ActivitySourceSnapshot(
+            items: [
+                activitySourceItem(id: "alpha-actions:1"),
+                ActivityItem(
+                    id: "alpha-actions:1",
+                    repository: "snow/repo",
+                    context: "CI",
+                    detail: "Activity",
+                    state: .success,
+                    destinationURL: destinationURL
+                ),
+            ],
+            status: .available
+        )
+    }
+
+    await #expect(
+        throws: ActivitySourceAggregationError.duplicateItemID(
+            sourceID: "alpha"
+        )
+    ) {
+        try await ActivitySourceAggregator(
+            sources: [source]
+        ).load()
+    }
+}
+
+@Test
+func activityAggregatorKeepsTimestampErrorAheadOfDestinationValidation() async throws {
+    let destinationURL = try #require(
+        URL(string: "file:///tmp/activity")
+    )
+    let source = ClosureActivitySource(id: "alpha") {
+        ActivitySourceSnapshot(
+            items: [
+                ActivityItem(
+                    id: "alpha-actions:1",
+                    repository: "snow/repo",
+                    context: "CI",
+                    detail: "Activity",
+                    state: .success,
+                    destinationURL: destinationURL,
+                    updatedAt: Date(
+                        timeIntervalSinceReferenceDate: .nan
+                    )
+                ),
+            ],
+            status: .available
+        )
+    }
+
+    await #expect(
+        throws: ActivitySourceAggregationError.invalidItemTimestamp(
+            sourceID: "alpha"
+        )
+    ) {
+        try await ActivitySourceAggregator(
+            sources: [source]
+        ).load()
+    }
+}
+
+@Test
+func activityAggregatorCancellationWinsBeforeDestinationValidation() async throws {
+    let destinationURL = try #require(
+        URL(string: "file:///tmp/activity")
+    )
+    let source = ClosureActivitySource(id: "alpha") {
+        withUnsafeCurrentTask { task in
+            task?.cancel()
+        }
+        return ActivitySourceSnapshot(
+            items: [
+                ActivityItem(
+                    id: "alpha-actions:1",
+                    repository: "snow/repo",
+                    context: "CI",
+                    detail: "Activity",
+                    state: .success,
+                    destinationURL: destinationURL
+                ),
+            ],
+            status: .available
+        )
+    }
+
+    await #expect(throws: CancellationError.self) {
+        try await ActivitySourceAggregator(
+            sources: [source]
+        ).load()
+    }
+}
+
 private enum ActivitySourceTestError: Error {
     case providerSpecific
 }
