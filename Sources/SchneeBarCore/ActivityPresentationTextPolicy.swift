@@ -33,6 +33,63 @@ public enum ActivityPresentationTextPolicy {
         return allows(value, role: role)
     }
 
+    public static func allows(
+        _ detail: ActivityDetailSnapshot
+    ) -> Bool {
+        guard allows(detail.repository, role: .repository),
+              allows(detail.title, role: .title),
+              allows(detail.summary, role: .detail),
+              allows(rows: detail.rows)
+        else {
+            return false
+        }
+
+        guard let timeline = detail.deliveryTimeline else {
+            return true
+        }
+        return allows(timeline)
+    }
+
+    public static func allows(
+        _ timeline: DeliveryTimelineSnapshot
+    ) -> Bool {
+        timeline.events.allSatisfy {
+            allows($0.title, role: .title)
+                && allowsOptional($0.detail, role: .detail)
+        }
+            && timeline.evidence.allSatisfy {
+                allows($0.title, role: .title)
+                    && allowsOptional($0.detail, role: .detail)
+            }
+    }
+
+    public static func allows(
+        _ history: DeliveryHistorySnapshot
+    ) -> Bool {
+        allows(history.repository, role: .repository)
+            && history.entries.allSatisfy {
+                allows($0.title, role: .title)
+                    && allowsOptional($0.detail, role: .detail)
+            }
+    }
+
+    private static func allows(
+        rows: [ActivityDetailRow]
+    ) -> Bool {
+        var pending = rows
+
+        while let row = pending.popLast() {
+            guard allows(row.title, role: .title),
+                  allowsOptional(row.detail, role: .detail)
+            else {
+                return false
+            }
+            pending.append(contentsOf: row.children)
+        }
+
+        return true
+    }
+
     private static func budget(
         for role: ActivityPresentationTextRole
     ) -> PresentationBudget {
