@@ -164,6 +164,8 @@ jobs:
           for workflow in ci.yml codeql.yml; do
             run_json="$(gh run list \
               --commit "${GITHUB_SHA}" \
+              --branch main \
+              --event push \
               --workflow "${workflow}" \
               --limit 1 \
               --json headSha,status,conclusion)"
@@ -310,6 +312,7 @@ jobs:
           - GHES runtime REST API-version discovery is intentionally not implemented under the currently published GitHub GHES OpenAPI contract; SchneeBar uses the evidence-backed release compatibility matrix instead.
           - External widget live reload/install UX and arbitrary native plugins are intentionally deferred.
           - The repository does not yet publish a stable release channel.
+          - Source/binary distribution terms for a stable release have not yet been selected (#215); the repository README remains authoritative for the current license status.
 
           Because this preview is not notarized, macOS Gatekeeper may block normal first launch after downloading it. Do not treat this artifact as the stable distribution channel.
 
