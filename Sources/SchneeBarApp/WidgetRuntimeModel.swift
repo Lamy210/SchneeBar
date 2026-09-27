@@ -54,6 +54,23 @@ final class WidgetRuntimeModel {
         configurationDidChange()
     }
 
+    func flushPreferences() async {
+        let pendingTask = persistenceTask
+        persistenceTask = nil
+        pendingTask?.cancel()
+
+        if let pendingTask {
+            await pendingTask.value
+        }
+
+        let latestConfiguration = configuration
+        do {
+            try await preferencesStore.save(latestConfiguration)
+        } catch {
+            // Persistence diagnostics will be surfaced in a later phase.
+        }
+    }
+
     func moveWidget(id: WidgetID, offset: Int) {
         guard offset != 0 else { return }
 
@@ -78,9 +95,15 @@ final class WidgetRuntimeModel {
         let latestConfiguration = configuration
         onConfigurationChanged?(latestConfiguration)
 
-        persistenceTask?.cancel()
+        let previousTask = persistenceTask
+        previousTask?.cancel()
+
         let store = preferencesStore
         persistenceTask = Task {
+            if let previousTask {
+                await previousTask.value
+            }
+
             do {
                 try await Task.sleep(for: .milliseconds(150))
                 try Task.checkCancellation()

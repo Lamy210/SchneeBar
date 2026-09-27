@@ -86,9 +86,15 @@ final class SchneeBarRealAppSmokeUITests: XCTestCase {
             becameEnabled,
             "Expected the external widget to become enabled through Settings."
         )
-        try await Task.sleep(for: .milliseconds(500))
 
-        app.terminate()
+        // Quit immediately after the UI state flips. Command-Q exercises
+        // AppKit's normal termination request, including applicationShouldTerminate,
+        // instead of XCUIApplication.terminate()'s forceful test-process shutdown.
+        let terminatedGracefully = await quitApplicationGracefully(app)
+        XCTAssertTrue(
+            terminatedGracefully,
+            "Expected SchneeBar to complete its graceful termination flush."
+        )
         launchAndOpenSettings(app)
 
         let relaunchedStartupStatus = externalWidgetStartupStatus(in: app)
@@ -133,6 +139,23 @@ final class SchneeBarRealAppSmokeUITests: XCTestCase {
             "Expected the test to restore the external widget to disabled."
         )
         try await Task.sleep(for: .milliseconds(500))
+    }
+
+    @MainActor
+    private func quitApplicationGracefully(
+        _ app: XCUIApplication
+    ) async -> Bool {
+        app.activate()
+        app.typeKey("q", modifierFlags: .command)
+
+        for _ in 0 ..< 100 {
+            if app.state == .notRunning {
+                return true
+            }
+            try? await Task.sleep(for: .milliseconds(50))
+        }
+
+        return app.state == .notRunning
     }
 
     @MainActor
