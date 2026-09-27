@@ -248,13 +248,12 @@ public actor GitHubActivityProvider {
                 maximumTotal: maximumCheckTargetsPerRefresh,
                 maximumPerRepository: maximumCheckTargetsPerRepository
             )
-            let validCandidateKeys = Set(checkCandidates.map {
-                CheckPollKey(
-                    connectionID: profile.id,
-                    repositoryID: $0.repositoryID,
-                    headSHA: $0.headSHA
-                )
-            })
+            let validCandidateKeys = validCachedCheckCandidateKeys(
+                connectionID: profile.id,
+                repositories: checkEligible,
+                reviewRequestsByRepositoryID: reviewRequestsByRepositoryID,
+                workflowEvidenceByRepositoryID: workflowEvidenceByRepositoryID
+            )
             pruneCheckCandidates(
                 connectionID: profile.id,
                 validCandidateKeys: validCandidateKeys
@@ -550,6 +549,54 @@ public actor GitHubActivityProvider {
         cachedCheckActivities = cachedCheckActivities.filter { key, _ in
             key.connectionID != connectionID || !repositoryIDs.contains(key.repositoryID)
         }
+    }
+
+    private func validCachedCheckCandidateKeys(
+        connectionID: UUID,
+        repositories: [GitHubRepositoryAccess],
+        reviewRequestsByRepositoryID: [Int64: [GitHubReviewRequest]],
+        workflowEvidenceByRepositoryID: [Int64: [GitHubWorkflowEvidence]]
+    ) -> Set<CheckPollKey> {
+        let repositoryByID = Dictionary(
+            uniqueKeysWithValues: repositories.map { ($0.id, $0) }
+        )
+        let cachedRepositoryIDs = Set(
+            cachedCheckActivities.keys.compactMap { key in
+                key.connectionID == connectionID
+                    ? key.repositoryID
+                    : nil
+            }
+        )
+
+        var validKeys = Set<CheckPollKey>()
+        for repositoryID in cachedRepositoryIDs {
+            guard let repository = repositoryByID[repositoryID] else {
+                continue
+            }
+
+            let candidates = checkCandidatePlanner.candidates(
+                repository: repository,
+                reviewRequests: reviewRequestsByRepositoryID[
+                    repositoryID,
+                    default: []
+                ],
+                workflowEvidence: workflowEvidenceByRepositoryID[
+                    repositoryID,
+                    default: []
+                ],
+                maximum: maximumCheckTargetsPerRepository
+            )
+            for candidate in candidates {
+                validKeys.insert(
+                    CheckPollKey(
+                        connectionID: connectionID,
+                        repositoryID: candidate.repositoryID,
+                        headSHA: candidate.headSHA
+                    )
+                )
+            }
+        }
+        return validKeys
     }
 
     private func pruneCheckCandidates(

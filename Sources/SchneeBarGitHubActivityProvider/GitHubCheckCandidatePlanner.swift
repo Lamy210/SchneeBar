@@ -21,44 +21,68 @@ struct GitHubCheckCandidatePlanner: Sendable {
         for repository in repositories.sorted(by: repositorySort) {
             guard result.count < maximumTotal else { break }
 
-            var seenSHAs = Set<String>()
-            var repositoryCandidates: [GitHubCheckCandidate] = []
-
-            let reviews = reviewRequestsByRepositoryID[repository.id, default: []]
-                .sorted(by: reviewSort)
-            for review in reviews {
-                guard seenSHAs.insert(review.headSHA).inserted else { continue }
-                repositoryCandidates.append(
-                    GitHubCheckCandidate(
-                        repositoryID: repository.id,
-                        headSHA: review.headSHA
-                    )
-                )
-                if repositoryCandidates.count == maximumPerRepository {
-                    break
-                }
-            }
-
-            if repositoryCandidates.count < maximumPerRepository {
-                let evidence = workflowEvidenceByRepositoryID[repository.id, default: []]
-                    .sorted(by: workflowSort)
-                for item in evidence {
-                    guard seenSHAs.insert(item.headSHA).inserted else { continue }
-                    repositoryCandidates.append(
-                        GitHubCheckCandidate(
-                            repositoryID: repository.id,
-                            headSHA: item.headSHA
-                        )
-                    )
-                    if repositoryCandidates.count == maximumPerRepository {
-                        break
-                    }
-                }
-            }
-
-            result.append(
-                contentsOf: repositoryCandidates.prefix(maximumTotal - result.count)
+            let repositoryCandidates = candidates(
+                repository: repository,
+                reviewRequests: reviewRequestsByRepositoryID[
+                    repository.id,
+                    default: []
+                ],
+                workflowEvidence: workflowEvidenceByRepositoryID[
+                    repository.id,
+                    default: []
+                ],
+                maximum: maximumPerRepository
             )
+            result.append(
+                contentsOf: repositoryCandidates.prefix(
+                    maximumTotal - result.count
+                )
+            )
+        }
+
+        return result
+    }
+
+    func candidates(
+        repository: GitHubRepositoryAccess,
+        reviewRequests: [GitHubReviewRequest],
+        workflowEvidence: [GitHubWorkflowEvidence],
+        maximum: Int
+    ) -> [GitHubCheckCandidate] {
+        guard maximum > 0 else { return [] }
+
+        var seenSHAs = Set<String>()
+        var result: [GitHubCheckCandidate] = []
+        result.reserveCapacity(maximum)
+
+        for review in reviewRequests.sorted(by: reviewSort) {
+            guard seenSHAs.insert(review.headSHA).inserted else {
+                continue
+            }
+            result.append(
+                GitHubCheckCandidate(
+                    repositoryID: repository.id,
+                    headSHA: review.headSHA
+                )
+            )
+            if result.count == maximum {
+                return result
+            }
+        }
+
+        for item in workflowEvidence.sorted(by: workflowSort) {
+            guard seenSHAs.insert(item.headSHA).inserted else {
+                continue
+            }
+            result.append(
+                GitHubCheckCandidate(
+                    repositoryID: repository.id,
+                    headSHA: item.headSHA
+                )
+            )
+            if result.count == maximum {
+                break
+            }
         }
 
         return result
