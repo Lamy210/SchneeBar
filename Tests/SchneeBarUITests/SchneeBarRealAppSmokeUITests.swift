@@ -62,13 +62,10 @@ final class SchneeBarRealAppSmokeUITests: XCTestCase {
             "Expected External Widgets startup health in Settings.\n"
                 + app.debugDescription
         )
-        XCTAssertEqual(
-            startupStatus.label,
-            "External widget startup Loaded"
-        )
-        XCTAssertEqual(
-            startupStatus.value as? String,
-            "1 external widget loaded."
+        XCTAssertTrue(
+            waitForLoadedExternalWidgetStatus(startupStatus),
+            "Expected one external widget to finish loading.\n"
+                + app.debugDescription
         )
 
         let widgetToggle = app
@@ -107,6 +104,25 @@ final class SchneeBarRealAppSmokeUITests: XCTestCase {
                 identifier: "external-widget-startup-status"
             )
             .firstMatch
+    }
+
+    @MainActor
+    private func waitForLoadedExternalWidgetStatus(
+        _ element: XCUIElement
+    ) -> Bool {
+        let predicate = NSPredicate(
+            format: "label == %@ AND value == %@",
+            "External widget startup Loaded",
+            "1 external widget loaded."
+        )
+        let expectation = XCTNSPredicateExpectation(
+            predicate: predicate,
+            object: element
+        )
+        return XCTWaiter.wait(
+            for: [expectation],
+            timeout: 10
+        ) == .completed
     }
 
     @MainActor
