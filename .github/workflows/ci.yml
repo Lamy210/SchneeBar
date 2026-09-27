@@ -50,6 +50,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          umask 077
 
           owner="$HOME/Library/Application Support/SchneeBar"
           root="$owner/ExternalWidgets"
@@ -87,7 +88,6 @@ jobs:
             : > "$root_state"
           fi
 
-          umask 077
           cat > "$fixture" <<'JSON'
           {
             "schemaVersion": 1,
