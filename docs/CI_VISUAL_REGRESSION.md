@@ -67,9 +67,26 @@ The first goal is reviewability and renderer stability. macOS rasterization tole
 
 The required lane is pinned to Xcode 26.6 / Swift 6.3 on `macos-26`. A separate scheduled `xcode-27` public-preview canary is intentionally non-blocking. Preview runner failures are compatibility signals, never release or merge gates.
 
+## Real-app smoke coverage
+
+The macOS UI-test target launches the actual `SchneeBar` app and opens the
+SwiftUI Settings scene through the standard Command-, shortcut. CI additionally
+opts into a filesystem-backed startup smoke that creates one bounded v1 external
+widget document in the ephemeral GitHub-hosted runner's normal Application
+Support location, verifies the production loader reports one loaded widget, and
+confirms the registered widget remains disabled by default.
+
+The GitHub-hosted workflow prepares one owned fixture plus an opaque sentinel
+immediately before the test step and removes them in an `always()` cleanup
+step. The UI test itself never creates or deletes Application Support content;
+it runs the filesystem-backed assertion only when both prepared files are
+present and safe regular files. Ordinary local and self-hosted `tuist test`
+runs have no sentinel, so the filesystem-backed assertion is skipped without
+mutating Application Support.
+
 ## Future layers
 
-- XCUITest smoke flow: click status item, open popover/settings
+- status-item/popover interaction smoke
 - full-app screenshots that exercise real Liquid Glass/materials
 - accessibility variants (increased contrast/reduced transparency)
 - fixed self-hosted Mac only if GitHub-hosted raster differences become materially flaky
