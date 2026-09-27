@@ -181,7 +181,7 @@ func activityRuntimeBoundsLargeRetainedActivitySnapshotWithoutDowngradingSource(
             displayTitle: "Build \(index)",
             event: "push",
             status: .completed,
-            conclusion: .success,
+            conclusion: .failure,
             runNumber: index + 1,
             headBranch: "main",
             headSHA: String(
