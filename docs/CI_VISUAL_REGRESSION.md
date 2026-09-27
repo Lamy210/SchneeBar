@@ -76,10 +76,13 @@ widget document in the ephemeral GitHub-hosted runner's normal Application
 Support location, verifies the production loader reports one loaded widget, and
 confirms the registered widget remains disabled by default.
 
-The filesystem-backed test is guarded by `GITHUB_ACTIONS=true`, `CI=true`,
-`SCHNEEBAR_REAL_EXTERNAL_WIDGET_SMOKE=1`, and the workflow-provided
-`SCHNEEBAR_RUNNER_ENVIRONMENT=github-hosted`. Ordinary local and self-hosted
-`tuist test` runs skip it and do not mutate Application Support.
+The GitHub-hosted workflow prepares one owned fixture plus an opaque sentinel
+immediately before the test step and removes them in an `always()` cleanup
+step. The UI test itself never creates or deletes Application Support content;
+it runs the filesystem-backed assertion only when both prepared files are
+present and safe regular files. Ordinary local and self-hosted `tuist test`
+runs have no sentinel, so the filesystem-backed assertion is skipped without
+mutating Application Support.
 
 ## Future layers
 
