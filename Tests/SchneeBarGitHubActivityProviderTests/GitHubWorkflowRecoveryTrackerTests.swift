@@ -295,10 +295,10 @@ func recoveryTrackerEvictsOldestLanesAtConfiguredBudget() throws {
 
     #expect(events.count == 2)
     #expect(
-        Set(events.map(\.detail)) == [
+        Set(events.map(\.detail)) == Set([
             "PR #121 succeeded after a previously observed failed workflow run",
             "PR #122 succeeded after a previously observed failed workflow run",
-        ]
+        ])
     )
 }
 
