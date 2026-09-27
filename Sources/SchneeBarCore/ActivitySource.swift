@@ -139,21 +139,21 @@ public enum ActivitySourceAggregationError: Error, Equatable, Sendable {
 }
 
 public struct ActivitySourceAggregator: Sendable {
-    private let sources: [any ActivitySource]
+    private let registrations: [RegisteredActivitySource]
 
     public init(sources: [any ActivitySource]) {
-        self.sources = sources
+        registrations = sources.map(RegisteredActivitySource.init)
     }
 
     public func load() async throws -> ActivityAggregateSnapshot {
         var seenSourceIDs = Set<ActivitySourceID>()
-        for source in sources {
-            guard source.id.isValidNamespace else {
+        for registration in registrations {
+            guard registration.id.isValidNamespace else {
                 throw ActivitySourceAggregationError.invalidSourceID
             }
-            guard seenSourceIDs.insert(source.id).inserted else {
+            guard seenSourceIDs.insert(registration.id).inserted else {
                 throw ActivitySourceAggregationError.duplicateSourceID(
-                    source.id
+                    registration.id
                 )
             }
         }
@@ -162,21 +162,21 @@ public struct ActivitySourceAggregator: Sendable {
             of: LoadedActivitySource.self,
             returning: [LoadedActivitySource].self
         ) { group in
-            for source in sources {
+            for registration in registrations {
                 group.addTask {
                     do {
                         try Task.checkCancellation()
-                        let snapshot = try await source.snapshot()
+                        let snapshot = try await registration.source.snapshot()
                         try Task.checkCancellation()
                         return LoadedActivitySource(
-                            id: source.id,
+                            id: registration.id,
                             snapshot: snapshot
                         )
                     } catch is CancellationError {
                         throw CancellationError()
                     } catch {
                         return LoadedActivitySource(
-                            id: source.id,
+                            id: registration.id,
                             snapshot: .unavailable
                         )
                     }
@@ -184,7 +184,7 @@ public struct ActivitySourceAggregator: Sendable {
             }
 
             var results: [LoadedActivitySource] = []
-            results.reserveCapacity(sources.count)
+            results.reserveCapacity(registrations.count)
             for try await result in group {
                 results.append(result)
             }
@@ -232,6 +232,16 @@ public struct ActivitySourceAggregator: Sendable {
             ),
             sources: statuses
         )
+    }
+}
+
+private struct RegisteredActivitySource: Sendable {
+    let source: any ActivitySource
+    let id: ActivitySourceID
+
+    init(_ source: any ActivitySource) {
+        self.source = source
+        id = source.id
     }
 }
 
