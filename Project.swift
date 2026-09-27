@@ -7,6 +7,8 @@ let project = Project(
     settings: .settings(
         base: [
             "SWIFT_VERSION": "6.0",
+            "MARKETING_VERSION": "0.1.0",
+            "CURRENT_PROJECT_VERSION": "1",
         ]
     ),
     targets: [
@@ -157,6 +159,8 @@ let project = Project(
             infoPlist: .extendingDefault(
                 with: [
                     "CFBundleDisplayName": "SchneeBar",
+                    "CFBundleShortVersionString": "$(MARKETING_VERSION)",
+                    "CFBundleVersion": "$(CURRENT_PROJECT_VERSION)",
                     "LSUIElement": true,
                 ]
             ),
