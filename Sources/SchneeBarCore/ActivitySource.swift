@@ -219,9 +219,9 @@ public struct ActivitySourceAggregator: Sendable {
                     throw ActivitySourceAggregationError
                         .invalidItemNamespace(sourceID: source.id)
                 }
-                guard item.updatedAt?
-                    .timeIntervalSinceReferenceDate.isFinite != false
-                else {
+                if let updatedAt = item.updatedAt,
+                   !updatedAt.timeIntervalSinceReferenceDate.isFinite
+                {
                     throw ActivitySourceAggregationError
                         .invalidItemTimestamp(sourceID: source.id)
                 }
