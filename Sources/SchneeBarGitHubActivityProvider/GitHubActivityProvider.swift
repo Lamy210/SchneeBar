@@ -21,6 +21,7 @@ public actor GitHubActivityProvider {
     private let maximumCheckTargetsPerRepository: Int
     private let minimumColdRepositoriesPerRefresh: Int
     private let minimumColdReviewRepositoriesPerRefresh: Int
+    private let cachePolicy: GitHubActivityCachePolicy
     private let now: @Sendable () -> Date
 
     private var workflowPollState: [RepositoryPollKey: RepositoryPollState] = [:]
@@ -50,6 +51,7 @@ public actor GitHubActivityProvider {
         maximumCheckTargetsPerRepository: Int = 2,
         minimumColdRepositoriesPerRefresh: Int = 2,
         minimumColdReviewRepositoriesPerRefresh: Int = 1,
+        cachePolicy: GitHubActivityCachePolicy = .init(),
         now: @escaping @Sendable () -> Date = { .now }
     ) {
         self.workflowRunLoader = workflowRunLoader
@@ -68,6 +70,7 @@ public actor GitHubActivityProvider {
         self.maximumCheckTargetsPerRepository = max(1, maximumCheckTargetsPerRepository)
         self.minimumColdRepositoriesPerRefresh = max(0, minimumColdRepositoriesPerRefresh)
         self.minimumColdReviewRepositoriesPerRefresh = max(0, minimumColdReviewRepositoriesPerRefresh)
+        self.cachePolicy = cachePolicy
         self.now = now
     }
 
@@ -194,12 +197,23 @@ public actor GitHubActivityProvider {
                     connectionID: profile.id,
                     repositoryID: repository.id
                 )
-                cachedWorkflowActivities[key] = activities
-                workflowEvidence[key] = evidence
+                if activities.isEmpty {
+                    cachedWorkflowActivities.removeValue(forKey: key)
+                } else {
+                    cachedWorkflowActivities[key] = activities
+                }
+                if evidence.isEmpty {
+                    workflowEvidence.removeValue(forKey: key)
+                } else {
+                    workflowEvidence[key] = evidence
+                }
                 workflowPollState[key, default: RepositoryPollState()].isHot = !activities.isEmpty
 
                 var tracker = workflowRecoveryTrackers[key]
-                    ?? GitHubWorkflowRecoveryTracker()
+                    ?? GitHubWorkflowRecoveryTracker(
+                        maximumLanes:
+                            cachePolicy.maximumRecoveryLanesPerRepository
+                    )
                 recoveryEvents.append(
                     contentsOf: tracker.observe(
                         runs: runs,
@@ -218,7 +232,11 @@ public actor GitHubActivityProvider {
             case let .success(repositoryID, requests):
                 successfulReviewCount += 1
                 let key = RepositoryPollKey(connectionID: profile.id, repositoryID: repositoryID)
-                cachedReviewRequests[key] = requests
+                if requests.isEmpty {
+                    cachedReviewRequests.removeValue(forKey: key)
+                } else {
+                    cachedReviewRequests[key] = requests
+                }
                 reviewPollState[key, default: RepositoryPollState()].isHot = !requests.isEmpty
             case let .failure(failure):
                 reviewFailures.append(failure)
@@ -291,7 +309,11 @@ public actor GitHubActivityProvider {
             switch outcome {
             case let .success(key, activities):
                 successfulCheckCount += 1
-                cachedCheckActivities[key] = activities
+                if activities.isEmpty {
+                    cachedCheckActivities.removeValue(forKey: key)
+                } else {
+                    cachedCheckActivities[key] = activities
+                }
             case let .failure(_, failure):
                 checkFailures.append(failure)
             }
@@ -328,7 +350,13 @@ public actor GitHubActivityProvider {
             surfaces: surfaces,
             recoveryEvents: recoveryEvents
         )
-        lastResultByConnectionID[profile.id] = result.droppingRecoveryEvents()
+        enforceRetainedCacheBudget(connectionID: profile.id)
+        lastResultByConnectionID[profile.id] = result.boundedForRetention(
+            maximumItemsPerSurface:
+                cachePolicy.maximumRetainedItemsPerSurface,
+            maximumFailuresPerSurface:
+                cachePolicy.maximumRetainedFailuresPerSurface
+        )
         return result
     }
 
@@ -526,6 +554,11 @@ public actor GitHubActivityProvider {
         workflowEvidence = workflowEvidence.filter { key, _ in
             key.connectionID != connectionID || !repositoryIDs.contains(key.repositoryID)
         }
+        workflowRecoveryTrackers = workflowRecoveryTrackers.filter {
+            key, _ in
+            key.connectionID != connectionID
+                || !repositoryIDs.contains(key.repositoryID)
+        }
     }
 
     private func removeReviewState(
@@ -606,6 +639,150 @@ public actor GitHubActivityProvider {
         cachedCheckActivities = cachedCheckActivities.filter { key, _ in
             key.connectionID != connectionID || validCandidateKeys.contains(key)
         }
+    }
+
+    private func enforceRetainedCacheBudget(
+        connectionID: UUID
+    ) {
+        let workflowKeys = Set(
+            cachedWorkflowActivities.keys.filter {
+                $0.connectionID == connectionID
+            }
+        )
+        .union(
+            workflowEvidence.keys.filter {
+                $0.connectionID == connectionID
+            }
+        )
+        .union(
+            workflowRecoveryTrackers.keys.filter {
+                $0.connectionID == connectionID
+            }
+        )
+        let retainedWorkflowKeys = Set(
+            workflowKeys.sorted {
+                repositoryCacheKeyPrecedes(
+                    lhs: $0,
+                    rhs: $1,
+                    state: workflowPollState
+                )
+            }
+            .prefix(cachePolicy.maximumWorkflowRepositories)
+        )
+        for key in workflowKeys
+        where !retainedWorkflowKeys.contains(key)
+        {
+            cachedWorkflowActivities.removeValue(forKey: key)
+            workflowEvidence.removeValue(forKey: key)
+            workflowRecoveryTrackers.removeValue(forKey: key)
+        }
+
+        let reviewKeys = Set(
+            cachedReviewRequests.keys.filter {
+                $0.connectionID == connectionID
+            }
+        )
+        let retainedReviewKeys = Set(
+            reviewKeys.sorted {
+                repositoryCacheKeyPrecedes(
+                    lhs: $0,
+                    rhs: $1,
+                    state: reviewPollState
+                )
+            }
+            .prefix(cachePolicy.maximumReviewRepositories)
+        )
+        for key in reviewKeys
+        where !retainedReviewKeys.contains(key)
+        {
+            cachedReviewRequests.removeValue(forKey: key)
+        }
+
+        let checkKeys = cachedCheckActivities.keys.filter {
+            $0.connectionID == connectionID
+        }
+        let ordering = ActivityInboxOrdering()
+        let bestItemByKey = Dictionary(
+            uniqueKeysWithValues: checkKeys.map { key in
+                (
+                    key,
+                    cachedCheckActivities[key]?
+                        .sorted(by: ordering.areInIncreasingOrder)
+                        .first
+                )
+            }
+        )
+        let retainedCheckKeys = Set(
+            checkKeys.sorted { lhs, rhs in
+                let lhsItem = bestItemByKey[lhs] ?? nil
+                let rhsItem = bestItemByKey[rhs] ?? nil
+                switch (lhsItem, rhsItem) {
+                case let (lhsItem?, rhsItem?):
+                    if ordering.areInIncreasingOrder(
+                        lhsItem,
+                        rhsItem
+                    ) {
+                        return true
+                    }
+                    if ordering.areInIncreasingOrder(
+                        rhsItem,
+                        lhsItem
+                    ) {
+                        return false
+                    }
+                case (_?, nil):
+                    return true
+                case (nil, _?):
+                    return false
+                case (nil, nil):
+                    break
+                }
+
+                if lhs.repositoryID != rhs.repositoryID {
+                    return lhs.repositoryID < rhs.repositoryID
+                }
+                return lhs.headSHA < rhs.headSHA
+            }
+            .prefix(cachePolicy.maximumCheckTargets)
+        )
+        for key in checkKeys
+        where !retainedCheckKeys.contains(key)
+        {
+            cachedCheckActivities.removeValue(forKey: key)
+        }
+    }
+
+    private func repositoryCacheKeyPrecedes(
+        lhs: RepositoryPollKey,
+        rhs: RepositoryPollKey,
+        state: [RepositoryPollKey: RepositoryPollState]
+    ) -> Bool {
+        let lhsState = state[lhs]
+        let rhsState = state[rhs]
+        let lhsHot = lhsState?.isHot == true
+        let rhsHot = rhsState?.isHot == true
+
+        if lhsHot != rhsHot {
+            return lhsHot
+        }
+
+        switch (
+            lhsState?.lastPolledAt,
+            rhsState?.lastPolledAt
+        ) {
+        case let (lhsDate?, rhsDate?):
+            if lhsDate != rhsDate {
+                return lhsDate > rhsDate
+            }
+        case (_?, nil):
+            return true
+        case (nil, _?):
+            return false
+        case (nil, nil):
+            break
+        }
+
+        return lhs.repositoryID < rhs.repositoryID
     }
 
     private func loadWorkflowRepositories(
