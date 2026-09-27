@@ -1,4 +1,5 @@
 import Foundation
+import SchneeBarCore
 import SchneeBarGitHub
 import SchneeBarGitHubActivityProvider
 import Testing
@@ -37,6 +38,49 @@ private actor BudgetWorkflowLoader: GitHubWorkflowRunLoading {
     }
 
     func count() -> Int { calls.count }
+}
+
+private actor RetainedBudgetWorkflowLoader:
+    GitHubWorkflowRunLoading
+{
+    func workflowRuns(
+        connection: GitHubConnection,
+        identity: GitHubAccountIdentity,
+        clientID: String?,
+        repository: GitHubRepositoryAccess,
+        query: GitHubWorkflowRunQuery
+    ) async throws -> [GitHubWorkflowRun] {
+        (0 ..< query.limit).map { index in
+            let runID = repository.id * 1_000 + Int64(index + 1)
+            return GitHubWorkflowRun(
+                id: runID,
+                workflowID: runID,
+                name: "CI",
+                displayTitle: "Build \(index)",
+                event: "push",
+                status: .completed,
+                conclusion: .failure,
+                runNumber: index + 1,
+                headBranch: "main",
+                headSHA: String(
+                    format: "%040llx",
+                    runID
+                ),
+                webURL: repository.webURL.appendingPathComponent(
+                    "actions/runs/\(runID)"
+                ),
+                pullRequestNumbers: [],
+                createdAt: Date(
+                    timeIntervalSince1970:
+                        TimeInterval(runID - 1)
+                ),
+                updatedAt: Date(
+                    timeIntervalSince1970:
+                        TimeInterval(runID)
+                )
+            )
+        }
+    }
 }
 
 private actor BudgetReviewLoader: GitHubReviewRequestLoading {
@@ -110,6 +154,52 @@ func periodicRefreshNeverExceedsSixteenActivitySourceListRequests() async throws
     #expect(result.surface(.workflows).attemptedTargetCount == 8)
     #expect(result.surface(.reviewRequests).attemptedTargetCount == 4)
     #expect(result.surface(.checks).attemptedTargetCount == 4)
+}
+
+@Test
+func retainedRepositoryCacheProjectsIntoBoundedSourceSnapshot() async throws {
+    let repositories = try (1 ... 103).map { id in
+        try budgetRepository(id: Int64(id))
+    }
+    let provider = GitHubActivityProvider(
+        workflowRunLoader: RetainedBudgetWorkflowLoader(),
+        maximumConcurrentRepositories: 8,
+        perRepositoryRunLimit: 20,
+        maximumRepositoriesPerRefresh: 52,
+        minimumColdRepositoriesPerRefresh: 52,
+        now: { Date(timeIntervalSince1970: 100) }
+    )
+    let profile = try budgetProfile()
+    let inventory = try budgetInventory(
+        repositories: repositories
+    )
+    let capabilities = budgetCapabilities(
+        repositories: repositories
+    )
+
+    let first = await provider.load(
+        profile: profile,
+        inventory: inventory,
+        capabilities: capabilities
+    )
+    let second = await provider.load(
+        profile: profile,
+        inventory: inventory,
+        capabilities: capabilities
+    )
+
+    #expect(first.items.count == 52 * 20)
+    #expect(second.items.count == 103 * 20)
+
+    let snapshot = ActivitySourceSnapshot.bounded(
+        items: second.items,
+        status: .available
+    )
+    #expect(
+        snapshot.items.count
+            == ActivitySourceCollectionPolicy.maximumItemsPerSource
+    )
+    #expect(snapshot.isTruncated)
 }
 
 private func budgetProfile() throws -> GitHubConnectionProfile {

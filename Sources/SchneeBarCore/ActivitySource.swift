@@ -60,16 +60,41 @@ public enum ActivitySourceStatus: Equatable, Sendable {
     case temporarilyUnavailable
 }
 
+public enum ActivitySourceCollectionPolicy {
+    public static let maximumSources = 16
+    public static let maximumItemsPerSource = 2_048
+    public static let maximumAggregateItems = 4_096
+}
+
 public struct ActivitySourceSnapshot: Equatable, Sendable {
     public let items: [ActivityItem]
     public let status: ActivitySourceStatus
+    public let isTruncated: Bool
 
     public init(
         items: [ActivityItem],
-        status: ActivitySourceStatus
+        status: ActivitySourceStatus,
+        isTruncated: Bool = false
     ) {
         self.items = items
         self.status = status
+        self.isTruncated = isTruncated
+    }
+
+    public static func bounded(
+        items: [ActivityItem],
+        status: ActivitySourceStatus
+    ) -> ActivitySourceSnapshot {
+        let ordered = items.sorted(
+            by: ActivityInboxOrdering().areInIncreasingOrder
+        )
+        let maximum = ActivitySourceCollectionPolicy
+            .maximumItemsPerSource
+        return ActivitySourceSnapshot(
+            items: Array(ordered.prefix(maximum)),
+            status: status,
+            isTruncated: ordered.count > maximum
+        )
     }
 
     public static var unavailable: ActivitySourceSnapshot {
@@ -107,30 +132,38 @@ public struct ClosureActivitySource: ActivitySource, Sendable {
 public struct ActivitySourceStatusRecord: Equatable, Sendable {
     public let sourceID: ActivitySourceID
     public let status: ActivitySourceStatus
+    public let isTruncated: Bool
 
     public init(
         sourceID: ActivitySourceID,
-        status: ActivitySourceStatus
+        status: ActivitySourceStatus,
+        isTruncated: Bool = false
     ) {
         self.sourceID = sourceID
         self.status = status
+        self.isTruncated = isTruncated
     }
 }
 
 public struct ActivityAggregateSnapshot: Equatable, Sendable {
     public let items: [ActivityItem]
     public let sources: [ActivitySourceStatusRecord]
+    public let isTruncated: Bool
 
     public init(
         items: [ActivityItem],
-        sources: [ActivitySourceStatusRecord]
+        sources: [ActivitySourceStatusRecord],
+        isTruncated: Bool = false
     ) {
         self.items = items
         self.sources = sources
+        self.isTruncated = isTruncated
     }
 }
 
 public enum ActivitySourceAggregationError: Error, Equatable, Sendable {
+    case tooManySources
+    case sourceItemLimitExceeded(sourceID: ActivitySourceID)
     case invalidSourceID
     case duplicateSourceID(ActivitySourceID)
     case invalidItemNamespace(sourceID: ActivitySourceID)
@@ -149,6 +182,13 @@ public struct ActivitySourceAggregator: Sendable {
     }
 
     public func load() async throws -> ActivityAggregateSnapshot {
+        try Task.checkCancellation()
+        guard registrations.count
+            <= ActivitySourceCollectionPolicy.maximumSources
+        else {
+            throw ActivitySourceAggregationError.tooManySources
+        }
+
         var seenSourceIDs = Set<ActivitySourceID>()
         for registration in registrations {
             guard registration.id.isValidNamespace else {
@@ -197,10 +237,21 @@ public struct ActivitySourceAggregator: Sendable {
             }
         }
 
+        try Task.checkCancellation()
+        for source in loaded
+        where source.snapshot.items.count
+            > ActivitySourceCollectionPolicy.maximumItemsPerSource
+        {
+            throw ActivitySourceAggregationError.sourceItemLimitExceeded(
+                sourceID: source.id
+            )
+        }
+
         let statuses = loaded.map {
             ActivitySourceStatusRecord(
                 sourceID: $0.id,
-                status: $0.snapshot.status
+                status: $0.snapshot.status,
+                isTruncated: $0.snapshot.isTruncated
             )
         }
         let available = loaded.filter {
@@ -257,11 +308,23 @@ public struct ActivitySourceAggregator: Sendable {
             }
         }
 
+        let orderedItems = items.sorted(
+            by: ActivityInboxOrdering().areInIncreasingOrder
+        )
+        let maximumAggregateItems = ActivitySourceCollectionPolicy
+            .maximumAggregateItems
+        let aggregateWasTruncated =
+            orderedItems.count > maximumAggregateItems
+        let sourceWasTruncated = statuses.contains {
+            $0.isTruncated
+        }
+
         return ActivityAggregateSnapshot(
-            items: items.sorted(
-                by: ActivityInboxOrdering().areInIncreasingOrder
+            items: Array(
+                orderedItems.prefix(maximumAggregateItems)
             ),
-            sources: statuses
+            sources: statuses,
+            isTruncated: aggregateWasTruncated || sourceWasTruncated
         )
     }
 }
