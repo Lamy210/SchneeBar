@@ -97,8 +97,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let runtimeModel = runtimeModel
         terminationFlushTask = Task { @MainActor [weak self] in
             await runtimeModel.flushPreferences()
-            self?.terminationFlushTask = nil
             sender.reply(toApplicationShouldTerminate: true)
+            self?.terminationFlushTask = nil
         }
         return .terminateLater
     }
