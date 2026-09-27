@@ -86,8 +86,9 @@ final class SchneeBarRealAppSmokeUITests: XCTestCase {
             becameEnabled,
             "Expected the external widget to become enabled through Settings."
         )
-        try await Task.sleep(for: .milliseconds(500))
 
+        // Terminate immediately after the UI state flips. The app's termination
+        // boundary must flush the pending debounced preference before exit.
         app.terminate()
         launchAndOpenSettings(app)
 
