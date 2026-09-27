@@ -174,9 +174,9 @@ struct SettingsView: View {
                     "external-widget-startup-status"
                 )
                 .accessibilityLabel(
-                    "External widget startup \(presentation.title)"
+                    Text("External widget startup \(presentation.title)")
                 )
-                .accessibilityValue(presentation.detail)
+                .accessibilityValue(Text(presentation.detail))
             }
         }
     }
