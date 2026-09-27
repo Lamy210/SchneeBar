@@ -221,11 +221,13 @@ Grouping is local, O(n log n) including sorting, O(n) memory, and adds no networ
 
 ## Deterministic IDs
 
-Single rows retain job-ID identity. Group parent IDs are deterministic and run-scoped, e.g.:
+Single rows retain job-ID identity. Group parent IDs are deterministic, run-scoped, and bounded independently of provider-owned presentation text:
 
 ```text
-github-job-group:<runID>:<baseName>
+github-job-group:<runID>:<minimumGroupedJobID>
 ```
+
+The minimum grouped job ID is unique within a run because one job belongs to at most one group. This keeps group identity stable and compact even when a matrix base name is long. The human-readable base name remains presentation-only in the row title.
 
 Child rows retain job-ID identity.
 

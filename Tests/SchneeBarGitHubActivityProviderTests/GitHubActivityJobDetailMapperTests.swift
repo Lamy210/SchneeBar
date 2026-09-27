@@ -139,7 +139,7 @@ func jobDetailMapperAggregatesVariantsWithoutChangingRawSummary() throws {
     #expect(snapshot.rows.map(\.title) == ["Test", "Docs"])
 
     let group = try #require(snapshot.rows.first)
-    #expect(group.id == "github-job-group:501:Test")
+    #expect(group.id == "github-job-group:501:11")
     #expect(group.title == "Test")
     #expect(group.detail == "5 variants · 1 failed · 1 running · 1 waiting · 1 cancelled")
     #expect(group.state == .failed)
@@ -151,6 +151,42 @@ func jobDetailMapperAggregatesVariantsWithoutChangingRawSummary() throws {
     #expect(group.children[3].detail == "Succeeded · 12s")
     #expect(group.children[3].destinationURL?.absoluteString.hasSuffix("/job/14") == true)
     #expect(group.children[4].detail == "Cancelled")
+}
+
+@Test
+func jobDetailMapperKeepsLongMatrixNamesOutOfGroupIdentity() throws {
+    let item = ActivityItem(
+        id: "github-actions:42:501",
+        repository: "octocat/project",
+        context: "CI",
+        detail: "Running",
+        state: .running
+    )
+    let baseName = String(repeating: "a", count: 300)
+    let jobs = [
+        try detailJob(
+            id: 101,
+            name: "\(baseName) (macos)",
+            status: .inProgress,
+            conclusion: nil
+        ),
+        try detailJob(
+            id: 102,
+            name: "\(baseName) (linux)",
+            status: .queued,
+            conclusion: nil
+        ),
+    ]
+
+    let snapshot = GitHubActivityJobDetailMapper().map(
+        item: item,
+        jobs: jobs
+    )
+    let group = try #require(snapshot.rows.first)
+
+    #expect(group.id == "github-job-group:501:101")
+    #expect(group.id.utf8.count < 256)
+    #expect(group.title == baseName)
 }
 
 @Test
