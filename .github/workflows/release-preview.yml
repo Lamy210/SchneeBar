@@ -319,9 +319,9 @@ jobs:
           - The repository does not yet publish a stable release channel.
           - Source/binary distribution terms for a stable release have not yet been selected (#215); the repository README remains authoritative for the current license status.
 
-          Because this preview is not notarized, macOS Gatekeeper may block normal first launch after downloading it. Do not treat this artifact as the stable distribution channel.
+          Because this preview is not notarized, macOS Gatekeeper may block normal first launch after downloading it. After verifying the SHA-256 checksum and release source, testers can use System Settings → Privacy & Security → Open Anyway for this app. Do not disable Gatekeeper globally or remove quarantine metadata as the normal installation path.
 
-          The attached SHA-256 file can be used to verify the downloaded archive.
+          Do not treat this artifact as the stable distribution channel. The attached SHA-256 file can be used to verify the downloaded archive.
           EOF
 
           echo "archive=${archive}" >> "${GITHUB_OUTPUT}"
