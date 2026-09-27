@@ -12,6 +12,7 @@ final class ActivityRuntimeModel {
     ) async throws -> Void
 
     var items: [ActivityItem] = []
+    var isTruncated = false
     var selectedItem: ActivityItem?
     var detail: ActivityDetailSnapshot?
     var detailIsLoading = false
@@ -57,8 +58,12 @@ final class ActivityRuntimeModel {
         detailActionHandler = handler
     }
 
-    func replace(with items: [ActivityItem]) {
+    func replace(
+        with items: [ActivityItem],
+        isTruncated: Bool = false
+    ) {
         self.items = items
+        self.isTruncated = isTruncated
 
         guard let selectedItem else { return }
         guard let refreshed = items.first(where: { $0.id == selectedItem.id }) else {
