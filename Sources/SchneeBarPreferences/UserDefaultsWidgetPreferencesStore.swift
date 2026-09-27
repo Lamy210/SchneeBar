@@ -47,7 +47,6 @@ public actor UserDefaultsWidgetPreferencesStore: WidgetPreferencesStore {
         )
         let data = try JSONEncoder().encode(payload)
         defaults.set(data, forKey: key)
-
     }
 }
 
