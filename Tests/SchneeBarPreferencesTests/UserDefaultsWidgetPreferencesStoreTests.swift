@@ -46,6 +46,35 @@ func widgetPreferencesStoreRoundTripsConfiguration() async throws {
 }
 
 @Test
+func widgetPreferencesStoreSaveIsVisibleToFreshStoreImmediately() async throws {
+    let suite = "dev.lamy.schneebar.tests.\(UUID().uuidString)"
+    let defaults = try #require(UserDefaults(suiteName: suite))
+    defer { defaults.removePersistentDomain(forName: suite) }
+
+    let expected = WidgetConfiguration(
+        preferences: [
+            WidgetPreference(
+                id: "external.ci.smoke",
+                isEnabled: true,
+                order: 10,
+                representation: .normal
+            ),
+        ]
+    )
+
+    let writer = UserDefaultsWidgetPreferencesStore(suiteName: suite)
+    try await writer.save(expected)
+
+    let reader = UserDefaultsWidgetPreferencesStore(suiteName: suite)
+    let loaded = try await reader.load()
+
+    #expect(loaded == expected)
+    #expect(
+        loaded.preference(for: "external.ci.smoke")?.isEnabled == true
+    )
+}
+
+@Test
 func widgetPreferencesStoreMigratesLegacyUnversionedConfiguration() async throws {
     let suite = "dev.lamy.schneebar.tests.\(UUID().uuidString)"
     let defaults = try #require(UserDefaults(suiteName: suite))
