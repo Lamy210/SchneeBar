@@ -57,6 +57,7 @@ struct PopoverRootView: View {
                 } else {
                     ActivityPopoverView(
                         items: activityModel.items,
+                        isTruncated: activityModel.isTruncated,
                         onInspect: { item in
                             activityModel.requestDetail(for: item)
                         }

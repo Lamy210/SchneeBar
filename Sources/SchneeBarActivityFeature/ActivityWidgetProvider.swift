@@ -55,6 +55,10 @@ public struct ActivityWidgetProvider: WidgetProvider {
         }
 
         let normalText = summary.menuBarLabel
+        let accessibilityText = aggregate.isTruncated
+            ? normalText
+                + ", partial activity list showing highest-priority recent activity"
+            : normalText
         let compactText: String
         if summary.actionRequired > 0 {
             compactText = "!\(summary.actionRequired)"
@@ -76,17 +80,17 @@ public struct ActivityWidgetProvider: WidgetProvider {
                 compact: WidgetContent(
                     text: compactText,
                     systemImage: "hammer",
-                    accessibilityLabel: normalText
+                    accessibilityLabel: accessibilityText
                 ),
                 normal: WidgetContent(
                     text: normalText,
                     systemImage: "hammer",
-                    accessibilityLabel: normalText
+                    accessibilityLabel: accessibilityText
                 ),
                 critical: WidgetContent(
                     text: normalText,
                     systemImage: "exclamationmark.triangle.fill",
-                    accessibilityLabel: normalText
+                    accessibilityLabel: accessibilityText
                 )
             )
         )

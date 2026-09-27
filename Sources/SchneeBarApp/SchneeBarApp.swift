@@ -137,7 +137,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             externalWidgetRegistrar: .applicationSupport(),
             loadActivitySnapshot: {
                 let snapshot = try await activityAggregator.load()
-                await activityRuntimeModel.replace(with: snapshot.items)
+                await activityRuntimeModel.replace(
+                    with: snapshot.items,
+                    isTruncated: snapshot.isTruncated
+                )
                 return snapshot
             }
         )

@@ -21,6 +21,7 @@ Developer Activity scenarios currently cover:
 - waiting-only
 - mixed Enterprise/GitHub contexts
 - overflow / long repository names
+- bounded/truncated inbox partial-state affordance
 - light/dark appearances
 
 Widget scenarios currently cover:
