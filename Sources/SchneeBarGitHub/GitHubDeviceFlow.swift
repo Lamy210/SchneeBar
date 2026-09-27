@@ -254,7 +254,9 @@ public struct GitHubDeviceFlowClient: Sendable {
               ),
               verification.scheme?.lowercased() == "https",
               verification.host?.lowercased() == expected.host?.lowercased(),
-              effectiveHTTPSPort(verification.port) == effectiveHTTPSPort(expected.port)
+              effectiveHTTPSPort(verification.port) == effectiveHTTPSPort(expected.port),
+              verification.user == nil,
+              verification.password == nil
         else {
             throw GitHubDeviceFlowError.untrustedVerificationURI
         }

@@ -123,6 +123,36 @@ func rejectsVerificationURIFromDifferentOrigin() async throws {
     }
 }
 
+@Test(arguments: [
+    "https://user@github.com/login/device",
+    "https://user:password@github.com/login/device",
+])
+func rejectsVerificationURIWithEmbeddedCredentials(
+    verificationURI: String
+) async throws {
+    let payload =
+        "{\"device_code\":\"device\","
+        + "\"user_code\":\"ABCD-EFGH\","
+        + "\"verification_uri\":\"\(verificationURI)\","
+        + "\"expires_in\":900,\"interval\":5}"
+    let transport = QueueGitHubTransport([
+        DeviceFlowStubResponse(payload)
+    ])
+    let client = GitHubDeviceFlowClient(
+        transport: transport,
+        now: { fixedNow }
+    )
+
+    await #expect(
+        throws: GitHubDeviceFlowError.untrustedVerificationURI
+    ) {
+        try await client.begin(
+            connection: try githubDotComConnection(),
+            clientID: "Iv1.client"
+        )
+    }
+}
+
 @Test
 func mapsPendingAndSlowDownPollStates() async throws {
     let transport = QueueGitHubTransport([
