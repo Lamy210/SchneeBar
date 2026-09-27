@@ -77,8 +77,9 @@ Support location, verifies the production loader reports one loaded widget, and
 confirms the registered widget remains disabled by default.
 
 The filesystem-backed test is guarded by `GITHUB_ACTIONS=true`, `CI=true`,
-and `SCHNEEBAR_REAL_EXTERNAL_WIDGET_SMOKE=1`. Ordinary local `tuist test`
-runs skip it and do not mutate Application Support.
+`SCHNEEBAR_REAL_EXTERNAL_WIDGET_SMOKE=1`, and the workflow-provided
+`SCHNEEBAR_RUNNER_ENVIRONMENT=github-hosted`. Ordinary local and self-hosted
+`tuist test` runs skip it and do not mutate Application Support.
 
 ## Future layers
 
