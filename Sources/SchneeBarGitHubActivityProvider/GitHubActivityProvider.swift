@@ -639,6 +639,150 @@ public actor GitHubActivityProvider {
         }
     }
 
+    private func enforceRetainedCacheBudget(
+        connectionID: UUID
+    ) {
+        let workflowKeys = Set(
+            cachedWorkflowActivities.keys.filter {
+                $0.connectionID == connectionID
+            }
+        )
+        .union(
+            workflowEvidence.keys.filter {
+                $0.connectionID == connectionID
+            }
+        )
+        .union(
+            workflowRecoveryTrackers.keys.filter {
+                $0.connectionID == connectionID
+            }
+        )
+        let retainedWorkflowKeys = Set(
+            workflowKeys.sorted {
+                repositoryCacheKeyPrecedes(
+                    lhs: $0,
+                    rhs: $1,
+                    state: workflowPollState
+                )
+            }
+            .prefix(cachePolicy.maximumWorkflowRepositories)
+        )
+        for key in workflowKeys
+        where !retainedWorkflowKeys.contains(key)
+        {
+            cachedWorkflowActivities.removeValue(forKey: key)
+            workflowEvidence.removeValue(forKey: key)
+            workflowRecoveryTrackers.removeValue(forKey: key)
+        }
+
+        let reviewKeys = Set(
+            cachedReviewRequests.keys.filter {
+                $0.connectionID == connectionID
+            }
+        )
+        let retainedReviewKeys = Set(
+            reviewKeys.sorted {
+                repositoryCacheKeyPrecedes(
+                    lhs: $0,
+                    rhs: $1,
+                    state: reviewPollState
+                )
+            }
+            .prefix(cachePolicy.maximumReviewRepositories)
+        )
+        for key in reviewKeys
+        where !retainedReviewKeys.contains(key)
+        {
+            cachedReviewRequests.removeValue(forKey: key)
+        }
+
+        let checkKeys = cachedCheckActivities.keys.filter {
+            $0.connectionID == connectionID
+        }
+        let ordering = ActivityInboxOrdering()
+        let bestItemByKey = Dictionary(
+            uniqueKeysWithValues: checkKeys.map { key in
+                (
+                    key,
+                    cachedCheckActivities[key]?
+                        .sorted(by: ordering.areInIncreasingOrder)
+                        .first
+                )
+            }
+        )
+        let retainedCheckKeys = Set(
+            checkKeys.sorted { lhs, rhs in
+                let lhsItem = bestItemByKey[lhs] ?? nil
+                let rhsItem = bestItemByKey[rhs] ?? nil
+                switch (lhsItem, rhsItem) {
+                case let (lhsItem?, rhsItem?):
+                    if ordering.areInIncreasingOrder(
+                        lhsItem,
+                        rhsItem
+                    ) {
+                        return true
+                    }
+                    if ordering.areInIncreasingOrder(
+                        rhsItem,
+                        lhsItem
+                    ) {
+                        return false
+                    }
+                case (_?, nil):
+                    return true
+                case (nil, _?):
+                    return false
+                case (nil, nil):
+                    break
+                }
+
+                if lhs.repositoryID != rhs.repositoryID {
+                    return lhs.repositoryID < rhs.repositoryID
+                }
+                return lhs.headSHA < rhs.headSHA
+            }
+            .prefix(cachePolicy.maximumCheckTargets)
+        )
+        for key in checkKeys
+        where !retainedCheckKeys.contains(key)
+        {
+            cachedCheckActivities.removeValue(forKey: key)
+        }
+    }
+
+    private func repositoryCacheKeyPrecedes(
+        lhs: RepositoryPollKey,
+        rhs: RepositoryPollKey,
+        state: [RepositoryPollKey: RepositoryPollState]
+    ) -> Bool {
+        let lhsState = state[lhs]
+        let rhsState = state[rhs]
+        let lhsHot = lhsState?.isHot == true
+        let rhsHot = rhsState?.isHot == true
+
+        if lhsHot != rhsHot {
+            return lhsHot
+        }
+
+        switch (
+            lhsState?.lastPolledAt,
+            rhsState?.lastPolledAt
+        ) {
+        case let (lhsDate?, rhsDate?):
+            if lhsDate != rhsDate {
+                return lhsDate > rhsDate
+            }
+        case (_?, nil):
+            return true
+        case (nil, _?):
+            return false
+        case (nil, nil):
+            break
+        }
+
+        return lhs.repositoryID < rhs.repositoryID
+    }
+
     private func loadWorkflowRepositories(
         _ repositories: [GitHubRepositoryAccess],
         profile: GitHubConnectionProfile
