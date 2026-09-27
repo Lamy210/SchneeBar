@@ -134,6 +134,7 @@ public enum ActivitySourceAggregationError: Error, Equatable, Sendable {
     case invalidSourceID
     case duplicateSourceID(ActivitySourceID)
     case invalidItemNamespace(sourceID: ActivitySourceID)
+    case invalidItemTimestamp(sourceID: ActivitySourceID)
     case duplicateItemID(sourceID: ActivitySourceID)
     case noUsableSources([ActivitySourceStatusRecord])
 }
@@ -217,6 +218,12 @@ public struct ActivitySourceAggregator: Sendable {
                 guard source.id.owns(itemID: item.id) else {
                     throw ActivitySourceAggregationError
                         .invalidItemNamespace(sourceID: source.id)
+                }
+                guard item.updatedAt?
+                    .timeIntervalSinceReferenceDate.isFinite != false
+                else {
+                    throw ActivitySourceAggregationError
+                        .invalidItemTimestamp(sourceID: source.id)
                 }
                 guard seenItemIDs.insert(item.id).inserted else {
                     throw ActivitySourceAggregationError
