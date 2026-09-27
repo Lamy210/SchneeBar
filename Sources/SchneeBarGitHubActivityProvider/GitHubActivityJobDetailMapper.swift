@@ -64,8 +64,12 @@ public struct GitHubActivityJobDetailMapper: Sendable {
             makeDetailRow(variant.job, title: variant.label)
         }
 
+        let identityJobID = variants
+            .map(\.job.id)
+            .min() ?? group.runID
+
         return ActivityDetailRow(
-            id: "github-job-group:\(group.runID):\(group.baseName)",
+            id: "github-job-group:\(group.runID):\(identityJobID)",
             title: group.baseName,
             detail: groupDetail(variants),
             state: groupState(children),

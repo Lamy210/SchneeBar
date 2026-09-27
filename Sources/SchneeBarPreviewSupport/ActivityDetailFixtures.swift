@@ -153,7 +153,7 @@ public enum ActivityDetailFixture {
         destinationURL: item.destinationURL,
         rows: [
             ActivityDetailRow(
-                id: "github-job-group:501:Test",
+                id: "github-job-group:501:7101",
                 title: "Test",
                 detail: "3 variants",
                 state: .success,
@@ -200,7 +200,7 @@ public enum ActivityDetailFixture {
         destinationURL: item.destinationURL,
         rows: [
             ActivityDetailRow(
-                id: "github-job-group:501:Test",
+                id: "github-job-group:501:7201",
                 title: "Test",
                 detail: "3 variants · 1 failed · 1 running · 1 waiting",
                 state: .failed,
