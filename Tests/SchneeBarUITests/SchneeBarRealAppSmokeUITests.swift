@@ -78,11 +78,12 @@ final class SchneeBarRealAppSmokeUITests: XCTestCase {
         )
 
         widgetToggle.click()
+        let becameEnabled = await waitForToggleState(
+            widgetToggle,
+            expected: true
+        )
         XCTAssertTrue(
-            await waitForToggleState(
-                widgetToggle,
-                expected: true
-            ),
+            becameEnabled,
             "Expected the external widget to become enabled through Settings."
         )
         try await Task.sleep(for: .milliseconds(500))
@@ -123,11 +124,12 @@ final class SchneeBarRealAppSmokeUITests: XCTestCase {
         )
 
         relaunchedToggle.click()
+        let becameDisabled = await waitForToggleState(
+            relaunchedToggle,
+            expected: false
+        )
         XCTAssertTrue(
-            await waitForToggleState(
-                relaunchedToggle,
-                expected: false
-            ),
+            becameDisabled,
             "Expected the test to restore the external widget to disabled."
         )
         try await Task.sleep(for: .milliseconds(500))
