@@ -39,6 +39,39 @@ func destinationPolicyAllowsMissingURL() {
 }
 
 @Test
+func destinationPolicyRejectsUnsafeDetailDestination() throws {
+    let unsafeURL = try #require(
+        URL(string: "file:///tmp/detail")
+    )
+    let detail = ActivityDetailSnapshot(
+        id: "activity",
+        repository: "snow/repo",
+        title: "CI",
+        summary: "Unsafe",
+        state: .failed,
+        destinationURL: unsafeURL,
+        rows: []
+    )
+
+    #expect(!ActivityDestinationURLPolicy.allows(detail))
+}
+
+@Test
+func destinationPolicyRejectsUnsafeTopLevelDetailRow() throws {
+    let unsafeURL = try #require(
+        URL(string: "custom://example.com/job")
+    )
+    let row = ActivityDetailRow(
+        id: "job",
+        title: "Job",
+        state: .failed,
+        destinationURL: unsafeURL
+    )
+
+    #expect(!ActivityDestinationURLPolicy.allows(row))
+}
+
+@Test
 func destinationPolicyValidatesNestedDetailRows() throws {
     let safeURL = try #require(
         URL(string: "https://github.com/snow/repo/actions/runs/1")
