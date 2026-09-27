@@ -232,6 +232,77 @@ func recoveryTrackerExplanationNeverContainsRawSHA() throws {
     #expect(!text.contains("sensitive-success-sha"))
 }
 
+@Test
+func recoveryTrackerEvictsOldestLanesAtConfiguredBudget() throws {
+    var tracker = GitHubWorkflowRecoveryTracker(
+        maximumLanes: 2
+    )
+    let repository = try recoveryRepository()
+
+    _ = tracker.observe(
+        runs: [
+            try recoveryRun(
+                id: 100,
+                runNumber: 1,
+                conclusion: .failure,
+                pullRequests: [120],
+                updatedAt: 10
+            ),
+            try recoveryRun(
+                id: 101,
+                runNumber: 1,
+                conclusion: .failure,
+                pullRequests: [121],
+                updatedAt: 20
+            ),
+            try recoveryRun(
+                id: 102,
+                runNumber: 1,
+                conclusion: .failure,
+                pullRequests: [122],
+                updatedAt: 30
+            ),
+        ],
+        repository: repository
+    )
+
+    let events = tracker.observe(
+        runs: [
+            try recoveryRun(
+                id: 200,
+                runNumber: 2,
+                conclusion: .success,
+                pullRequests: [120],
+                updatedAt: 40
+            ),
+            try recoveryRun(
+                id: 201,
+                runNumber: 2,
+                conclusion: .success,
+                pullRequests: [121],
+                updatedAt: 50
+            ),
+            try recoveryRun(
+                id: 202,
+                runNumber: 2,
+                conclusion: .success,
+                pullRequests: [122],
+                updatedAt: 60
+            ),
+        ],
+        repository: repository
+    )
+
+    #expect(events.count == 2)
+    #expect(
+        Set(events.map(\.detail)) == [
+            "PR #121 succeeded after a previously observed failed workflow run",
+            "PR #122 succeeded after a previously observed failed workflow run",
+        ]
+    )
+}
+
+
 private func recoveryRun(
     id: Int64,
     workflowID: Int64 = 41,
