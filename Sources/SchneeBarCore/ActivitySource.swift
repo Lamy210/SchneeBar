@@ -184,7 +184,7 @@ public struct ActivitySourceAggregator: Sendable {
             }
 
             var results: [LoadedActivitySource] = []
-            results.reserveCapacity(sources.count)
+            results.reserveCapacity(registrations.count)
             for try await result in group {
                 results.append(result)
             }
