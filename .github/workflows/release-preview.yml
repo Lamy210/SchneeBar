@@ -21,7 +21,12 @@ permissions:
   contents: read
 
 concurrency:
-  group: release-preview-${{ inputs.tag }}
+  group: >-
+    release-preview-${{
+      github.event_name == 'workflow_dispatch'
+      && inputs.tag
+      || format('pr-{0}', github.event.pull_request.number)
+    }}
   cancel-in-progress: false
 
 jobs:
