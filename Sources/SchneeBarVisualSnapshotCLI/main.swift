@@ -271,6 +271,7 @@ private func deliveryHistoryRoot(
             errorMessage: scenario.errorMessage,
             onBack: {},
             onRetry: {},
+            onInspect: { _ in },
             surfaceStyle: .deterministic
         )
         .padding(24)
