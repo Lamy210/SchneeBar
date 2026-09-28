@@ -31,6 +31,11 @@ struct PopoverRootView: View {
                         },
                         onRetry: {
                             activityModel.retryDeliveryHistory()
+                        },
+                        onInspect: { entry in
+                            activityModel.requestDetail(
+                                forHistoryEntry: entry
+                            )
                         }
                     )
                 } else if let selectedItem = activityModel.selectedItem {
@@ -40,14 +45,25 @@ struct PopoverRootView: View {
                         isLoading: activityModel.detailIsLoading,
                         errorMessage: activityModel.detailErrorMessage,
                         onBack: {
-                            activityModel.dismissDetail()
+                            if activityModel.isPresentingHistoryEntryDetail {
+                                activityModel.returnToDeliveryHistory()
+                            } else {
+                                activityModel.dismissDetail()
+                            }
                         },
+                        backAccessibilityLabel:
+                            activityModel.isPresentingHistoryEntryDetail
+                                ? "Back to delivery history"
+                                : "Back to Developer Activity",
                         onRetry: {
                             activityModel.retryDetail()
                         },
-                        onShowHistory: {
-                            activityModel.requestDeliveryHistory()
-                        },
+                        onShowHistory:
+                            activityModel.isPresentingHistoryEntryDetail
+                                ? nil
+                                : {
+                                    activityModel.requestDeliveryHistory()
+                                },
                         actionInProgress: activityModel.detailActionInProgress,
                         actionErrorMessage: activityModel.detailActionErrorMessage,
                         onAction: { action in
