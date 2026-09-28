@@ -245,6 +245,7 @@ private func activityDetailRoot(
             errorMessage: nil,
             onBack: {},
             onRetry: {},
+            onInspect: { _ in },
             onAction: { _ in },
             evidenceInitiallyExpanded:
                 scenario.detail.deliveryTimeline?.evidence.isEmpty == false,
