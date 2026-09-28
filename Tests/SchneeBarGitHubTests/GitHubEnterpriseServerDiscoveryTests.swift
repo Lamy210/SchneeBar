@@ -129,7 +129,7 @@ func discoveryAcceptsInstalledVersionAtByteLimit() async throws {
                 - "3.22.0-".utf8.count
     )
     let transport = RecordingGitHubTransport(
-        json: #"{"installed_version":"#(value)"}"#
+        json: #"{"installed_version":"\#(value)"}"#
     )
     let client = GitHubEnterpriseServerDiscoveryClient(transport: transport)
     let connection = GitHubConnection(
@@ -154,7 +154,7 @@ func discoveryRejectsOversizedInstalledVersionEvidence() async throws {
                 + 1
     )
     let transport = RecordingGitHubTransport(
-        json: #"{"installed_version":"#(value)"}"#
+        json: #"{"installed_version":"\#(value)"}"#
     )
     let client = GitHubEnterpriseServerDiscoveryClient(transport: transport)
     let connection = GitHubConnection(
