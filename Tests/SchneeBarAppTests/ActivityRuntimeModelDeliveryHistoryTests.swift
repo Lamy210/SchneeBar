@@ -66,6 +66,22 @@ func activityRuntimeHistoryPreservesLoadedDetailAndBackDoesNotReloadDetail() asy
 }
 
 @Test @MainActor
+func activityRuntimeHistoryDoesNotOpenDuringWorkflowMutation() {
+    let model = ActivityRuntimeModel()
+    let item = historyRuntimeItem()
+
+    model.selectedItem = item
+    model.detail = historyRuntimeDetail(item: item)
+    model.detailActionInProgress = .rerunWorkflow
+
+    model.requestDeliveryHistory()
+
+    #expect(!model.isPresentingDeliveryHistory)
+    #expect(model.deliveryHistory == nil)
+    #expect(!model.deliveryHistoryIsLoading)
+}
+
+@Test @MainActor
 func activityRuntimeHistoryRetryOnlyRepeatsHistoryLoader() async throws {
     let model = ActivityRuntimeModel()
     let item = historyRuntimeItem()
