@@ -59,6 +59,7 @@ Implemented foundation:
 - endpoint resolution without hard-coding `api.github.com`
 - GHES endpoint discovery foundation
 - discovered GHES version compatibility surfaced in connection health without masking operational failures
+- bounded GHES `installed_version` metadata normalization before persistence/presentation so malformed oversized version evidence fails closed
 - bounded GHES metadata rediscovery during existing refreshes, capped at one `/meta` request when the persisted 24-hour check-attempt cadence is due, persisting failed attempts to prevent refresh-time polling, with no background polling and best-effort fallback to the last known server version
 - REST API version policy
 - centralized REST API request-version selection across GitHub clients, including explicit overrides and evidence-backed GHES 3.20-3.22 release mapping without guessing untested releases
