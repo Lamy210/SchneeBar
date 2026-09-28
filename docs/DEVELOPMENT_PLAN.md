@@ -171,10 +171,12 @@ Implemented:
 - cached Delivery history fallback for transient GitHub failure or definitive current Actions unavailability
 - source-scoped persisted history cleanup on explicit connection disconnect
 - zero additional GitHub requests: live standalone history remains exactly one completed-runs request
+- local Delivery history row drill-down into existing Workflow detail loading, preserving the loaded history and parent detail for zero-history-refetch Back navigation
+- history drill-down remains stable across periodic Inbox replacement even when the historical run is no longer present in the current Activity list
 
 Next:
 
-- revisit standalone/paginated Environment browsing, local history-row drill-down, and custom protection-rule details only if product usage justifies the extra scope
+- revisit standalone/paginated Environment browsing and custom protection-rule details only if product usage justifies the extra scope
 
 ## Phase 5 — Enterprise
 
@@ -212,7 +214,7 @@ Evidence-bound / deferred pending upstream support:
 
 1. Stabilize the provider-neutral Developer Activity source boundary and the strict external-widget document + startup-registration contract.
 2. Extend real-app external-widget coverage only where it adds release confidence; keep live reload/watch and install UX explicitly deferred.
-3. Revisit standalone/paginated Environment browsing, local history-row drill-down, custom protection-rule details, and additional providers only when product usage or authoritative upstream evidence justifies the extra scope.
+3. Revisit standalone/paginated Environment browsing, custom protection-rule details, and additional providers only when product usage or authoritative upstream evidence justifies the extra scope.
 
 ## Engineering constraints
 
