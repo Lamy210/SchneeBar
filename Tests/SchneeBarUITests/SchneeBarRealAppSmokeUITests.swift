@@ -192,7 +192,7 @@ final class SchneeBarRealAppSmokeUITests: XCTestCase {
         )
 
         app.terminate()
-        try Data(#"{\"schemaVersion\":1,"#.utf8).write(
+        try Data("not-json".utf8).write(
             to: fixtureURL,
             options: .atomic
         )
