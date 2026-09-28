@@ -19,8 +19,10 @@ permissions:
   security-events: write
 
 concurrency:
+  # Keep PR, push, and scheduled analysis independent. A scheduled run on
+  # refs/heads/main must never cancel the exact-main push gate used by release.
   group: >-
-    codeql-${{ github.workflow }}-${{
+    codeql-${{ github.workflow }}-${{ github.event_name }}-${{
       github.event_name == 'pull_request'
       && format('pr-{0}', github.event.pull_request.number)
       || github.ref
