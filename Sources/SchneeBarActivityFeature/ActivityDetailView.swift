@@ -160,6 +160,7 @@ public struct ActivityDetailView: View {
     private let isLoading: Bool
     private let errorMessage: String?
     private let onBack: () -> Void
+    private let backAccessibilityLabel: String
     private let onRetry: () -> Void
     private let onShowHistory: (() -> Void)?
     private let actionInProgress: ActivityDetailAction?
@@ -175,6 +176,7 @@ public struct ActivityDetailView: View {
         isLoading: Bool,
         errorMessage: String?,
         onBack: @escaping () -> Void,
+        backAccessibilityLabel: String = "Back to Developer Activity",
         onRetry: @escaping () -> Void,
         onShowHistory: (() -> Void)? = nil,
         actionInProgress: ActivityDetailAction? = nil,
@@ -188,6 +190,7 @@ public struct ActivityDetailView: View {
         self.isLoading = isLoading
         self.errorMessage = errorMessage
         self.onBack = onBack
+        self.backAccessibilityLabel = backAccessibilityLabel
         self.onRetry = onRetry
         self.onShowHistory = onShowHistory
         self.actionInProgress = actionInProgress
@@ -261,8 +264,8 @@ public struct ActivityDetailView: View {
                 Image(systemName: "chevron.left")
             }
             .buttonStyle(.plain)
-            .help("Back to Developer Activity")
-            .accessibilityLabel("Back to Developer Activity")
+            .help(backAccessibilityLabel)
+            .accessibilityLabel(backAccessibilityLabel)
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(item.repository)
