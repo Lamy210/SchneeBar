@@ -21,6 +21,7 @@ final class ActivityRuntimeModel {
     var deliveryHistoryIsLoading = false
     var deliveryHistoryErrorMessage: String?
     var isPresentingDeliveryHistory = false
+    var isPresentingHistoryEntryDetail = false
     var detailActionInProgress: ActivityDetailAction?
     var detailActionErrorMessage: String?
 
@@ -41,6 +42,12 @@ final class ActivityRuntimeModel {
 
     @ObservationIgnored
     private var deliveryHistoryTask: Task<Void, Never>?
+
+    @ObservationIgnored
+    private var deliveryHistoryParentItem: ActivityItem?
+
+    @ObservationIgnored
+    private var deliveryHistoryParentDetail: ActivityDetailSnapshot?
 
     func configureDetailLoader(_ loader: @escaping DetailLoader) {
         detailLoader = loader
@@ -76,6 +83,7 @@ final class ActivityRuntimeModel {
     func requestDetail(for item: ActivityItem) {
         detailActionTask?.cancel()
         detailActionTask = nil
+        clearHistoryEntryDetailNavigation()
         selectedItem = item
         detail = nil
         detailErrorMessage = nil
@@ -145,9 +153,72 @@ final class ActivityRuntimeModel {
         loadSelectedDeliveryHistory()
     }
 
+    func requestDetail(forHistoryEntry entry: DeliveryHistoryEntry) {
+        guard isPresentingDeliveryHistory,
+              let history = deliveryHistory,
+              let parentItem = selectedItem,
+              let parentDetail = detail,
+              let destinationURL = entry.destinationURL
+        else {
+            return
+        }
+
+        deliveryHistoryTask?.cancel()
+        deliveryHistoryTask = nil
+        detailActionTask?.cancel()
+        detailActionTask = nil
+
+        deliveryHistoryParentItem = parentItem
+        deliveryHistoryParentDetail = parentDetail
+        isPresentingDeliveryHistory = false
+        isPresentingHistoryEntryDetail = true
+        selectedItem = ActivityItem(
+            id: entry.id,
+            repository: history.repository,
+            context: entry.title,
+            detail: entry.detail ?? "Completed workflow run",
+            state: activityState(for: entry.state),
+            destinationURL: destinationURL,
+            kind: .workflowRun,
+            updatedAt: entry.occurredAt
+        )
+        detail = nil
+        detailErrorMessage = nil
+        detailActionErrorMessage = nil
+        detailActionInProgress = nil
+        detailIsLoading = true
+        loadSelectedDetail()
+    }
+
+    func returnToDeliveryHistory() {
+        guard isPresentingHistoryEntryDetail,
+              let parentItem = deliveryHistoryParentItem,
+              let parentDetail = deliveryHistoryParentDetail,
+              deliveryHistory != nil
+        else {
+            return
+        }
+
+        detailTask?.cancel()
+        detailTask = nil
+        detailActionTask?.cancel()
+        detailActionTask = nil
+        selectedItem = parentItem
+        detail = parentDetail
+        detailErrorMessage = nil
+        detailIsLoading = false
+        detailActionInProgress = nil
+        detailActionErrorMessage = nil
+        isPresentingHistoryEntryDetail = false
+        isPresentingDeliveryHistory = true
+        deliveryHistoryParentItem = nil
+        deliveryHistoryParentDetail = nil
+    }
+
     func dismissDeliveryHistory() {
         deliveryHistoryTask?.cancel()
         deliveryHistoryTask = nil
+        clearHistoryEntryDetailNavigation()
         isPresentingDeliveryHistory = false
         deliveryHistory = nil
         deliveryHistoryErrorMessage = nil
@@ -167,6 +238,7 @@ final class ActivityRuntimeModel {
         detailIsLoading = false
         detailActionInProgress = nil
         detailActionErrorMessage = nil
+        clearHistoryEntryDetailNavigation()
         isPresentingDeliveryHistory = false
         deliveryHistory = nil
         deliveryHistoryErrorMessage = nil
@@ -246,6 +318,27 @@ final class ActivityRuntimeModel {
                 deliveryHistoryErrorMessage = "Could not load delivery history."
                 deliveryHistoryIsLoading = false
             }
+        }
+    }
+
+    private func clearHistoryEntryDetailNavigation() {
+        isPresentingHistoryEntryDetail = false
+        deliveryHistoryParentItem = nil
+        deliveryHistoryParentDetail = nil
+    }
+
+    private func activityState(
+        for detailState: ActivityDetailState
+    ) -> ActivityState {
+        switch detailState {
+        case .failed:
+            return .failed
+        case .running:
+            return .running
+        case .waiting:
+            return .waiting
+        case .success, .neutral:
+            return .success
         }
     }
 
