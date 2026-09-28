@@ -8,6 +8,25 @@ func deliveryHistoryEntryIconName(
     activityDetailIconName(for: entry.state)
 }
 
+enum DeliveryHistoryEntryInteraction: Equatable {
+    case localDetail
+    case externalLink(URL)
+    case none
+}
+
+func deliveryHistoryEntryInteraction(
+    _ entry: DeliveryHistoryEntry,
+    hasInspectHandler: Bool
+) -> DeliveryHistoryEntryInteraction {
+    guard let destinationURL = entry.destinationURL else {
+        return .none
+    }
+    if hasInspectHandler {
+        return .localDetail
+    }
+    return .externalLink(destinationURL)
+}
+
 public struct DeliveryHistoryView: View {
     private let repository: String
     private let history: DeliveryHistorySnapshot?
@@ -15,6 +34,7 @@ public struct DeliveryHistoryView: View {
     private let errorMessage: String?
     private let onBack: () -> Void
     private let onRetry: () -> Void
+    private let onInspect: ((DeliveryHistoryEntry) -> Void)?
     private let surfaceStyle: SchneeSurfaceStyle
 
     public init(
@@ -24,6 +44,7 @@ public struct DeliveryHistoryView: View {
         errorMessage: String?,
         onBack: @escaping () -> Void,
         onRetry: @escaping () -> Void,
+        onInspect: ((DeliveryHistoryEntry) -> Void)? = nil,
         surfaceStyle: SchneeSurfaceStyle = .adaptive
     ) {
         self.repository = repository
@@ -32,6 +53,7 @@ public struct DeliveryHistoryView: View {
         self.errorMessage = errorMessage
         self.onBack = onBack
         self.onRetry = onRetry
+        self.onInspect = onInspect
         self.surfaceStyle = surfaceStyle
     }
 
@@ -145,20 +167,60 @@ public struct DeliveryHistoryView: View {
     private func entryRow(
         _ entry: DeliveryHistoryEntry
     ) -> some View {
-        if let destinationURL = entry.destinationURL {
+        switch deliveryHistoryEntryInteraction(
+            entry,
+            hasInspectHandler: onInspect != nil
+        ) {
+        case .localDetail:
+            HStack(spacing: 4) {
+                Button {
+                    onInspect?(entry)
+                } label: {
+                    entryContent(
+                        entry,
+                        accessory: .disclosure
+                    )
+                }
+                .buttonStyle(.plain)
+                .help("Show workflow detail")
+
+                if let destinationURL = entry.destinationURL {
+                    Link(destination: destinationURL) {
+                        Image(systemName: "arrow.up.right")
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                            .frame(width: 20, height: 28)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Open workflow run on GitHub")
+                    .accessibilityLabel("Open workflow run on GitHub")
+                }
+            }
+
+        case let .externalLink(destinationURL):
             Link(destination: destinationURL) {
-                entryContent(entry, showsExternalLink: true)
+                entryContent(
+                    entry,
+                    accessory: .externalLink
+                )
             }
             .buttonStyle(.plain)
             .help("Open workflow run")
-        } else {
-            entryContent(entry, showsExternalLink: false)
+
+        case .none:
+            entryContent(entry, accessory: .none)
         }
+    }
+
+    private enum EntryAccessory {
+        case disclosure
+        case externalLink
+        case none
     }
 
     private func entryContent(
         _ entry: DeliveryHistoryEntry,
-        showsExternalLink: Bool
+        accessory: EntryAccessory
     ) -> some View {
         HStack(alignment: .top, spacing: 10) {
             Image(systemName: deliveryHistoryEntryIconName(entry))
@@ -182,11 +244,19 @@ public struct DeliveryHistoryView: View {
 
             Spacer(minLength: 4)
 
-            if showsExternalLink {
+            switch accessory {
+            case .disclosure:
+                Image(systemName: "chevron.right")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                    .padding(.top, 3)
+            case .externalLink:
                 Image(systemName: "arrow.up.right")
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
                     .padding(.top, 3)
+            case .none:
+                EmptyView()
             }
         }
         .padding(.vertical, 7)
