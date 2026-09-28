@@ -131,6 +131,65 @@ func deliveryHistoryEntriesUseActivityDetailStateIconLanguage() {
 
 
 @Test
+func deliveryHistoryEntryPrefersLocalDetailWhenHandlerIsAvailable() throws {
+    let destination = try #require(
+        URL(string: "https://github.com/snow/app/actions/runs/699")
+    )
+    let entry = DeliveryHistoryEntry(
+        id: "github-actions:1:699",
+        title: "CI",
+        state: .success,
+        destinationURL: destination,
+        occurredAt: Date(timeIntervalSince1970: 99)
+    )
+
+    #expect(
+        deliveryHistoryEntryInteraction(
+            entry,
+            hasInspectHandler: true
+        ) == .localDetail
+    )
+}
+
+@Test
+func deliveryHistoryEntryFallsBackToExternalLinkWithoutLocalHandler() throws {
+    let destination = try #require(
+        URL(string: "https://github.com/snow/app/actions/runs/699")
+    )
+    let entry = DeliveryHistoryEntry(
+        id: "github-actions:1:699",
+        title: "CI",
+        state: .success,
+        destinationURL: destination,
+        occurredAt: Date(timeIntervalSince1970: 99)
+    )
+
+    #expect(
+        deliveryHistoryEntryInteraction(
+            entry,
+            hasInspectHandler: false
+        ) == .externalLink(destination)
+    )
+}
+
+@Test
+func deliveryHistoryEntryWithoutDestinationRemainsNonInteractive() {
+    let entry = DeliveryHistoryEntry(
+        id: "github-actions:1:699",
+        title: "CI",
+        state: .success,
+        occurredAt: Date(timeIntervalSince1970: 99)
+    )
+
+    #expect(
+        deliveryHistoryEntryInteraction(
+            entry,
+            hasInspectHandler: true
+        ) == .none
+    )
+}
+
+@Test
 func deliveryTimelineEvidenceDisclosureLabelsExplainStatus() {
     #expect(
         deliveryTimelineEvidenceDisclosureLabel(for: .correlated)
