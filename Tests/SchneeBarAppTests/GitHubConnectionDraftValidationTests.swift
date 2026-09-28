@@ -53,6 +53,22 @@ func gheDraftRejectsAPIHostBeforeAuthentication() {
 }
 
 @Test
+func gheDraftRejectsInvalidTenantDNSLabelBeforeAuthentication() {
+    let draft = GitHubConnectionDraft(
+        deploymentKind: .gheDotCom,
+        displayName: "Company GitHub",
+        serverURL: "https://acme_team.ghe.com",
+        clientID: "Iv1.enterprise-client"
+    )
+
+    #expect(!draft.isReadyToConnect)
+    #expect(
+        draft.endpointValidationError
+            == .unsupportedEndpoint(.invalidGHEHost)
+    )
+}
+
+@Test
 func hostedDraftRejectsPathBeforeAuthentication() {
     let draft = GitHubConnectionDraft(
         deploymentKind: .gheDotCom,
