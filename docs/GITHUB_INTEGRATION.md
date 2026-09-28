@@ -43,6 +43,14 @@ For the local-first public desktop client, the initial preferred GitHub.com flow
 
 Tokens are stored in macOS Keychain. A GitHub App private key is never shipped in the desktop client.
 
+### Developer preview client ID
+
+The current developer preview does not bundle a SchneeBar-owned GitHub App client ID. A tester must provide the public client ID of a GitHub App with Device Flow enabled in the connection onboarding form.
+
+The client ID is public application metadata and may be stored in the local connection profile. A client secret or GitHub App private key must never be entered into SchneeBar.
+
+For GitHub.com/GHE.com, use an app registered for the relevant hosted environment. GHES requires a per-instance app registration on that server.
+
 If a future Auth/Webhook Relay is introduced, it is optional and separately threat-modeled.
 
 ## Permissions

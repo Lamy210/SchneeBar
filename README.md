@@ -2,7 +2,7 @@
 
 SchneeBar is a native macOS menu-bar platform for surfacing the information and actions that matter **right now**.
 
-The project is in its bootstrap phase. The first vertical slice focuses on a native menu-bar shell, clear Core / DesignSystem / Feature boundaries, deterministic visual rendering, and public-repository-safe CI.
+The project is pre-release. The current implementation includes the native menu-bar shell, provider-neutral widget and Developer Activity boundaries, GitHub.com/GHE.com/GHES foundations, deterministic visual regression, and public-repository-safe CI. The first public distribution target is an unsigned **developer preview** prerelease; stable distribution remains gated on Developer ID signing and Apple notarization.
 
 ## Product direction
 
@@ -73,6 +73,22 @@ Render deterministic visual scenarios used by CI:
 mise exec -- tuist run SchneeBarVisualSnapshotCLI -- --output .visual/current
 ```
 
+## Developer preview GitHub setup
+
+The current preview build does **not** bundle a project-owned GitHub App client ID. To use GitHub-backed features, provide the client ID of a GitHub App that has Device Flow enabled. The onboarding UI accepts that public client ID directly; do not enter a client secret or private key.
+
+Use read-only permissions for the surfaces you want to test:
+
+- Actions: read for workflow runs/jobs
+- Pull requests: read for review-request activity
+- Checks: read for Check Run activity
+- Deployments: read for Delivery deployment evidence
+- Actions: write only when explicitly testing opt-in workflow rerun/cancel controls
+
+Self-hosted GHES requires an app registered on that GHES instance.
+
+See [GitHub Integration](docs/GITHUB_INTEGRATION.md) for the authentication and least-privilege model.
+
 ## CI and visual review
 
 Every pull request builds and tests the native app. A separate Visual Regression workflow renders deterministic scenarios from the pull request candidate and its exact base commit (`pull_request.base.sha`), then produces an HTML report with Before / After / Overlay views.
@@ -93,7 +109,7 @@ This repository is public. CI is therefore designed with untrusted fork pull req
 - Signing, notarization, and release credentials belong only in protected release workflows/environments.
 - GitHub OAuth/App credentials must never be committed or embedded as private secrets in the public client.
 
-See [Public Repository Security](docs/PUBLIC_REPOSITORY_SECURITY.md) and [Security Policy](SECURITY.md).
+See [Public Repository Security](docs/PUBLIC_REPOSITORY_SECURITY.md), [Release Process](docs/RELEASE.md), and [Security Policy](SECURITY.md).
 
 ## Project documents
 
@@ -102,6 +118,7 @@ See [Public Repository Security](docs/PUBLIC_REPOSITORY_SECURITY.md) and [Securi
 - [GitHub Integration](docs/GITHUB_INTEGRATION.md)
 - [CI & Visual Regression](docs/CI_VISUAL_REGRESSION.md)
 - [Public Repository Security](docs/PUBLIC_REPOSITORY_SECURITY.md)
+- [Release Process](docs/RELEASE.md)
 - [ADR-0001: Native modular architecture](docs/decisions/0001-native-modular-architecture.md)
 
 ## License

@@ -1,0 +1,429 @@
+name: Release Preview
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/release-preview.yml"
+      - "Project.swift"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Prerelease tag, for example v0.1.0-alpha.1"
+        required: true
+        default: "v0.1.0-alpha.1"
+        type: string
+      expected_sha:
+        description: "Exact reviewed main commit SHA to release"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: >-
+    release-preview-${{
+      github.event_name == 'workflow_dispatch'
+      && inputs.tag
+      || format('pr-{0}', github.event.pull_request.number)
+    }}
+  cancel-in-progress: false
+
+jobs:
+  validate-preview-build:
+    name: Validate preview release build
+    if: github.event_name == 'pull_request'
+    runs-on: macos-26
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+
+      - name: Install pinned tools
+        uses: jdx/mise-action@9e7f7633ff6f6d6048a9418a68d48f288f50eb14 # v4.2.3
+        with:
+          version: "2026.9.5"
+          github_token: ""
+          cache_save: false
+
+      - name: Select Xcode 26.6
+        run: sudo xcode-select -s /Applications/Xcode_26.6.app/Contents/Developer
+
+      - name: Generate project
+        run: tuist generate
+
+      - name: Build release configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          xcodebuild \
+            -project SchneeBar.xcodeproj \
+            -scheme SchneeBar \
+            -configuration Release \
+            -destination 'platform=macOS' \
+            -derivedDataPath "${RUNNER_TEMP}/SchneeBarReleaseValidation" \
+            -skipMacroValidation \
+            CODE_SIGNING_ALLOWED=NO \
+            ONLY_ACTIVE_ARCH=NO \
+            ARCHS="arm64 x86_64" \
+            MARKETING_VERSION="0.1.0" \
+            CURRENT_PROJECT_VERSION="1" \
+            build
+
+      - name: Validate release bundle and package
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          app="${RUNNER_TEMP}/SchneeBarReleaseValidation/Build/Products/Release/SchneeBar.app"
+          test -d "${app}"
+
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "${app}/Contents/Info.plist")" = "0.1.0"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "${app}/Contents/Info.plist")" = "1"
+
+          binary="${app}/Contents/MacOS/SchneeBar"
+          archs="$(lipo -archs "${binary}")"
+          for arch in arm64 x86_64; do
+            if [[ " ${archs} " != *" ${arch} "* ]]; then
+              echo "Missing required architecture ${arch}; found: ${archs}" >&2
+              exit 1
+            fi
+          done
+
+          /usr/bin/codesign --force --deep --sign - "${app}"
+          /usr/bin/codesign --verify --deep --strict --verbose=2 "${app}"
+
+          archive="${RUNNER_TEMP}/SchneeBar-0.1.0-preview-validation.zip"
+          /usr/bin/ditto -c -k --sequesterRsrc --keepParent "${app}" "${archive}"
+          unzip -t "${archive}"
+
+  build-preview-package:
+    name: Build unsigned preview package
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    permissions:
+      actions: read
+      contents: read
+    runs-on: macos-26
+    timeout-minutes: 35
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+
+      - name: Install pinned tools
+        uses: jdx/mise-action@9e7f7633ff6f6d6048a9418a68d48f288f50eb14 # v4.2.3
+        with:
+          version: "2026.9.5"
+          github_token: ""
+          cache_save: false
+
+      - name: Select Xcode 26.6
+        run: sudo xcode-select -s /Applications/Xcode_26.6.app/Contents/Developer
+
+      - name: Validate release input
+        id: version
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+          EXPECTED_SHA: ${{ inputs.expected_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ ! "${RELEASE_TAG}" =~ ^v((0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*))-((0|[1-9][0-9]*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*)(\.(0|[1-9][0-9]*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*))*)$ ]]; then
+            echo "Expected a prerelease tag such as v0.1.0-alpha.1" >&2
+            exit 1
+          fi
+          marketing_version="${BASH_REMATCH[1]}"
+
+          if [[ ! "${EXPECTED_SHA}" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "expected_sha must be a full 40-character commit SHA" >&2
+            exit 1
+          fi
+          if [[ "${GITHUB_SHA}" != "${EXPECTED_SHA}" ]]; then
+            echo "Refusing to release unexpected main commit." >&2
+            echo "Expected: ${EXPECTED_SHA}" >&2
+            echo "Actual:   ${GITHUB_SHA}" >&2
+            exit 1
+          fi
+
+          echo "marketing_version=${marketing_version}" >> "${GITHUB_OUTPUT}"
+          echo "artifact_version=${RELEASE_TAG#v}" >> "${GITHUB_OUTPUT}"
+
+          if git ls-remote --exit-code --tags origin "refs/tags/${RELEASE_TAG}" >/dev/null 2>&1; then
+            echo "Tag already exists: ${RELEASE_TAG}" >&2
+            exit 1
+          fi
+
+      - name: Verify exact-main push gates
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          for workflow in ci.yml codeql.yml; do
+            run_json="$(gh run list \
+              --commit "${GITHUB_SHA}" \
+              --branch main \
+              --event push \
+              --workflow "${workflow}" \
+              --limit 1 \
+              --json headSha,status,conclusion)"
+
+            if ! jq -e \
+              --arg sha "${GITHUB_SHA}" \
+              'length == 1
+               and .[0].headSha == $sha
+               and .[0].status == "completed"
+               and .[0].conclusion == "success"' \
+              <<<"${run_json}" >/dev/null; then
+              echo "Required push workflow is not green for ${GITHUB_SHA}: ${workflow}" >&2
+              echo "${run_json}" >&2
+              exit 1
+            fi
+          done
+
+      - name: Toolchain
+        run: |
+          set -euo pipefail
+          sw_vers
+          xcodebuild -version
+          swift --version
+          tuist version
+
+      - name: Generate project
+        run: tuist generate
+
+      - name: Test release candidate
+        run: tuist test -- -skipMacroValidation CODE_SIGNING_ALLOWED=NO
+
+      - name: Render deterministic release smoke
+        run: tuist run SchneeBarVisualSnapshotCLI -- --output "${RUNNER_TEMP}/release-visual-smoke"
+
+      - name: Build release app
+        env:
+          MARKETING_VERSION: ${{ steps.version.outputs.marketing_version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          xcodebuild \
+            -project SchneeBar.xcodeproj \
+            -scheme SchneeBar \
+            -configuration Release \
+            -destination 'platform=macOS' \
+            -derivedDataPath "${RUNNER_TEMP}/SchneeBarDerivedData" \
+            -skipMacroValidation \
+            CODE_SIGNING_ALLOWED=NO \
+            ONLY_ACTIVE_ARCH=NO \
+            ARCHS="arm64 x86_64" \
+            MARKETING_VERSION="${MARKETING_VERSION}" \
+            CURRENT_PROJECT_VERSION="${GITHUB_RUN_NUMBER}" \
+            build
+
+      - name: Package unsigned preview
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+          MARKETING_VERSION: ${{ steps.version.outputs.marketing_version }}
+          ARTIFACT_VERSION: ${{ steps.version.outputs.artifact_version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          app="${RUNNER_TEMP}/SchneeBarDerivedData/Build/Products/Release/SchneeBar.app"
+          if [[ ! -d "${app}" ]]; then
+            echo "Release app was not produced at ${app}" >&2
+            exit 1
+          fi
+
+          actual_marketing_version="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "${app}/Contents/Info.plist")"
+          actual_build_number="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "${app}/Contents/Info.plist")"
+
+          if [[ "${actual_marketing_version}" != "${MARKETING_VERSION}" ]]; then
+            echo "Unexpected CFBundleShortVersionString: ${actual_marketing_version}" >&2
+            exit 1
+          fi
+          if [[ "${actual_build_number}" != "${GITHUB_RUN_NUMBER}" ]]; then
+            echo "Unexpected CFBundleVersion: ${actual_build_number}" >&2
+            exit 1
+          fi
+
+          binary="${app}/Contents/MacOS/SchneeBar"
+          archs="$(lipo -archs "${binary}")"
+          for arch in arm64 x86_64; do
+            if [[ " ${archs} " != *" ${arch} "* ]]; then
+              echo "Missing required architecture ${arch}; found: ${archs}" >&2
+              exit 1
+            fi
+          done
+
+          # Ad-hoc signing provides bundle integrity only. This is intentionally
+          # not Developer ID signing and does not make the build notarized.
+          /usr/bin/codesign --force --deep --sign - "${app}"
+          /usr/bin/codesign --verify --deep --strict --verbose=2 "${app}"
+
+          output_dir="${RUNNER_TEMP}/release"
+          mkdir -p "${output_dir}"
+
+          archive="${output_dir}/SchneeBar-${ARTIFACT_VERSION}-unsigned.zip"
+          checksum="${archive}.sha256"
+          notes="${output_dir}/release-notes.md"
+
+          /usr/bin/ditto -c -k --sequesterRsrc --keepParent "${app}" "${archive}"
+          unzip -t "${archive}"
+
+          (
+            cd "${output_dir}"
+            shasum -a 256 "$(basename "${archive}")" > "$(basename "${checksum}")"
+            shasum -a 256 -c "$(basename "${checksum}")"
+          )
+
+          cat > "${notes}" <<EOF
+          ## SchneeBar ${RELEASE_TAG}
+
+          This is an **unsigned, unnotarized developer preview prerelease** for early testing.
+
+          - macOS 15 or later
+          - Universal app: Apple Silicon (arm64) + Intel (x86_64)
+          - Built from commit ${GITHUB_SHA}
+          - Marketing version: ${MARKETING_VERSION}
+          - Build number: ${GITHUB_RUN_NUMBER}
+          - Ad-hoc signed for bundle integrity only
+          - Not Developer ID signed
+          - Not notarized by Apple
+
+          ### Preview scope
+
+          - native macOS menu-bar widget runtime
+          - Clock and CPU system widgets
+          - bounded Developer Activity inbox
+          - GitHub Actions workflow activity and local job detail
+          - review requests and Check Run activity
+          - GitHub.com, GHE.com, and evidence-backed GHES compatibility foundations
+          - Delivery timeline, deployment/environment evidence, and bounded local Delivery history
+          - declarative startup-loaded external widgets
+          - deterministic visual and real-app smoke coverage
+
+          ### Known preview limitations
+
+          - GitHub-backed features require the tester to provide a Device-Flow-enabled GitHub App client ID; this preview does not bundle a project-owned client ID.
+          - Apple Developer ID signing/notarization is not configured yet (#210).
+          - GHES runtime REST API-version discovery is intentionally not implemented under the currently published GitHub GHES OpenAPI contract; SchneeBar uses the evidence-backed release compatibility matrix instead.
+          - External widget live reload/install UX and arbitrary native plugins are intentionally deferred.
+          - The repository does not yet publish a stable release channel.
+          - Source/binary distribution terms for a stable release have not yet been selected (#215); the repository README remains authoritative for the current license status.
+
+          Because this preview is not notarized, macOS Gatekeeper may block normal first launch after downloading it. After verifying the SHA-256 checksum and release source, testers can use System Settings → Privacy & Security → Open Anyway for this app. Do not disable Gatekeeper globally or remove quarantine metadata as the normal installation path.
+
+          Do not treat this artifact as the stable distribution channel. The attached SHA-256 file can be used to verify the downloaded archive.
+          EOF
+
+      - name: Upload bounded release payload
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: schneebar-preview-payload-${{ github.run_id }}
+          path: ${{ runner.temp }}/release
+          if-no-files-found: error
+          retention-days: 1
+
+  publish-preview:
+    name: Publish preview prerelease
+    needs: build-preview-package
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    permissions:
+      actions: read
+      contents: write
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Download bounded release payload
+        uses: actions/download-artifact@70fc10c6e5e1ce46ad2ea6f2b72d43f7d47b13c3 # v8.0.0
+        with:
+          name: schneebar-preview-payload-${{ github.run_id }}
+          path: release-payload
+
+      - name: Verify bounded release payload
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+          EXPECTED_SHA: ${{ inputs.expected_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ "${GITHUB_SHA}" != "${EXPECTED_SHA}" ]]; then
+            echo "Refusing to publish unexpected main commit." >&2
+            exit 1
+          fi
+
+          artifact_version="${RELEASE_TAG#v}"
+          archive="release-payload/SchneeBar-${artifact_version}-unsigned.zip"
+          checksum="${archive}.sha256"
+          notes="release-payload/release-notes.md"
+
+          test -f "${archive}"
+          test -f "${checksum}"
+          test -f "${notes}"
+
+          if find release-payload -type l -print -quit | grep -q .; then
+            echo "Release payload must not contain symbolic links." >&2
+            exit 1
+          fi
+
+          mapfile -t payload_files < <(find release-payload -type f -print | LC_ALL=C sort)
+          if [[ "${#payload_files[@]}" -ne 3 ]]; then
+            echo "Unexpected release payload file count: ${#payload_files[@]}" >&2
+            printf '%s\n' "${payload_files[@]}" >&2
+            exit 1
+          fi
+
+          expected_files="$(
+            printf '%s\n' "${archive}" "${checksum}" "${notes}" | LC_ALL=C sort
+          )"
+          actual_files="$(printf '%s\n' "${payload_files[@]}")"
+          if [[ "${actual_files}" != "${expected_files}" ]]; then
+            echo "Unexpected release payload contents." >&2
+            printf '%s\n' "${payload_files[@]}" >&2
+            exit 1
+          fi
+
+          (
+            cd release-payload
+            sha256sum -c "$(basename "${checksum}")"
+            unzip -t "$(basename "${archive}")"
+          )
+
+          grep -F "## SchneeBar ${RELEASE_TAG}" "${notes}" >/dev/null
+          grep -F "Built from commit ${GITHUB_SHA}" "${notes}" >/dev/null
+
+          if git ls-remote --exit-code --tags "https://github.com/${GITHUB_REPOSITORY}.git" "refs/tags/${RELEASE_TAG}" >/dev/null 2>&1; then
+            echo "Tag already exists: ${RELEASE_TAG}" >&2
+            exit 1
+          fi
+
+      - name: Create GitHub prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          artifact_version="${RELEASE_TAG#v}"
+          archive="release-payload/SchneeBar-${artifact_version}-unsigned.zip"
+          checksum="${archive}.sha256"
+          notes="release-payload/release-notes.md"
+
+          gh release create "${RELEASE_TAG}" \
+            "${archive}" \
+            "${checksum}" \
+            --target "${GITHUB_SHA}" \
+            --title "SchneeBar ${RELEASE_TAG}" \
+            --notes-file "${notes}" \
+            --prerelease
