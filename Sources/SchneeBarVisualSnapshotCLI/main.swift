@@ -245,7 +245,6 @@ private func activityDetailRoot(
             errorMessage: nil,
             onBack: {},
             onRetry: {},
-            onInspect: { _ in },
             onAction: { _ in },
             evidenceInitiallyExpanded:
                 scenario.detail.deliveryTimeline?.evidence.isEmpty == false,
@@ -272,6 +271,7 @@ private func deliveryHistoryRoot(
             errorMessage: scenario.errorMessage,
             onBack: {},
             onRetry: {},
+            onInspect: { _ in },
             surfaceStyle: .deterministic
         )
         .padding(24)
