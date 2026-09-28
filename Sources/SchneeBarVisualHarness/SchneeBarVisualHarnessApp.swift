@@ -161,7 +161,8 @@ private struct VisualHarnessView: View {
                         isLoading: false,
                         errorMessage: deliveryHistoryScenario.errorMessage,
                         onBack: {},
-                        onRetry: {}
+                        onRetry: {},
+                        onInspect: { _ in }
                     )
                     .frame(maxWidth: 400)
 
