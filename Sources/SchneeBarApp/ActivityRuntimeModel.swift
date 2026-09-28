@@ -149,7 +149,12 @@ final class ActivityRuntimeModel {
     }
 
     func requestDeliveryHistory() {
-        guard selectedItem != nil, detail != nil else { return }
+        guard selectedItem != nil,
+              detail != nil,
+              detailActionInProgress == nil
+        else {
+            return
+        }
         isPresentingDeliveryHistory = true
         deliveryHistory = nil
         deliveryHistoryErrorMessage = nil
@@ -166,6 +171,7 @@ final class ActivityRuntimeModel {
 
     func requestDetail(forHistoryEntry entry: DeliveryHistoryEntry) {
         guard isPresentingDeliveryHistory,
+              detailActionInProgress == nil,
               let history = deliveryHistory,
               let parentItem = selectedItem,
               let parentDetail = detail,
