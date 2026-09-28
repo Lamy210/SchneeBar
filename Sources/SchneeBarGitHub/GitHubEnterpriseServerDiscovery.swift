@@ -135,6 +135,8 @@ public enum GitHubEnterpriseServerDiscoveryError: Error, Equatable, Sendable {
 }
 
 public struct GitHubEnterpriseServerDiscoveryClient: Sendable {
+    public static let maximumInstalledVersionBytes = 64
+
     private let transport: any GitHubHTTPTransport
     private let compatibilityPolicy: GitHubEnterpriseCompatibilityPolicy
 
@@ -209,6 +211,7 @@ public struct GitHubEnterpriseServerDiscoveryClient: Sendable {
             in: .whitespacesAndNewlines
         )
         guard !value.isEmpty,
+              value.utf8.count <= Self.maximumInstalledVersionBytes,
               !value.unicodeScalars.contains(where: isControlScalar)
         else {
             throw GitHubEnterpriseServerDiscoveryError.invalidPayload
