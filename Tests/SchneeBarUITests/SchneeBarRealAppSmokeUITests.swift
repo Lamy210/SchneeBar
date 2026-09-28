@@ -35,6 +35,18 @@ final class SchneeBarRealAppSmokeUITests: XCTestCase {
             fileManager: fileManager
         )
 
+        let fixtureURL = rootURL.appendingPathComponent(
+            Self.fixtureFilename,
+            isDirectory: false
+        )
+        let originalFixtureData = try Data(contentsOf: fixtureURL)
+        defer {
+            try? originalFixtureData.write(
+                to: fixtureURL,
+                options: .atomic
+            )
+        }
+
         let app = XCUIApplication()
         app.terminate()
         launchAndOpenSettings(app)
@@ -139,6 +151,87 @@ final class SchneeBarRealAppSmokeUITests: XCTestCase {
             "Expected the test to restore the external widget to disabled."
         )
         try await Task.sleep(for: .milliseconds(500))
+
+        let terminatedBeforeRemoval = await quitApplicationGracefully(app)
+        XCTAssertTrue(
+            terminatedBeforeRemoval,
+            "Expected SchneeBar to terminate before mutating the CI fixture."
+        )
+
+        try fileManager.removeItem(at: fixtureURL)
+        launchAndOpenSettings(app)
+
+        let removedDocumentStatus = externalWidgetStartupStatus(in: app)
+        XCTAssertTrue(
+            removedDocumentStatus.waitForExistence(timeout: 10),
+            "Expected External Widgets startup health after fixture removal.\n"
+                + app.debugDescription
+        )
+        XCTAssertTrue(
+            waitForExternalWidgetStartupStatus(
+                removedDocumentStatus,
+                expectedLabel:
+                    "External widget startup Loaded. "
+                        + "No external widgets were loaded."
+            ),
+            "Expected removed documents to produce a successful zero-widget "
+                + "startup. Observed label=\(removedDocumentStatus.label).\n"
+                + app.debugDescription
+        )
+
+        let removedDocumentToggle = app
+            .descendants(matching: .any)
+            .matching(
+                identifier:
+                    "widget-enabled-\(Self.externalWidgetID)"
+            )
+            .firstMatch
+        XCTAssertFalse(
+            removedDocumentToggle.waitForExistence(timeout: 1),
+            "A removed external widget must not remain registered after relaunch."
+        )
+
+        app.terminate()
+        try Data(#"{\"schemaVersion\":1,"#.utf8).write(
+            to: fixtureURL,
+            options: .atomic
+        )
+        launchAndOpenSettings(app)
+
+        let malformedDocumentStatus = externalWidgetStartupStatus(in: app)
+        XCTAssertTrue(
+            malformedDocumentStatus.waitForExistence(timeout: 10),
+            "Expected External Widgets startup health for malformed fixture.\n"
+                + app.debugDescription
+        )
+        XCTAssertTrue(
+            waitForExternalWidgetStartupStatus(
+                malformedDocumentStatus,
+                expectedLabel:
+                    "External widget startup Unavailable. "
+                        + "One or more external widget documents are invalid."
+            ),
+            "Expected malformed external widget input to surface only the "
+                + "sanitized invalid-document state. Observed label="
+                + "\(malformedDocumentStatus.label).\n"
+                + app.debugDescription
+        )
+        XCTAssertFalse(
+            malformedDocumentStatus.label.contains(Self.fixtureFilename),
+            "Startup health must not expose the malformed fixture filename."
+        )
+
+        let malformedDocumentToggle = app
+            .descendants(matching: .any)
+            .matching(
+                identifier:
+                    "widget-enabled-\(Self.externalWidgetID)"
+            )
+            .firstMatch
+        XCTAssertFalse(
+            malformedDocumentToggle.waitForExistence(timeout: 1),
+            "Malformed external widget input must not register a widget."
+        )
     }
 
     @MainActor
@@ -181,9 +274,21 @@ final class SchneeBarRealAppSmokeUITests: XCTestCase {
     private func waitForLoadedExternalWidgetStatus(
         _ element: XCUIElement
     ) -> Bool {
+        waitForExternalWidgetStartupStatus(
+            element,
+            expectedLabel:
+                "External widget startup Loaded. 1 external widget loaded."
+        )
+    }
+
+    @MainActor
+    private func waitForExternalWidgetStartupStatus(
+        _ element: XCUIElement,
+        expectedLabel: String
+    ) -> Bool {
         let predicate = NSPredicate(
             format: "label == %@",
-            "External widget startup Loaded. 1 external widget loaded."
+            expectedLabel
         )
         let expectation = XCTNSPredicateExpectation(
             predicate: predicate,
