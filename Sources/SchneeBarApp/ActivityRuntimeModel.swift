@@ -72,6 +72,17 @@ final class ActivityRuntimeModel {
         self.items = items
         self.isTruncated = isTruncated
 
+        if isPresentingHistoryEntryDetail {
+            if let parentItem = deliveryHistoryParentItem,
+               let refreshedParent = items.first(where: {
+                   $0.id == parentItem.id
+               })
+            {
+                deliveryHistoryParentItem = refreshedParent
+            }
+            return
+        }
+
         guard let selectedItem else { return }
         guard let refreshed = items.first(where: { $0.id == selectedItem.id }) else {
             dismissDetail()
