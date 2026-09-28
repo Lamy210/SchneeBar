@@ -276,11 +276,11 @@ startup-only behavior in the built app:
    rejected value.
 
 The GitHub-hosted real-app smoke now automates the valid-document launch path,
-the default-disabled assertion, and the explicit-enable preference surviving a
-real application relaunch. The test restores that preference to disabled before
-it exits. Removed-document and malformed-document release checks remain manual
-until they can be isolated without weakening the workflow-owned filesystem
-fixture boundary.
+the default-disabled assertion, the explicit-enable preference surviving a real
+application relaunch, removed-document startup resolving to a successful
+zero-widget state, and malformed-document startup surfacing only the sanitized
+invalid-document health state. The test restores the preference to disabled and
+restores the workflow-owned valid fixture before it exits.
 
 This is a release smoke check, not a live-reload contract. Editing files while
 SchneeBar is running is intentionally outside v1 behavior.
