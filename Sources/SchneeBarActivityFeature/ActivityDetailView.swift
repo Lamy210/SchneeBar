@@ -288,6 +288,7 @@ public struct ActivityDetailView: View {
                     Image(systemName: "clock.arrow.circlepath")
                 }
                 .buttonStyle(.plain)
+                .disabled(actionInProgress != nil)
                 .help("Show delivery history")
                 .accessibilityLabel("Show delivery history")
             }
