@@ -14,6 +14,18 @@ private actor HistoryLoadCounter {
     func value() -> Int { count }
 }
 
+private actor HistoryItemRecorder {
+    private var items: [ActivityItem] = []
+
+    func record(_ item: ActivityItem) {
+        items.append(item)
+    }
+
+    func values() -> [ActivityItem] {
+        items
+    }
+}
+
 @Test @MainActor
 func activityRuntimeHistoryPreservesLoadedDetailAndBackDoesNotReloadDetail() async throws {
     let model = ActivityRuntimeModel()
@@ -90,6 +102,134 @@ func activityRuntimeHistoryRetryOnlyRepeatsHistoryLoader() async throws {
 }
 
 @Test @MainActor
+func activityRuntimeHistoryEntryDrilldownLoadsDetailAndReturnsWithoutReloadingHistory() async throws {
+    let model = ActivityRuntimeModel()
+    let parentItem = historyRuntimeItem()
+    let parentDetail = historyRuntimeDetail(item: parentItem)
+    let history = historyRuntimeSnapshot(runID: 699)
+    let detailCounter = HistoryLoadCounter()
+    let historyCounter = HistoryLoadCounter()
+    let recorder = HistoryItemRecorder()
+
+    model.selectedItem = parentItem
+    model.detail = parentDetail
+    model.configureDeliveryHistoryLoader { _ in
+        _ = await historyCounter.next()
+        return history
+    }
+    model.configureDetailLoader { item in
+        _ = await detailCounter.next()
+        await recorder.record(item)
+        return historyRuntimeDetail(item: item)
+    }
+
+    model.requestDeliveryHistory()
+    await waitForHistoryLoad(model)
+    let entry = try #require(model.deliveryHistory?.entries.first)
+
+    model.requestDetail(forHistoryEntry: entry)
+    await waitForDetailLoad(model)
+
+    #expect(!model.isPresentingDeliveryHistory)
+    #expect(model.isPresentingHistoryEntryDetail)
+    #expect(model.selectedItem?.id == entry.id)
+    #expect(model.selectedItem?.repository == history.repository)
+    #expect(model.selectedItem?.context == entry.title)
+    #expect(model.selectedItem?.destinationURL == entry.destinationURL)
+    #expect(model.detail?.id == entry.id)
+    #expect(model.deliveryHistory == history)
+    #expect(await historyCounter.value() == 1)
+    #expect(await detailCounter.value() == 1)
+
+    let recorded = await recorder.values()
+    #expect(recorded.count == 1)
+    #expect(recorded.first?.updatedAt == entry.occurredAt)
+
+    model.returnToDeliveryHistory()
+
+    #expect(model.isPresentingDeliveryHistory)
+    #expect(!model.isPresentingHistoryEntryDetail)
+    #expect(model.selectedItem == parentItem)
+    #expect(model.detail == parentDetail)
+    #expect(model.deliveryHistory == history)
+    #expect(await historyCounter.value() == 1)
+    #expect(await detailCounter.value() == 1)
+}
+
+@Test @MainActor
+func activityRuntimeHistoryEntryDrilldownSurvivesInboxRefresh() async throws {
+    let model = ActivityRuntimeModel()
+    let parentItem = historyRuntimeItem()
+    let refreshedParent = ActivityItem(
+        id: parentItem.id,
+        repository: parentItem.repository,
+        context: "CI refreshed",
+        detail: parentItem.detail,
+        state: parentItem.state,
+        destinationURL: parentItem.destinationURL,
+        kind: parentItem.kind,
+        updatedAt: Date(timeIntervalSince1970: 200)
+    )
+    let history = historyRuntimeSnapshot(runID: 699)
+
+    model.selectedItem = parentItem
+    model.detail = historyRuntimeDetail(item: parentItem)
+    model.configureDeliveryHistoryLoader { _ in history }
+    model.configureDetailLoader { item in
+        historyRuntimeDetail(item: item)
+    }
+
+    model.requestDeliveryHistory()
+    await waitForHistoryLoad(model)
+    let entry = try #require(model.deliveryHistory?.entries.first)
+    model.requestDetail(forHistoryEntry: entry)
+    await waitForDetailLoad(model)
+
+    model.replace(with: [refreshedParent])
+
+    #expect(model.isPresentingHistoryEntryDetail)
+    #expect(model.selectedItem?.id == entry.id)
+    #expect(model.detail?.id == entry.id)
+
+    model.returnToDeliveryHistory()
+
+    #expect(model.selectedItem == refreshedParent)
+    #expect(model.isPresentingDeliveryHistory)
+}
+
+@Test @MainActor
+func activityRuntimeHistoryEntryWithoutDestinationDoesNotNavigate() async throws {
+    let model = ActivityRuntimeModel()
+    let parentItem = historyRuntimeItem()
+    let parentDetail = historyRuntimeDetail(item: parentItem)
+    let entry = DeliveryHistoryEntry(
+        id: "github-actions:1:699",
+        title: "CI",
+        detail: "Succeeded · main · Run #699",
+        state: .success,
+        destinationURL: nil,
+        occurredAt: Date(timeIntervalSince1970: 99)
+    )
+    let history = DeliveryHistorySnapshot(
+        repository: parentItem.repository,
+        entries: [entry]
+    )
+
+    model.selectedItem = parentItem
+    model.detail = parentDetail
+    model.configureDeliveryHistoryLoader { _ in history }
+    model.requestDeliveryHistory()
+    await waitForHistoryLoad(model)
+
+    model.requestDetail(forHistoryEntry: entry)
+
+    #expect(model.isPresentingDeliveryHistory)
+    #expect(!model.isPresentingHistoryEntryDetail)
+    #expect(model.selectedItem == parentItem)
+    #expect(model.detail == parentDetail)
+}
+
+@Test @MainActor
 func activityRuntimeHistoryDismissCancelsStaleCompletion() async throws {
     let model = ActivityRuntimeModel()
     let item = historyRuntimeItem()
@@ -150,6 +290,16 @@ private func waitForHistoryLoad(_ model: ActivityRuntimeModel) async {
     }
 }
 
+@MainActor
+private func waitForDetailLoad(_ model: ActivityRuntimeModel) async {
+    for _ in 0 ..< 1_000 {
+        if !model.detailIsLoading {
+            return
+        }
+        await Task.yield()
+    }
+}
+
 private func historyRuntimeItem() -> ActivityItem {
     ActivityItem(
         id: "github-actions:1:700",
@@ -177,17 +327,21 @@ private func historyRuntimeDetail(
     )
 }
 
-private func historyRuntimeSnapshot() -> DeliveryHistorySnapshot {
+private func historyRuntimeSnapshot(
+    runID: Int64 = 700
+) -> DeliveryHistorySnapshot {
     DeliveryHistorySnapshot(
         repository: "snow/app",
         entries: [
             DeliveryHistoryEntry(
-                id: "github-actions:1:700",
+                id: "github-actions:1:\(runID)",
                 title: "CI",
-                detail: "Succeeded · Default branch · Run #700",
+                detail: "Succeeded · Default branch · Run #\(runID)",
                 state: .success,
-                destinationURL: URL(string: "https://github.com/snow/app/actions/runs/700"),
-                occurredAt: Date(timeIntervalSince1970: 100)
+                destinationURL: URL(
+                    string: "https://github.com/snow/app/actions/runs/\(runID)"
+                ),
+                occurredAt: Date(timeIntervalSince1970: TimeInterval(runID))
             ),
         ]
     )
