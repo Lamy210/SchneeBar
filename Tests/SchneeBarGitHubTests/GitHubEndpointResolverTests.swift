@@ -28,6 +28,40 @@ func resolvesGHEDataResidencyEndpoints() throws {
     #expect(endpoints.authenticationBaseURL.absoluteString == "https://acme.ghe.com")
 }
 
+@Test(arguments: [
+    "https://octo-enterprise.ghe.com",
+    "https://tenant123.ghe.com",
+])
+func acceptsDNSCompatibleDedicatedGHETenantHosts(
+    rawURL: String
+) throws {
+    let endpoints = try GitHubEndpointResolver.resolve(
+        deploymentKind: .gheDotCom,
+        webBaseURL: try #require(URL(string: rawURL))
+    )
+
+    #expect(endpoints.webBaseURL.absoluteString == rawURL)
+}
+
+@Test(arguments: [
+    "https://-acme.ghe.com",
+    "https://acme-.ghe.com",
+    "https://acme_team.ghe.com",
+    "https://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.ghe.com",
+])
+func rejectsInvalidDedicatedGHETenantDNSLabels(
+    rawURL: String
+) throws {
+    let url = try #require(URL(string: rawURL))
+
+    #expect(throws: GitHubEndpointResolverError.invalidGHEHost) {
+        try GitHubEndpointResolver.resolve(
+            deploymentKind: .gheDotCom,
+            webBaseURL: url
+        )
+    }
+}
+
 @Test
 func normalizesCaseForDedicatedGHEWebHost() throws {
     let endpoints = try GitHubEndpointResolver.resolve(
