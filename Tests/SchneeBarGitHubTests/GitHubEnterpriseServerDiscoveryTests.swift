@@ -121,6 +121,58 @@ func discoveryRejectsUnsafeInstalledVersionEvidence(
 }
 
 @Test
+func discoveryAcceptsInstalledVersionAtByteLimit() async throws {
+    let value = "3.22.0-" + String(
+        repeating: "a",
+        count:
+            GitHubEnterpriseServerDiscoveryClient.maximumInstalledVersionBytes
+                - "3.22.0-".utf8.count
+    )
+    let transport = RecordingGitHubTransport(
+        json: #"{"installed_version":"#(value)"}"#
+    )
+    let client = GitHubEnterpriseServerDiscoveryClient(transport: transport)
+    let connection = GitHubConnection(
+        displayName: "Internal GitHub",
+        deploymentKind: .enterpriseServer,
+        webBaseURL: try #require(
+            URL(string: "https://github.internal.example")
+        )
+    )
+
+    let result = try await client.discover(connection: connection)
+
+    #expect(result.installedVersion == value)
+}
+
+@Test
+func discoveryRejectsOversizedInstalledVersionEvidence() async throws {
+    let value = String(
+        repeating: "a",
+        count:
+            GitHubEnterpriseServerDiscoveryClient.maximumInstalledVersionBytes
+                + 1
+    )
+    let transport = RecordingGitHubTransport(
+        json: #"{"installed_version":"#(value)"}"#
+    )
+    let client = GitHubEnterpriseServerDiscoveryClient(transport: transport)
+    let connection = GitHubConnection(
+        displayName: "Internal GitHub",
+        deploymentKind: .enterpriseServer,
+        webBaseURL: try #require(
+            URL(string: "https://github.internal.example")
+        )
+    )
+
+    await #expect(
+        throws: GitHubEnterpriseServerDiscoveryError.invalidPayload
+    ) {
+        try await client.discover(connection: connection)
+    }
+}
+
+@Test
 func discoveryPreservesEnterpriseServerCustomPort() async throws {
     let transport = RecordingGitHubTransport(
         json: #"{"installed_version":"3.21.4"}"#
