@@ -1,4 +1,5 @@
 @testable import SchneeBar
+import Darwin
 import Foundation
 import SchneeBarCore
 import Testing
@@ -281,6 +282,32 @@ func applicationSupportDeliveryHistoryStoreRejectsOversizedBackingFile() async t
 
     await #expect(
         throws: DeliveryHistoryStoreError.payloadTooLarge
+    ) {
+        _ = try await fixture.store.load(
+            scope: DeliveryHistoryStorageScope(
+                sourceID: "source",
+                repositoryID: "repo"
+            )
+        )
+    }
+}
+
+@Test
+func applicationSupportDeliveryHistoryStoreRejectsFIFOBackingPathWithoutBlocking() async throws {
+    let fixture = try historyStoreFixture()
+    defer { try? FileManager.default.removeItem(at: fixture.directory) }
+
+    try FileManager.default.createDirectory(
+        at: fixture.directory,
+        withIntermediateDirectories: true
+    )
+    let result = fixture.fileURL.path.withCString {
+        Darwin.mkfifo($0, 0o600)
+    }
+    #expect(result == 0)
+
+    await #expect(
+        throws: DeliveryHistoryStoreError.invalidBackingFile
     ) {
         _ = try await fixture.store.load(
             scope: DeliveryHistoryStorageScope(
