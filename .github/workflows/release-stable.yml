@@ -23,6 +23,8 @@ on:
 
 env:
   SCHNEEBAR_MAX_RELEASE_ARCHIVE_BYTES: "536870912"
+  SCHNEEBAR_MAX_RELEASE_UNCOMPRESSED_BYTES: "1073741824"
+  SCHNEEBAR_MAX_RELEASE_ARCHIVE_ENTRIES: "10000"
 
 permissions:
   contents: read
@@ -108,11 +110,31 @@ jobs:
             echo "Release archive size is outside the allowed bound: $archive_bytes bytes" >&2
             exit 1
           fi
+          archive_totals="$(zipinfo -t "$archive")"
+          archive_entry_total="$(awk 'END {print $1}' <<< "$archive_totals")"
+          archive_uncompressed_bytes="$(awk 'END {print $3}' <<< "$archive_totals")"
+          if [[ ! "$archive_entry_total" =~ ^[0-9]+$ || ! "$archive_uncompressed_bytes" =~ ^[0-9]+$ ]]; then
+            echo "Could not parse release archive totals." >&2
+            printf '%s\n' "$archive_totals" >&2
+            exit 1
+          fi
+          if [[ "$archive_entry_total" -le 0 || "$archive_entry_total" -gt "$SCHNEEBAR_MAX_RELEASE_ARCHIVE_ENTRIES" ]]; then
+            echo "Release archive entry count is outside the allowed bound: $archive_entry_total" >&2
+            exit 1
+          fi
+          if [[ "$archive_uncompressed_bytes" -le 0 || "$archive_uncompressed_bytes" -gt "$SCHNEEBAR_MAX_RELEASE_UNCOMPRESSED_BYTES" ]]; then
+            echo "Release archive uncompressed size is outside the allowed bound: $archive_uncompressed_bytes bytes" >&2
+            exit 1
+          fi
           unzip -t "$archive"
 
           entry_count=0
           while IFS= read -r entry; do
             entry_count=$((entry_count + 1))
+            if [[ "$entry_count" -gt "$SCHNEEBAR_MAX_RELEASE_ARCHIVE_ENTRIES" ]]; then
+              echo "Signing-input archive has too many entries." >&2
+              exit 1
+            fi
 
             case "$entry" in
               SchneeBar.app|SchneeBar.app/*) ;;
@@ -137,6 +159,11 @@ jobs:
 
           if [[ "$entry_count" -eq 0 ]]; then
             echo "Signing-input archive must not be empty." >&2
+            exit 1
+          fi
+          if [[ "$entry_count" -ne "$archive_entry_total" ]]; then
+            echo "Signing-input archive entry enumeration is ambiguous or malformed." >&2
+            echo "zipinfo total: $archive_entry_total; enumerated lines: $entry_count" >&2
             exit 1
           fi
 
@@ -370,6 +397,22 @@ jobs:
             echo "Release archive size is outside the allowed bound: $archive_bytes bytes" >&2
             exit 1
           fi
+          archive_totals="$(zipinfo -t "$archive")"
+          archive_entry_total="$(awk 'END {print $1}' <<< "$archive_totals")"
+          archive_uncompressed_bytes="$(awk 'END {print $3}' <<< "$archive_totals")"
+          if [[ ! "$archive_entry_total" =~ ^[0-9]+$ || ! "$archive_uncompressed_bytes" =~ ^[0-9]+$ ]]; then
+            echo "Could not parse release archive totals." >&2
+            printf '%s\n' "$archive_totals" >&2
+            exit 1
+          fi
+          if [[ "$archive_entry_total" -le 0 || "$archive_entry_total" -gt "$SCHNEEBAR_MAX_RELEASE_ARCHIVE_ENTRIES" ]]; then
+            echo "Release archive entry count is outside the allowed bound: $archive_entry_total" >&2
+            exit 1
+          fi
+          if [[ "$archive_uncompressed_bytes" -le 0 || "$archive_uncompressed_bytes" -gt "$SCHNEEBAR_MAX_RELEASE_UNCOMPRESSED_BYTES" ]]; then
+            echo "Release archive uncompressed size is outside the allowed bound: $archive_uncompressed_bytes bytes" >&2
+            exit 1
+          fi
           unzip -t "$archive"
 
           (
@@ -428,6 +471,22 @@ jobs:
             echo "Release archive size is outside the allowed bound: $archive_bytes bytes" >&2
             exit 1
           fi
+          archive_totals="$(zipinfo -t "$archive")"
+          archive_entry_total="$(awk 'END {print $1}' <<< "$archive_totals")"
+          archive_uncompressed_bytes="$(awk 'END {print $3}' <<< "$archive_totals")"
+          if [[ ! "$archive_entry_total" =~ ^[0-9]+$ || ! "$archive_uncompressed_bytes" =~ ^[0-9]+$ ]]; then
+            echo "Could not parse release archive totals." >&2
+            printf '%s\n' "$archive_totals" >&2
+            exit 1
+          fi
+          if [[ "$archive_entry_total" -le 0 || "$archive_entry_total" -gt "$SCHNEEBAR_MAX_RELEASE_ARCHIVE_ENTRIES" ]]; then
+            echo "Release archive entry count is outside the allowed bound: $archive_entry_total" >&2
+            exit 1
+          fi
+          if [[ "$archive_uncompressed_bytes" -le 0 || "$archive_uncompressed_bytes" -gt "$SCHNEEBAR_MAX_RELEASE_UNCOMPRESSED_BYTES" ]]; then
+            echo "Release archive uncompressed size is outside the allowed bound: $archive_uncompressed_bytes bytes" >&2
+            exit 1
+          fi
           if find signing-input -type l -print -quit | grep -q .; then
             echo "Signing input must not contain symbolic links." >&2
             exit 1
@@ -449,6 +508,10 @@ jobs:
           entry_count=0
           while IFS= read -r entry; do
             entry_count=$((entry_count + 1))
+            if [[ "$entry_count" -gt "$SCHNEEBAR_MAX_RELEASE_ARCHIVE_ENTRIES" ]]; then
+              echo "Signing-input archive has too many entries." >&2
+              exit 1
+            fi
 
             case "$entry" in
               SchneeBar.app|SchneeBar.app/*) ;;
@@ -473,6 +536,11 @@ jobs:
 
           if [[ "$entry_count" -eq 0 ]]; then
             echo "Signing-input archive must not be empty." >&2
+            exit 1
+          fi
+          if [[ "$entry_count" -ne "$archive_entry_total" ]]; then
+            echo "Signing-input archive entry enumeration is ambiguous or malformed." >&2
+            echo "zipinfo total: $archive_entry_total; enumerated lines: $entry_count" >&2
             exit 1
           fi
 
@@ -699,6 +767,22 @@ jobs:
             echo "Release archive size is outside the allowed bound: $archive_bytes bytes" >&2
             exit 1
           fi
+          archive_totals="$(zipinfo -t "$archive")"
+          archive_entry_total="$(awk 'END {print $1}' <<< "$archive_totals")"
+          archive_uncompressed_bytes="$(awk 'END {print $3}' <<< "$archive_totals")"
+          if [[ ! "$archive_entry_total" =~ ^[0-9]+$ || ! "$archive_uncompressed_bytes" =~ ^[0-9]+$ ]]; then
+            echo "Could not parse release archive totals." >&2
+            printf '%s\n' "$archive_totals" >&2
+            exit 1
+          fi
+          if [[ "$archive_entry_total" -le 0 || "$archive_entry_total" -gt "$SCHNEEBAR_MAX_RELEASE_ARCHIVE_ENTRIES" ]]; then
+            echo "Release archive entry count is outside the allowed bound: $archive_entry_total" >&2
+            exit 1
+          fi
+          if [[ "$archive_uncompressed_bytes" -le 0 || "$archive_uncompressed_bytes" -gt "$SCHNEEBAR_MAX_RELEASE_UNCOMPRESSED_BYTES" ]]; then
+            echo "Release archive uncompressed size is outside the allowed bound: $archive_uncompressed_bytes bytes" >&2
+            exit 1
+          fi
           unzip -t "$archive"
 
           (
@@ -784,6 +868,22 @@ jobs:
           archive_bytes="$(wc -c < "$archive" | tr -d ' ')"
           if [[ "$archive_bytes" -le 0 || "$archive_bytes" -gt "$SCHNEEBAR_MAX_RELEASE_ARCHIVE_BYTES" ]]; then
             echo "Release archive size is outside the allowed bound: $archive_bytes bytes" >&2
+            exit 1
+          fi
+          archive_totals="$(zipinfo -t "$archive")"
+          archive_entry_total="$(awk 'END {print $1}' <<< "$archive_totals")"
+          archive_uncompressed_bytes="$(awk 'END {print $3}' <<< "$archive_totals")"
+          if [[ ! "$archive_entry_total" =~ ^[0-9]+$ || ! "$archive_uncompressed_bytes" =~ ^[0-9]+$ ]]; then
+            echo "Could not parse release archive totals." >&2
+            printf '%s\n' "$archive_totals" >&2
+            exit 1
+          fi
+          if [[ "$archive_entry_total" -le 0 || "$archive_entry_total" -gt "$SCHNEEBAR_MAX_RELEASE_ARCHIVE_ENTRIES" ]]; then
+            echo "Release archive entry count is outside the allowed bound: $archive_entry_total" >&2
+            exit 1
+          fi
+          if [[ "$archive_uncompressed_bytes" -le 0 || "$archive_uncompressed_bytes" -gt "$SCHNEEBAR_MAX_RELEASE_UNCOMPRESSED_BYTES" ]]; then
+            echo "Release archive uncompressed size is outside the allowed bound: $archive_uncompressed_bytes bytes" >&2
             exit 1
           fi
           (
@@ -891,6 +991,22 @@ jobs:
           archive_bytes="$(wc -c < "$archive" | tr -d ' ')"
           if [[ "$archive_bytes" -le 0 || "$archive_bytes" -gt "$SCHNEEBAR_MAX_RELEASE_ARCHIVE_BYTES" ]]; then
             echo "Release archive size is outside the allowed bound: $archive_bytes bytes" >&2
+            exit 1
+          fi
+          archive_totals="$(zipinfo -t "$archive")"
+          archive_entry_total="$(awk 'END {print $1}' <<< "$archive_totals")"
+          archive_uncompressed_bytes="$(awk 'END {print $3}' <<< "$archive_totals")"
+          if [[ ! "$archive_entry_total" =~ ^[0-9]+$ || ! "$archive_uncompressed_bytes" =~ ^[0-9]+$ ]]; then
+            echo "Could not parse release archive totals." >&2
+            printf '%s\n' "$archive_totals" >&2
+            exit 1
+          fi
+          if [[ "$archive_entry_total" -le 0 || "$archive_entry_total" -gt "$SCHNEEBAR_MAX_RELEASE_ARCHIVE_ENTRIES" ]]; then
+            echo "Release archive entry count is outside the allowed bound: $archive_entry_total" >&2
+            exit 1
+          fi
+          if [[ "$archive_uncompressed_bytes" -le 0 || "$archive_uncompressed_bytes" -gt "$SCHNEEBAR_MAX_RELEASE_UNCOMPRESSED_BYTES" ]]; then
+            echo "Release archive uncompressed size is outside the allowed bound: $archive_uncompressed_bytes bytes" >&2
             exit 1
           fi
           if find release-payload -type l -print -quit | grep -q .; then
