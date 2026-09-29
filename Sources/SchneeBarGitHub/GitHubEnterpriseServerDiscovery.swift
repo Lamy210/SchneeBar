@@ -12,17 +12,29 @@ public struct GitHubEnterpriseServerVersion: Codable, Comparable, Equatable, Sen
     }
 
     public init?(parsing rawValue: String) {
-        let components = rawValue.split(separator: ".", omittingEmptySubsequences: false)
-        guard components.count >= 2,
-              let major = Self.leadingInteger(in: components[0]),
-              let minor = Self.leadingInteger(in: components[1])
+        let components = rawValue.split(
+            separator: ".",
+            maxSplits: 2,
+            omittingEmptySubsequences: false
+        )
+        guard (2 ... 3).contains(components.count),
+              let major = Self.strictInteger(in: components[0]),
+              let minor = Self.strictInteger(in: components[1])
         else {
             return nil
         }
 
-        let patch = components.count >= 3
-            ? Self.leadingInteger(in: components[2]) ?? 0
-            : 0
+        let patch: Int
+        if components.count == 3 {
+            guard let parsedPatch = Self.leadingInteger(
+                in: components[2]
+            ) else {
+                return nil
+            }
+            patch = parsedPatch
+        } else {
+            patch = 0
+        }
 
         self.init(major: major, minor: minor, patch: patch)
     }
@@ -36,10 +48,75 @@ public struct GitHubEnterpriseServerVersion: Codable, Comparable, Equatable, Sen
         return lhs.patch < rhs.patch
     }
 
+    private static func strictInteger(
+        in component: Substring
+    ) -> Int? {
+        guard !component.isEmpty,
+              component.utf8.allSatisfy({
+                  $0 >= 48 && $0 <= 57
+              })
+        else {
+            return nil
+        }
+        return Int(component)
+    }
+
     private static func leadingInteger(in component: Substring) -> Int? {
-        let digits = component.prefix(while: { $0.isNumber })
-        guard !digits.isEmpty else { return nil }
-        return Int(digits)
+        let bytes = Array(component.utf8)
+        let digitCount = bytes.prefix(while: {
+            $0 >= 48 && $0 <= 57
+        }).count
+
+        guard digitCount > 0 else {
+            return nil
+        }
+
+        if digitCount < bytes.count {
+            let suffix = bytes[digitCount...]
+            guard let separator = suffix.first,
+                  separator == 45 || separator == 43,
+                  Self.isValidVersionSuffix(suffix.dropFirst())
+            else {
+                return nil
+            }
+        }
+
+        return Int(
+            String(decoding: bytes[..<digitCount], as: UTF8.self)
+        )
+    }
+
+    private static func isValidVersionSuffix(
+        _ bytes: ArraySlice<UInt8>
+    ) -> Bool {
+        guard !bytes.isEmpty else {
+            return false
+        }
+
+        var currentIdentifierHasByte = false
+        for byte in bytes {
+            if byte == 46 {
+                guard currentIdentifierHasByte else {
+                    return false
+                }
+                currentIdentifierHasByte = false
+                continue
+            }
+            guard isVersionSuffixIdentifierByte(byte) else {
+                return false
+            }
+            currentIdentifierHasByte = true
+        }
+        return currentIdentifierHasByte
+    }
+
+    private static func isVersionSuffixIdentifierByte(
+        _ byte: UInt8
+    ) -> Bool {
+        (byte >= 48 && byte <= 57)
+            || (byte >= 65 && byte <= 90)
+            || (byte >= 97 && byte <= 122)
+            || byte == 45
     }
 }
 
@@ -135,6 +212,12 @@ public enum GitHubEnterpriseServerDiscoveryError: Error, Equatable, Sendable {
 }
 
 public struct GitHubEnterpriseServerDiscoveryClient: Sendable {
+    // Internal defensive input budget, not a GitHub protocol limit. GHES
+    // version strings are tiny in practice; bounding the provider-controlled
+    // value keeps untrusted metadata from growing UI/profile state without
+    // inventing a narrower GitHub-specific version grammar.
+    private static let maximumInstalledVersionUTF8Bytes = 128
+
     private let transport: any GitHubHTTPTransport
     private let compatibilityPolicy: GitHubEnterpriseCompatibilityPolicy
 
@@ -209,6 +292,7 @@ public struct GitHubEnterpriseServerDiscoveryClient: Sendable {
             in: .whitespacesAndNewlines
         )
         guard !value.isEmpty,
+              value.utf8.count <= Self.maximumInstalledVersionUTF8Bytes,
               !value.unicodeScalars.contains(where: isControlScalar)
         else {
             throw GitHubEnterpriseServerDiscoveryError.invalidPayload

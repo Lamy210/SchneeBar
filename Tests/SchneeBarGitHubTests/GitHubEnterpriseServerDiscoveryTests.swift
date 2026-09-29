@@ -121,6 +121,62 @@ func discoveryRejectsUnsafeInstalledVersionEvidence(
 }
 
 @Test
+func discoveryAllowsInstalledVersionEvidenceAtByteLimit() async throws {
+    let installedVersion = String(repeating: "a", count: 128)
+    let transport = RecordingGitHubTransport(
+        json:
+            "{\"installed_version\":\"\(installedVersion)\"}"
+    )
+    let client = GitHubEnterpriseServerDiscoveryClient(
+        transport: transport
+    )
+    let connection = GitHubConnection(
+        displayName: "Internal GitHub",
+        deploymentKind: .enterpriseServer,
+        webBaseURL: try #require(
+            URL(string: "https://github.internal.example")
+        )
+    )
+
+    let result = try await client.discover(connection: connection)
+
+    #expect(result.installedVersion == installedVersion)
+    #expect(result.parsedVersion == nil)
+    #expect(result.compatibility == .unknownVersion)
+}
+
+@Test
+func discoveryRejectsOversizedInstalledVersionEvidence() async throws {
+    let oversizedVersions = [
+        String(repeating: "a", count: 129),
+        String(repeating: "雪", count: 43),
+    ]
+
+    for installedVersion in oversizedVersions {
+        let transport = RecordingGitHubTransport(
+            json:
+                "{\"installed_version\":\"\(installedVersion)\"}"
+        )
+        let client = GitHubEnterpriseServerDiscoveryClient(
+            transport: transport
+        )
+        let connection = GitHubConnection(
+            displayName: "Internal GitHub",
+            deploymentKind: .enterpriseServer,
+            webBaseURL: try #require(
+                URL(string: "https://github.internal.example")
+            )
+        )
+
+        await #expect(
+            throws: GitHubEnterpriseServerDiscoveryError.invalidPayload
+        ) {
+            try await client.discover(connection: connection)
+        }
+    }
+}
+
+@Test
 func discoveryPreservesEnterpriseServerCustomPort() async throws {
     let transport = RecordingGitHubTransport(
         json: #"{"installed_version":"3.21.4"}"#
@@ -141,6 +197,7 @@ func discoveryPreservesEnterpriseServerCustomPort() async throws {
     ("3.19.9", GitHubEnterpriseCompatibility.olderUntested),
     ("3.20.0", GitHubEnterpriseCompatibility.tested),
     ("3.21.5", GitHubEnterpriseCompatibility.tested),
+    ("3.22", GitHubEnterpriseCompatibility.tested),
     ("3.22.1", GitHubEnterpriseCompatibility.tested),
     ("3.23.0", GitHubEnterpriseCompatibility.newerUntested),
     ("4.0.0", GitHubEnterpriseCompatibility.newerUntested),
@@ -155,10 +212,49 @@ func classifiesEnterpriseServerVersions(
     #expect(compatibility == expected)
 }
 
-@Test
-func parsesEnterpriseServerVersionSuffixWithoutRejectingDiscovery() {
-    let version = GitHubEnterpriseServerVersion(parsing: "3.22.0-rc1")
-    #expect(version == GitHubEnterpriseServerVersion(major: 3, minor: 22, patch: 0))
+@Test(arguments: [
+    "3preview.22.0",
+    "3.22preview.0",
+    "3.22.",
+    "3.22.0.extra",
+    "3.22.0garbage",
+    "3.22.0_foo",
+    "3.22.0-",
+    "3.22.0+",
+    "3.22.0-rc..1",
+    "3.22.0-.rc1",
+    "3.22.0-rc1.",
+    "３.22.0",
+])
+func malformedEnterpriseServerVersionDoesNotReceiveTestedClassification(
+    rawVersion: String
+) {
+    let parsed = GitHubEnterpriseServerVersion(parsing: rawVersion)
+    #expect(parsed == nil)
+    #expect(
+        GitHubEnterpriseCompatibilityPolicy().compatibility(
+            for: parsed
+        ) == .unknownVersion
+    )
+}
+
+@Test(arguments: [
+    "3.22.0-rc1",
+    "3.22.0-rc.1",
+    "3.22.0+build1",
+])
+func parsesEnterpriseServerVersionSuffixWithoutRejectingDiscovery(
+    rawVersion: String
+) {
+    let version = GitHubEnterpriseServerVersion(parsing: rawVersion)
+    #expect(
+        version
+            == GitHubEnterpriseServerVersion(
+                major: 3,
+                minor: 22,
+                patch: 0
+            )
+    )
 }
 
 @Test
