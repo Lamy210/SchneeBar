@@ -143,6 +143,9 @@ public actor ApplicationSupportGitHubConnectionProfileStore: GitHubConnectionPro
         encoder.dateEncodingStrategy = .iso8601
         encoder.outputFormatting = [.sortedKeys]
         let data = try encoder.encode(payload)
+        guard data.count <= Self.maximumPersistedBytes else {
+            throw GitHubConnectionProfileStoreError.payloadTooLarge
+        }
         try data.write(to: fileURL, options: .atomic)
         try? fileManager.setAttributes(
             [.posixPermissions: 0o600],
