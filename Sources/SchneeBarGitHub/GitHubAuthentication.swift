@@ -20,17 +20,23 @@ public struct GitHubCredential: Codable, Equatable, Sendable {
     public let refreshToken: String?
     public let accessTokenExpiresAt: Date?
     public let refreshTokenExpiresAt: Date?
+    /// Canonical web endpoint that this credential was established against.
+    /// Legacy credentials decode with nil and are handled by the session
+    /// coordinator according to deployment kind.
+    public let endpointIdentity: String?
 
     public init(
         accessToken: String,
         refreshToken: String? = nil,
         accessTokenExpiresAt: Date? = nil,
-        refreshTokenExpiresAt: Date? = nil
+        refreshTokenExpiresAt: Date? = nil,
+        endpointIdentity: String? = nil
     ) {
         self.accessToken = accessToken
         self.refreshToken = refreshToken
         self.accessTokenExpiresAt = accessTokenExpiresAt
         self.refreshTokenExpiresAt = refreshTokenExpiresAt
+        self.endpointIdentity = endpointIdentity
     }
 }
 
