@@ -617,6 +617,55 @@ func restoreAcceptsGHESCredentialBoundToCanonicalEndpoint() async throws {
 }
 
 @Test
+func restoreAcceptsGHESCredentialAcrossExplicitDefaultHTTPSPort() async throws {
+    let transport = SessionQueueTransport([
+        SessionStubResponse(userJSON(id: 42, login: "octocat")),
+        SessionStubResponse(userJSON(id: 42, login: "octocat")),
+        SessionStubResponse(#"{"total_count":0,"installations":[]}"#),
+    ])
+    let store = MemoryGitHubCredentialStore()
+    let connection = GitHubConnection(
+        id: UUID(uuidString: "00000000-0000-0000-0000-000000000043")!,
+        displayName: "Internal GitHub",
+        deploymentKind: .enterpriseServer,
+        webBaseURL: try #require(
+            URL(string: "https://github.internal.example:443")
+        )
+    )
+    let identity = GitHubAccountIdentity(id: "42", login: "octocat")
+    let key = GitHubCredentialKey(
+        connectionID: connection.id,
+        accountID: identity.id
+    )
+    try await store.save(
+        GitHubCredential(
+            accessToken: "ghes-bound-token",
+            endpointIdentity: "https://github.internal.example"
+        ),
+        for: key
+    )
+    let coordinator = makeCoordinator(
+        transport: transport,
+        store: store
+    )
+
+    let session = try await coordinator.restore(
+        connection: connection,
+        identity: identity
+    )
+
+    #expect(session.account.identity == identity)
+    let requests = await transport.recordedRequests()
+    #expect(!requests.isEmpty)
+    #expect(
+        requests.allSatisfy {
+            $0.url?.host == "github.internal.example"
+                && $0.url?.port == nil
+        }
+    )
+}
+
+@Test
 func restoreFailsWhenCredentialIsMissing() async throws {
     let transport = SessionQueueTransport([])
     let store = MemoryGitHubCredentialStore()
