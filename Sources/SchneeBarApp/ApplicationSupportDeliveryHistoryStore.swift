@@ -82,14 +82,12 @@ actor ApplicationSupportDeliveryHistoryStore: DeliveryHistoryStoring {
     }
 
     private func readPayload() throws -> PersistedDeliveryHistoryPayload {
-        guard fileManager.fileExists(atPath: fileURL.path) else {
+        guard let data = try readPersistedDataIfPresent() else {
             return PersistedDeliveryHistoryPayload(
                 schemaVersion: PersistedDeliveryHistoryPayload.currentSchemaVersion,
                 records: []
             )
         }
-
-        let data = try readPersistedData()
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
         let payload = try decoder.decode(
@@ -106,7 +104,7 @@ actor ApplicationSupportDeliveryHistoryStore: DeliveryHistoryStoring {
         return payload
     }
 
-    private func readPersistedData() throws -> Data {
+    private func readPersistedDataIfPresent() throws -> Data? {
         var descriptor = Int32(-1)
         let hasFileSystemRepresentation =
             fileURL.withUnsafeFileSystemRepresentation { path in
@@ -121,6 +119,9 @@ actor ApplicationSupportDeliveryHistoryStore: DeliveryHistoryStoring {
             throw DeliveryHistoryStoreError.invalidBackingFile
         }
         guard descriptor >= 0 else {
+            if errno == ENOENT {
+                return nil
+            }
             if errno == ELOOP {
                 throw DeliveryHistoryStoreError.invalidBackingFile
             }
