@@ -325,7 +325,12 @@ public actor GitHubConnectionSessionCoordinator {
         let key = credentialKey(connection: connection, identity: identity)
 
         if let refreshTask = refreshTasks[key] {
-            return try await refreshTask.value
+            let refreshed = try await refreshTask.value
+            try validateCredentialEndpointBinding(
+                refreshed,
+                connection: connection
+            )
+            return refreshed
         }
 
         guard let credential = try await credentialStore.load(for: key) else {
