@@ -13,7 +13,9 @@ public enum BoundedRegularFileReader {
         at fileURL: URL,
         maximumBytes: Int
     ) throws -> Data? {
-        precondition(maximumBytes >= 0)
+        precondition(
+            maximumBytes >= 0 && maximumBytes < Int.max
+        )
 
         var descriptor = Int32(-1)
         let hasFileSystemRepresentation =
@@ -83,8 +85,7 @@ public enum BoundedRegularFileReader {
 
             if count > 0 {
                 data.append(
-                    buffer,
-                    count: Int(count)
+                    contentsOf: buffer.prefix(Int(count))
                 )
                 continue
             }
