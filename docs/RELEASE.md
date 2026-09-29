@@ -64,6 +64,8 @@ Signing certificates, private keys, App Store Connect API credentials, and notar
 
 The stable workflow also separates build execution from signing. Checkout, tests, visual smoke, and the unsigned universal build run in a secret-free job. That job uploads only a bounded ZIP plus SHA-256 checksum. The protected `release` signing/notarization job downloads and validates that artifact, does not checkout repository source, and does not run Tuist or tests before importing Apple credentials.
 
+Both the unsigned signing-input ZIP and the final stable release ZIP are capped at 512 MiB. The limit is checked when the archive is created and again at each downstream trust boundary before extraction, Intel runtime validation, or publication.
+
 ### Stable release environment
 
 The stable workflow uses a protected GitHub Actions environment named `release`. Configure approval/protection rules before enabling stable publication.
