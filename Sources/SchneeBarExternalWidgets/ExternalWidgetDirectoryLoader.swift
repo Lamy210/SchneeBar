@@ -215,22 +215,22 @@ public struct ExternalWidgetDirectoryLoader: Sendable {
     private func hasExtendedACL(
         _ fileDescriptor: Int32
     ) -> Bool {
-        guard let acl = Darwin.acl_get_fd_np(
+        guard let acl = acl_get_fd_np(
             fileDescriptor,
             ACL_TYPE_EXTENDED
         ) else {
             return false
         }
         defer {
-            Darwin.acl_free(acl)
+            acl_free(UnsafeMutableRawPointer(acl))
         }
 
         var entry: acl_entry_t?
-        return Darwin.acl_get_entry(
+        return acl_get_entry(
             acl,
-            ACL_FIRST_ENTRY,
+            ACL_FIRST_ENTRY.rawValue,
             &entry
-        ) >= 0
+        ) == 0
     }
 
     private func rootOpenFailure() throws -> Int32? {
