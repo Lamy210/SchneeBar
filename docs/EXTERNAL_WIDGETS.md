@@ -177,6 +177,7 @@ Safety policy:
 - child files are opened with `openat(..., O_NOFOLLOW | O_NONBLOCK)`;
 - only direct-child, case-sensitive `.json` filenames are considered;
 - symbolic links, hard links, and non-regular `.json` entries fail closed;
+- each opened `.json` document must be owned by the effective user and must not be writable by group or other users;
 - JSON filenames are limited to 255 UTF-8 bytes and control characters are rejected before opening;
 - fd-based enumeration stops and fails closed after 256 direct directory entries, including non-JSON entries;
 - at most 32 JSON documents are accepted;
