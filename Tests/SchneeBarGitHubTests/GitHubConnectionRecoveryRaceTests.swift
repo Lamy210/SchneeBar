@@ -167,7 +167,9 @@ func recoveryDrainsOlderRefreshBeforeSavingRecoveryCredential() async throws {
     _ = try await recoveryTask.value
     _ = try await restoreTask.value
 
-    #expect(await store.credential(for: key) == recoveryCredential)
+    let persisted = try #require(await store.credential(for: key))
+    #expect(persisted.accessToken == recoveryCredential.accessToken)
+    #expect(persisted.endpointIdentity == "https://github.com")
 }
 
 @Test
@@ -210,6 +212,7 @@ func cancellingRecoveryDuringRefreshDrainPreventsRecoveryCredentialSave() async 
 
     let stored = try #require(await store.credential(for: key))
     #expect(stored.accessToken == "test-refreshed-old-token")
+    #expect(stored.endpointIdentity == "https://github.com")
     #expect(stored != recoveryCredential)
 }
 
