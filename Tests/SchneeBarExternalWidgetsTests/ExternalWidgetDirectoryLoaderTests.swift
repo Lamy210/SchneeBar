@@ -123,6 +123,27 @@ func rejectsSymlinkedRootDirectory() async throws {
 }
 
 @Test(arguments: [0o775, 0o757])
+func rejectsTrustedParentWritableByGroupOrOthers(
+    permissions: Int
+) async throws {
+    let fixture = try LoaderDirectoryFixture()
+    defer { fixture.cleanup() }
+
+    try FileManager.default.setAttributes(
+        [.posixPermissions: permissions],
+        ofItemAtPath: fixture.anchorURL.path
+    )
+
+    await #expect(
+        throws: ExternalWidgetDirectoryLoaderError.unsafeRoot
+    ) {
+        try await ExternalWidgetDirectoryLoader(
+            rootURL: fixture.rootURL
+        ).load()
+    }
+}
+
+@Test(arguments: [0o775, 0o757])
 func rejectsOwnerDirectoryWritableByGroupOrOthers(
     permissions: Int
 ) async throws {
@@ -446,20 +467,29 @@ func preservesCancellationBeforeFilesystemWork() async throws {
 }
 
 private struct LoaderDirectoryFixture {
+    let anchorURL: URL
     let baseURL: URL
     let rootURL: URL
 
     init(createRoot: Bool = true) throws {
-        baseURL = FileManager.default.temporaryDirectory
+        anchorURL = FileManager.default.temporaryDirectory
             .appendingPathComponent(
                 "SchneeBarExternalWidgetLoaderTests-\(UUID().uuidString)",
                 isDirectory: true
             )
+        baseURL = anchorURL.appendingPathComponent(
+            "SchneeBar",
+            isDirectory: true
+        )
         rootURL = baseURL.appendingPathComponent(
             "ExternalWidgets",
             isDirectory: true
         )
 
+        try FileManager.default.createDirectory(
+            at: anchorURL,
+            withIntermediateDirectories: false
+        )
         try FileManager.default.createDirectory(
             at: baseURL,
             withIntermediateDirectories: false
@@ -493,7 +523,7 @@ private struct LoaderDirectoryFixture {
     }
 
     func cleanup() {
-        try? FileManager.default.removeItem(at: baseURL)
+        try? FileManager.default.removeItem(at: anchorURL)
     }
 }
 
