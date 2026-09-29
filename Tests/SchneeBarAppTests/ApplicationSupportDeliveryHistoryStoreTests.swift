@@ -197,6 +197,36 @@ func applicationSupportDeliveryHistoryStoreRejectsSymlinkBackingFile() async thr
 }
 
 @Test
+func applicationSupportDeliveryHistoryStoreRejectsDanglingSymlinkBackingFile() async throws {
+    let fixture = try historyStoreFixture()
+    defer { try? FileManager.default.removeItem(at: fixture.directory) }
+
+    try FileManager.default.createDirectory(
+        at: fixture.directory,
+        withIntermediateDirectories: true
+    )
+    let missingTarget = fixture.directory.appendingPathComponent(
+        "missing.json",
+        isDirectory: false
+    )
+    try FileManager.default.createSymbolicLink(
+        at: fixture.fileURL,
+        withDestinationURL: missingTarget
+    )
+
+    await #expect(
+        throws: DeliveryHistoryStoreError.invalidBackingFile
+    ) {
+        _ = try await fixture.store.load(
+            scope: DeliveryHistoryStorageScope(
+                sourceID: "source",
+                repositoryID: "repo"
+            )
+        )
+    }
+}
+
+@Test
 func applicationSupportDeliveryHistoryStoreRejectsOversizedBackingFile() async throws {
     let fixture = try historyStoreFixture()
     defer { try? FileManager.default.removeItem(at: fixture.directory) }
