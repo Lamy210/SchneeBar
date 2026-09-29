@@ -339,7 +339,6 @@ jobs:
     environment: release
     permissions:
       actions: read
-      contents: read
     runs-on: macos-26
     timeout-minutes: 45
 
@@ -395,6 +394,18 @@ jobs:
           app="$extract_dir/SchneeBar.app"
           binary="$app/Contents/MacOS/SchneeBar"
           marketing_version="$(printf '%s' "$RELEASE_TAG" | cut -c2-)"
+
+          root_entry_count="$(find "$extract_dir" -mindepth 1 -maxdepth 1 -print | wc -l | tr -d ' ')"
+          if [[ "$root_entry_count" != "1" ]]; then
+            echo "Signing input must expand to exactly one root entry." >&2
+            find "$extract_dir" -mindepth 1 -maxdepth 1 -print >&2
+            exit 1
+          fi
+          if find "$extract_dir" -type l -print -quit | grep -q .; then
+            echo "Signing input must not contain symbolic links." >&2
+            find "$extract_dir" -type l -print >&2
+            exit 1
+          fi
 
           test -d "$app"
           test -x "$binary"
@@ -649,7 +660,6 @@ jobs:
     if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
     permissions:
       actions: read
-      contents: read
     runs-on: macos-26-intel
     timeout-minutes: 15
 
