@@ -205,10 +205,32 @@ public struct ExternalWidgetDirectoryLoader: Sendable {
 
         guard fileType(of: metadata) == mode_t(S_IFDIR),
               metadata.st_uid == expectedOwnerUID,
-              writableByOthers == 0
+              writableByOthers == 0,
+              !hasExtendedACL(fileDescriptor)
         else {
             throw ExternalWidgetDirectoryLoaderError.unsafeRoot
         }
+    }
+
+    private func hasExtendedACL(
+        _ fileDescriptor: Int32
+    ) -> Bool {
+        guard let acl = Darwin.acl_get_fd_np(
+            fileDescriptor,
+            ACL_TYPE_EXTENDED
+        ) else {
+            return false
+        }
+        defer {
+            Darwin.acl_free(acl)
+        }
+
+        var entry: acl_entry_t?
+        return Darwin.acl_get_entry(
+            acl,
+            ACL_FIRST_ENTRY,
+            &entry
+        ) >= 0
     }
 
     private func rootOpenFailure() throws -> Int32? {
@@ -327,7 +349,8 @@ public struct ExternalWidgetDirectoryLoader: Sendable {
         guard fileType(of: metadata) == mode_t(S_IFREG),
               metadata.st_nlink == 1,
               metadata.st_uid == expectedOwnerUID,
-              writableByOthers == 0
+              writableByOthers == 0,
+              !hasExtendedACL(fileDescriptor)
         else {
             throw ExternalWidgetDirectoryLoaderError
                 .unsafeDocumentEntry
