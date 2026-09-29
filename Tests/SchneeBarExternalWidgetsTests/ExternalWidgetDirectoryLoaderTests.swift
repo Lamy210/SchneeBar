@@ -226,6 +226,29 @@ func rejectsSymlinkedJSONDocumentWithoutFollowingIt() async throws {
     }
 }
 
+@Test(arguments: [0o664, 0o646])
+func rejectsJSONDocumentWritableByGroupOrOthers(
+    permissions: Int
+) async throws {
+    let fixture = try LoaderDirectoryFixture()
+    defer { fixture.cleanup() }
+
+    let url = fixture.rootURL.appendingPathComponent("writable.json")
+    try loaderDocumentData(id: "external.writable.build").write(to: url)
+    try FileManager.default.setAttributes(
+        [.posixPermissions: permissions],
+        ofItemAtPath: url.path
+    )
+
+    await #expect(
+        throws: ExternalWidgetDirectoryLoaderError.unsafeDocumentEntry
+    ) {
+        try await ExternalWidgetDirectoryLoader(
+            rootURL: fixture.rootURL
+        ).load()
+    }
+}
+
 @Test
 func rejectsHardLinkedJSONDocument() async throws {
     let fixture = try LoaderDirectoryFixture()
