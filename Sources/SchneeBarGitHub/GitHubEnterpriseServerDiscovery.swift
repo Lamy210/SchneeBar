@@ -75,8 +75,7 @@ public struct GitHubEnterpriseServerVersion: Codable, Comparable, Equatable, Sen
             let suffix = bytes[digitCount...]
             guard let separator = suffix.first,
                   separator == 45 || separator == 43,
-                  suffix.count > 1,
-                  suffix.dropFirst().allSatisfy(Self.isVersionSuffixByte)
+                  Self.isValidVersionSuffix(suffix.dropFirst())
             else {
                 return nil
             }
@@ -87,12 +86,37 @@ public struct GitHubEnterpriseServerVersion: Codable, Comparable, Equatable, Sen
         )
     }
 
-    private static func isVersionSuffixByte(_ byte: UInt8) -> Bool {
+    private static func isValidVersionSuffix(
+        _ bytes: ArraySlice<UInt8>
+    ) -> Bool {
+        guard !bytes.isEmpty else {
+            return false
+        }
+
+        var currentIdentifierHasByte = false
+        for byte in bytes {
+            if byte == 46 {
+                guard currentIdentifierHasByte else {
+                    return false
+                }
+                currentIdentifierHasByte = false
+                continue
+            }
+            guard isVersionSuffixIdentifierByte(byte) else {
+                return false
+            }
+            currentIdentifierHasByte = true
+        }
+        return currentIdentifierHasByte
+    }
+
+    private static func isVersionSuffixIdentifierByte(
+        _ byte: UInt8
+    ) -> Bool {
         (byte >= 48 && byte <= 57)
             || (byte >= 65 && byte <= 90)
             || (byte >= 97 && byte <= 122)
             || byte == 45
-            || byte == 46
     }
 }
 
