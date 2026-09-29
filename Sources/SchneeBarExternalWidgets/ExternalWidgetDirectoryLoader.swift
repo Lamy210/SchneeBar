@@ -321,8 +321,13 @@ public struct ExternalWidgetDirectoryLoader: Sendable {
         guard Darwin.fstat(fileDescriptor, &metadata) == 0 else {
             throw ExternalWidgetDirectoryLoaderError.unreadableDocument
         }
+        let writableByOthers = metadata.st_mode
+            & mode_t(S_IWGRP | S_IWOTH)
+
         guard fileType(of: metadata) == mode_t(S_IFREG),
-              metadata.st_nlink == 1
+              metadata.st_nlink == 1,
+              metadata.st_uid == expectedOwnerUID,
+              writableByOthers == 0
         else {
             throw ExternalWidgetDirectoryLoaderError
                 .unsafeDocumentEntry
