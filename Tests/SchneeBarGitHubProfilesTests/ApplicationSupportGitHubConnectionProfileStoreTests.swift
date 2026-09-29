@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 import SchneeBarGitHub
 import SchneeBarGitHubProfiles
@@ -223,6 +224,27 @@ func profileStoreDoesNotWritePayloadItCannotReadBack() async throws {
         try await context.store.save(profile)
     }
     #expect(!FileManager.default.fileExists(atPath: context.fileURL.path))
+}
+
+@Test
+func profileStoreRejectsFIFOBackingPathWithoutBlocking() async throws {
+    let context = try temporaryProfileStore()
+    defer { try? FileManager.default.removeItem(at: context.directory) }
+
+    try FileManager.default.createDirectory(
+        at: context.directory,
+        withIntermediateDirectories: true
+    )
+    let result = context.fileURL.path.withCString {
+        Darwin.mkfifo($0, 0o600)
+    }
+    #expect(result == 0)
+
+    await #expect(
+        throws: GitHubConnectionProfileStoreError.invalidBackingFile
+    ) {
+        try await context.store.loadAll()
+    }
 }
 
 @Test
