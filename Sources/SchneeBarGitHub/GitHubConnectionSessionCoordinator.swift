@@ -71,8 +71,12 @@ public actor GitHubConnectionSessionCoordinator {
             throw GitHubConnectionSessionError.ssoRequired
         }
         let key = credentialKey(connection: connection, identity: account.identity)
+        let persistedCredential = try boundCredential(
+            credential,
+            to: connection
+        )
 
-        try await credentialStore.save(credential, for: key)
+        try await credentialStore.save(persistedCredential, for: key)
 
         do {
             let inventory = try await accessClient.inventory(
@@ -149,7 +153,11 @@ public actor GitHubConnectionSessionCoordinator {
         try Task.checkCancellation()
         await cancelAndDrainRefreshTask(for: key)
         try Task.checkCancellation()
-        try await credentialStore.save(credential, for: key)
+        let persistedCredential = try boundCredential(
+            credential,
+            to: connection
+        )
+        try await credentialStore.save(persistedCredential, for: key)
 
         return GitHubConnectionSession(
             connectionID: connection.id,
@@ -181,6 +189,10 @@ public actor GitHubConnectionSessionCoordinator {
         else {
             throw GitHubConnectionSessionError.credentialNotFound
         }
+        try validateCredentialEndpointBinding(
+            credential,
+            connection: sourceConnection
+        )
 
         let targetKey = credentialKey(
             connection: targetConnection,
@@ -319,6 +331,10 @@ public actor GitHubConnectionSessionCoordinator {
         guard let credential = try await credentialStore.load(for: key) else {
             throw GitHubConnectionSessionError.credentialNotFound
         }
+        try validateCredentialEndpointBinding(
+            credential,
+            connection: connection
+        )
 
         guard shouldRefresh(credential) else {
             return credential
@@ -334,14 +350,24 @@ public actor GitHubConnectionSessionCoordinator {
 
         let deviceFlowClient = self.deviceFlowClient
         let credentialStore = self.credentialStore
+        let endpointIdentity = try canonicalEndpointIdentity(
+            for: connection
+        )
         let refreshTask = Task<GitHubCredential, Error> {
             let refreshed = try await deviceFlowClient.refresh(
                 connection: connection,
                 clientID: clientID,
                 credential: credential
             )
-            try await credentialStore.save(refreshed, for: key)
-            return refreshed
+            let persistedCredential = Self.boundCredential(
+                refreshed,
+                endpointIdentity: endpointIdentity
+            )
+            try await credentialStore.save(
+                persistedCredential,
+                for: key
+            )
+            return persistedCredential
         }
         refreshTasks[key] = refreshTask
 
@@ -353,6 +379,66 @@ public actor GitHubConnectionSessionCoordinator {
             refreshTasks[key] = nil
             throw error
         }
+    }
+
+    private func validateCredentialEndpointBinding(
+        _ credential: GitHubCredential,
+        connection: GitHubConnection
+    ) throws {
+        let expected = try canonicalEndpointIdentity(
+            for: connection
+        )
+
+        if let actual = credential.endpointIdentity {
+            guard actual == expected else {
+                throw GitHubConnectionSessionError
+                    .reauthenticationRequired
+            }
+            return
+        }
+
+        // Legacy credentials predate endpoint binding. Hosted GitHub endpoints
+        // remain provider-controlled by the resolver, but arbitrary GHES hosts
+        // must reauthenticate once so a tampered profile cannot redirect a
+        // previously stored bearer credential.
+        if connection.deploymentKind == .enterpriseServer {
+            throw GitHubConnectionSessionError
+                .reauthenticationRequired
+        }
+    }
+
+    private func boundCredential(
+        _ credential: GitHubCredential,
+        to connection: GitHubConnection
+    ) throws -> GitHubCredential {
+        Self.boundCredential(
+            credential,
+            endpointIdentity: try canonicalEndpointIdentity(
+                for: connection
+            )
+        )
+    }
+
+    private static func boundCredential(
+        _ credential: GitHubCredential,
+        endpointIdentity: String
+    ) -> GitHubCredential {
+        GitHubCredential(
+            accessToken: credential.accessToken,
+            refreshToken: credential.refreshToken,
+            accessTokenExpiresAt: credential.accessTokenExpiresAt,
+            refreshTokenExpiresAt: credential.refreshTokenExpiresAt,
+            endpointIdentity: endpointIdentity
+        )
+    }
+
+    private func canonicalEndpointIdentity(
+        for connection: GitHubConnection
+    ) throws -> String {
+        try GitHubEndpointResolver.resolve(
+            deploymentKind: connection.deploymentKind,
+            webBaseURL: connection.webBaseURL
+        ).webBaseURL.absoluteString
     }
 
     private func isSSORequired(
