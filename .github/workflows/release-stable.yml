@@ -90,6 +90,8 @@ jobs:
           app="$RUNNER_TEMP/SchneeBarStableValidation/Build/Products/Release/SchneeBar.app"
           test -d "$app"
           test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$app/Contents/Info.plist")" = "dev.lamy.schneebar"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app/Contents/Info.plist")" = "0.1.0"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$app/Contents/Info.plist")" = "1"
 
           binary="$app/Contents/MacOS/SchneeBar"
           archs="$(lipo -archs "$binary")"
@@ -222,6 +224,9 @@ jobs:
 
           test -d "$app"
           test -x "$binary"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$app/Contents/Info.plist")" = "dev.lamy.schneebar"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app/Contents/Info.plist")" = "0.1.0"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$app/Contents/Info.plist")" = "1"
 
           archs="$(lipo -archs "$binary")"
           if [[ " $archs " != *" x86_64 "* ]]; then
@@ -383,12 +388,17 @@ jobs:
             build
 
       - name: Package bounded unsigned signing input
+        env:
+          MARKETING_VERSION: ${{ steps.version.outputs.marketing_version }}
         shell: bash
         run: |
           set -euo pipefail
 
           app="$RUNNER_TEMP/SchneeBarStableDerivedData/Build/Products/Release/SchneeBar.app"
           test -d "$app"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$app/Contents/Info.plist")" = "dev.lamy.schneebar"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app/Contents/Info.plist")" = "$MARKETING_VERSION"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$app/Contents/Info.plist")" = "$GITHUB_RUN_NUMBER"
 
           output_dir="$RUNNER_TEMP/stable-signing-input"
           mkdir -p "$output_dir"
@@ -565,6 +575,11 @@ jobs:
           if find "$extract_dir" -type l -print -quit | grep -q .; then
             echo "Signing input must not contain symbolic links." >&2
             find "$extract_dir" -type l -print >&2
+            exit 1
+          fi
+          if find "$extract_dir" ! -type f ! -type d -print -quit | grep -q .; then
+            echo "Signing input contains an unsupported filesystem entry." >&2
+            find "$extract_dir" ! -type f ! -type d -print >&2
             exit 1
           fi
 
