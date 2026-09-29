@@ -245,6 +245,63 @@ jobs:
           fi
 
 
+      - name: Verify exact-main push gates
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          for workflow in ci.yml codeql.yml; do
+            run_json="$(gh run list \
+              --commit "$GITHUB_SHA" \
+              --branch main \
+              --event push \
+              --workflow "$workflow" \
+              --limit 1 \
+              --json headSha,status,conclusion)"
+
+            if ! jq -e \
+              --arg sha "$GITHUB_SHA" \
+              'length == 1
+               and .[0].headSha == $sha
+               and .[0].status == "completed"
+               and .[0].conclusion == "success"' \
+              <<<"$run_json" >/dev/null; then
+              echo "Required push workflow is not green for $GITHUB_SHA: $workflow" >&2
+              echo "$run_json" >&2
+              exit 1
+            fi
+          done
+
+      - name: Generate project
+        run: tuist generate
+
+      - name: Test stable release candidate
+        run: tuist test -- -skipMacroValidation CODE_SIGNING_ALLOWED=NO
+
+      - name: Render deterministic release smoke
+        run: tuist run SchneeBarVisualSnapshotCLI -- --output "$RUNNER_TEMP/stable-visual-smoke"
+
+      - name: Build unsigned universal Release app
+        env:
+          MARKETING_VERSION: ${{ steps.version.outputs.marketing_version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcodebuild \
+            -project SchneeBar.xcodeproj \
+            -scheme SchneeBar \
+            -configuration Release \
+            -destination 'platform=macOS' \
+            -derivedDataPath "$RUNNER_TEMP/SchneeBarStableDerivedData" \
+            -skipMacroValidation \
+            CODE_SIGNING_ALLOWED=NO \
+            ONLY_ACTIVE_ARCH=NO \
+            ARCHS="arm64 x86_64" \
+            MARKETING_VERSION="$MARKETING_VERSION" \
+            CURRENT_PROJECT_VERSION="$GITHUB_RUN_NUMBER" \
+            build
+
       - name: Package bounded unsigned signing input
         shell: bash
         run: |
@@ -383,63 +440,6 @@ jobs:
               exit 1
             fi
           done
-
-      - name: Verify exact-main push gates
-        env:
-          GH_TOKEN: ${{ github.token }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          for workflow in ci.yml codeql.yml; do
-            run_json="$(gh run list \
-              --commit "$GITHUB_SHA" \
-              --branch main \
-              --event push \
-              --workflow "$workflow" \
-              --limit 1 \
-              --json headSha,status,conclusion)"
-
-            if ! jq -e \
-              --arg sha "$GITHUB_SHA" \
-              'length == 1
-               and .[0].headSha == $sha
-               and .[0].status == "completed"
-               and .[0].conclusion == "success"' \
-              <<<"$run_json" >/dev/null; then
-              echo "Required push workflow is not green for $GITHUB_SHA: $workflow" >&2
-              echo "$run_json" >&2
-              exit 1
-            fi
-          done
-
-      - name: Generate project
-        run: tuist generate
-
-      - name: Test stable release candidate
-        run: tuist test -- -skipMacroValidation CODE_SIGNING_ALLOWED=NO
-
-      - name: Render deterministic release smoke
-        run: tuist run SchneeBarVisualSnapshotCLI -- --output "$RUNNER_TEMP/stable-visual-smoke"
-
-      - name: Build unsigned universal Release app
-        env:
-          MARKETING_VERSION: ${{ steps.version.outputs.marketing_version }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          xcodebuild \
-            -project SchneeBar.xcodeproj \
-            -scheme SchneeBar \
-            -configuration Release \
-            -destination 'platform=macOS' \
-            -derivedDataPath "$RUNNER_TEMP/SchneeBarStableDerivedData" \
-            -skipMacroValidation \
-            CODE_SIGNING_ALLOWED=NO \
-            ONLY_ACTIVE_ARCH=NO \
-            ARCHS="arm64 x86_64" \
-            MARKETING_VERSION="$MARKETING_VERSION" \
-            CURRENT_PROJECT_VERSION="$GITHUB_RUN_NUMBER" \
-            build
 
       - name: Import Developer ID certificate
         env:
