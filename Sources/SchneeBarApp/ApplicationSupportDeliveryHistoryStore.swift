@@ -111,7 +111,7 @@ actor ApplicationSupportDeliveryHistoryStore: DeliveryHistoryStoring {
                 guard let path else { return false }
                 descriptor = Darwin.open(
                     path,
-                    O_RDONLY | O_CLOEXEC | O_NOFOLLOW
+                    O_RDONLY | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK
                 )
                 return true
             }
