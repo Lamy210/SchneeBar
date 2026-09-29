@@ -112,6 +112,7 @@ let project = Project(
             deploymentTargets: deploymentTarget,
             sources: ["Sources/SchneeBarGitHubProfiles/**"],
             dependencies: [
+                .target(name: "SchneeBarCore"),
                 .target(name: "SchneeBarGitHub"),
             ]
         ),

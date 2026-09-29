@@ -1,4 +1,5 @@
 @testable import SchneeBar
+import Darwin
 import Foundation
 import SchneeBarCore
 import Testing
@@ -162,6 +163,181 @@ func applicationSupportDeliveryHistoryStoreDeletesOnlyRequestedSource() async th
     let retained = try await fixture.store.load(scope: second)
     #expect(deleted == nil)
     #expect(retained == snapshot)
+}
+
+@Test
+func applicationSupportDeliveryHistoryStoreRejectsSymlinkBackingFile() async throws {
+    let fixture = try historyStoreFixture()
+    defer { try? FileManager.default.removeItem(at: fixture.directory) }
+
+    try FileManager.default.createDirectory(
+        at: fixture.directory,
+        withIntermediateDirectories: true
+    )
+    let target = fixture.directory.appendingPathComponent(
+        "target.json",
+        isDirectory: false
+    )
+    try Data(#"{"schemaVersion":1,"records":[]}"#.utf8)
+        .write(to: target)
+    try FileManager.default.createSymbolicLink(
+        at: fixture.fileURL,
+        withDestinationURL: target
+    )
+
+    await #expect(
+        throws: DeliveryHistoryStoreError.invalidBackingFile
+    ) {
+        _ = try await fixture.store.load(
+            scope: DeliveryHistoryStorageScope(
+                sourceID: "source",
+                repositoryID: "repo"
+            )
+        )
+    }
+}
+
+@Test
+func applicationSupportDeliveryHistoryStoreRejectsHardLinkedBackingFile() async throws {
+    let fixture = try historyStoreFixture()
+    defer { try? FileManager.default.removeItem(at: fixture.directory) }
+
+    try FileManager.default.createDirectory(
+        at: fixture.directory,
+        withIntermediateDirectories: true
+    )
+    let target = fixture.directory.appendingPathComponent(
+        "target.json",
+        isDirectory: false
+    )
+    try Data(#"{"schemaVersion":1,"records":[]}"#.utf8)
+        .write(to: target)
+    try FileManager.default.linkItem(
+        at: target,
+        to: fixture.fileURL
+    )
+
+    await #expect(
+        throws: DeliveryHistoryStoreError.invalidBackingFile
+    ) {
+        _ = try await fixture.store.load(
+            scope: DeliveryHistoryStorageScope(
+                sourceID: "source",
+                repositoryID: "repo"
+            )
+        )
+    }
+}
+
+@Test
+func applicationSupportDeliveryHistoryStoreRejectsDanglingSymlinkBackingFile() async throws {
+    let fixture = try historyStoreFixture()
+    defer { try? FileManager.default.removeItem(at: fixture.directory) }
+
+    try FileManager.default.createDirectory(
+        at: fixture.directory,
+        withIntermediateDirectories: true
+    )
+    let missingTarget = fixture.directory.appendingPathComponent(
+        "missing.json",
+        isDirectory: false
+    )
+    try FileManager.default.createSymbolicLink(
+        at: fixture.fileURL,
+        withDestinationURL: missingTarget
+    )
+
+    await #expect(
+        throws: DeliveryHistoryStoreError.invalidBackingFile
+    ) {
+        _ = try await fixture.store.load(
+            scope: DeliveryHistoryStorageScope(
+                sourceID: "source",
+                repositoryID: "repo"
+            )
+        )
+    }
+}
+
+@Test
+func applicationSupportDeliveryHistoryStoreRejectsOversizedBackingFile() async throws {
+    let fixture = try historyStoreFixture()
+    defer { try? FileManager.default.removeItem(at: fixture.directory) }
+
+    try FileManager.default.createDirectory(
+        at: fixture.directory,
+        withIntermediateDirectories: true
+    )
+    #expect(
+        FileManager.default.createFile(
+            atPath: fixture.fileURL.path,
+            contents: nil
+        )
+    )
+    let handle = try FileHandle(forWritingTo: fixture.fileURL)
+    defer { try? handle.close() }
+    try handle.truncate(
+        atOffset: UInt64(256 * 1024 * 1024 + 1)
+    )
+
+    await #expect(
+        throws: DeliveryHistoryStoreError.payloadTooLarge
+    ) {
+        _ = try await fixture.store.load(
+            scope: DeliveryHistoryStorageScope(
+                sourceID: "source",
+                repositoryID: "repo"
+            )
+        )
+    }
+}
+
+@Test
+func applicationSupportDeliveryHistoryStoreRejectsFIFOBackingPathWithoutBlocking() async throws {
+    let fixture = try historyStoreFixture()
+    defer { try? FileManager.default.removeItem(at: fixture.directory) }
+
+    try FileManager.default.createDirectory(
+        at: fixture.directory,
+        withIntermediateDirectories: true
+    )
+    let result = fixture.fileURL.path.withCString {
+        Darwin.mkfifo($0, 0o600)
+    }
+    #expect(result == 0)
+
+    await #expect(
+        throws: DeliveryHistoryStoreError.invalidBackingFile
+    ) {
+        _ = try await fixture.store.load(
+            scope: DeliveryHistoryStorageScope(
+                sourceID: "source",
+                repositoryID: "repo"
+            )
+        )
+    }
+}
+
+@Test
+func applicationSupportDeliveryHistoryStoreRejectsDirectoryBackingPath() async throws {
+    let fixture = try historyStoreFixture()
+    defer { try? FileManager.default.removeItem(at: fixture.directory) }
+
+    try FileManager.default.createDirectory(
+        at: fixture.fileURL,
+        withIntermediateDirectories: true
+    )
+
+    await #expect(
+        throws: DeliveryHistoryStoreError.invalidBackingFile
+    ) {
+        _ = try await fixture.store.load(
+            scope: DeliveryHistoryStorageScope(
+                sourceID: "source",
+                repositoryID: "repo"
+            )
+        )
+    }
 }
 
 private final class HistoryStoreClock: @unchecked Sendable {

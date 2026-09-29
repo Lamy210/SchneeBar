@@ -1,11 +1,19 @@
 import Foundation
+import SchneeBarCore
 import SchneeBarGitHub
 
 public enum GitHubConnectionProfileStoreError: Error, Equatable, Sendable {
     case unsupportedSchemaVersion(Int)
+    case invalidBackingFile
+    case payloadTooLarge
 }
 
 public actor ApplicationSupportGitHubConnectionProfileStore: GitHubConnectionProfileStore {
+    // Internal defensive budget for app-owned non-secret metadata. This is not
+    // a GitHub protocol limit and is intentionally generous for large selected
+    // repository sets while preventing an unbounded local file read.
+    private static let maximumPersistedBytes = 8 * 1024 * 1024
+
     private let fileURL: URL
     private let fileManager: FileManager
 
@@ -44,11 +52,9 @@ public actor ApplicationSupportGitHubConnectionProfileStore: GitHubConnectionPro
     }
 
     private func readProfiles() throws -> [GitHubConnectionProfile] {
-        guard fileManager.fileExists(atPath: fileURL.path) else {
+        guard let data = try readPersistedDataIfPresent() else {
             return []
         }
-
-        let data = try Data(contentsOf: fileURL)
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
         let payload = try decoder.decode(PersistedProfiles.self, from: data)
@@ -56,6 +62,19 @@ public actor ApplicationSupportGitHubConnectionProfileStore: GitHubConnectionPro
             throw GitHubConnectionProfileStoreError.unsupportedSchemaVersion(payload.schemaVersion)
         }
         return payload.profiles
+    }
+
+    private func readPersistedDataIfPresent() throws -> Data? {
+        do {
+            return try BoundedRegularFileReader.readIfPresent(
+                at: fileURL,
+                maximumBytes: Self.maximumPersistedBytes
+            )
+        } catch BoundedRegularFileReadError.unsafeBackingFile {
+            throw GitHubConnectionProfileStoreError.invalidBackingFile
+        } catch BoundedRegularFileReadError.payloadTooLarge {
+            throw GitHubConnectionProfileStoreError.payloadTooLarge
+        }
     }
 
     private func writeProfiles(_ profiles: [GitHubConnectionProfile]) throws {
@@ -77,6 +96,9 @@ public actor ApplicationSupportGitHubConnectionProfileStore: GitHubConnectionPro
         encoder.dateEncodingStrategy = .iso8601
         encoder.outputFormatting = [.sortedKeys]
         let data = try encoder.encode(payload)
+        guard data.count <= Self.maximumPersistedBytes else {
+            throw GitHubConnectionProfileStoreError.payloadTooLarge
+        }
         try data.write(to: fileURL, options: .atomic)
         try? fileManager.setAttributes(
             [.posixPermissions: 0o600],

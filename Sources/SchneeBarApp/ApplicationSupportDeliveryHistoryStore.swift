@@ -3,11 +3,16 @@ import SchneeBarCore
 
 enum DeliveryHistoryStoreError: Error, Equatable, Sendable {
     case unsupportedSchemaVersion(Int)
+    case invalidBackingFile
+    case payloadTooLarge
 }
 
 actor ApplicationSupportDeliveryHistoryStore: DeliveryHistoryStoring {
     private static let maximumEntriesPerScope = 200
     private static let maximumScopes = 100
+    // Internal defensive budget derived to stay well above the bounded
+    // 100-scope / 200-entry cache while preventing an unbounded local read.
+    private static let maximumPersistedBytes = 256 * 1024 * 1024
 
     private let fileURL: URL
     private let fileManager: FileManager
@@ -76,14 +81,12 @@ actor ApplicationSupportDeliveryHistoryStore: DeliveryHistoryStoring {
     }
 
     private func readPayload() throws -> PersistedDeliveryHistoryPayload {
-        guard fileManager.fileExists(atPath: fileURL.path) else {
+        guard let data = try readPersistedDataIfPresent() else {
             return PersistedDeliveryHistoryPayload(
                 schemaVersion: PersistedDeliveryHistoryPayload.currentSchemaVersion,
                 records: []
             )
         }
-
-        let data = try Data(contentsOf: fileURL)
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
         let payload = try decoder.decode(
@@ -98,6 +101,19 @@ actor ApplicationSupportDeliveryHistoryStore: DeliveryHistoryStoring {
             )
         }
         return payload
+    }
+
+    private func readPersistedDataIfPresent() throws -> Data? {
+        do {
+            return try BoundedRegularFileReader.readIfPresent(
+                at: fileURL,
+                maximumBytes: Self.maximumPersistedBytes
+            )
+        } catch BoundedRegularFileReadError.unsafeBackingFile {
+            throw DeliveryHistoryStoreError.invalidBackingFile
+        } catch BoundedRegularFileReadError.payloadTooLarge {
+            throw DeliveryHistoryStoreError.payloadTooLarge
+        }
     }
 
     private func writePayload(
@@ -117,6 +133,9 @@ actor ApplicationSupportDeliveryHistoryStore: DeliveryHistoryStoring {
         encoder.dateEncodingStrategy = .iso8601
         encoder.outputFormatting = [.sortedKeys]
         let data = try encoder.encode(payload)
+        guard data.count <= Self.maximumPersistedBytes else {
+            throw DeliveryHistoryStoreError.payloadTooLarge
+        }
         try data.write(to: fileURL, options: .atomic)
 
         try? fileManager.setAttributes(
