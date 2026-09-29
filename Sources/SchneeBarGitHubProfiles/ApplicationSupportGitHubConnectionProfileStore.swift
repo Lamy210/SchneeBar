@@ -1,11 +1,19 @@
+import Darwin
 import Foundation
 import SchneeBarGitHub
 
 public enum GitHubConnectionProfileStoreError: Error, Equatable, Sendable {
     case unsupportedSchemaVersion(Int)
+    case invalidBackingFile
+    case payloadTooLarge
 }
 
 public actor ApplicationSupportGitHubConnectionProfileStore: GitHubConnectionProfileStore {
+    // Internal defensive budget for app-owned non-secret metadata. This is not
+    // a GitHub protocol limit and is intentionally generous for large selected
+    // repository sets while preventing an unbounded local file read.
+    private static let maximumPersistedBytes = 8 * 1024 * 1024
+
     private let fileURL: URL
     private let fileManager: FileManager
 
@@ -48,7 +56,7 @@ public actor ApplicationSupportGitHubConnectionProfileStore: GitHubConnectionPro
             return []
         }
 
-        let data = try Data(contentsOf: fileURL)
+        let data = try readPersistedData()
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
         let payload = try decoder.decode(PersistedProfiles.self, from: data)
@@ -56,6 +64,51 @@ public actor ApplicationSupportGitHubConnectionProfileStore: GitHubConnectionPro
             throw GitHubConnectionProfileStoreError.unsupportedSchemaVersion(payload.schemaVersion)
         }
         return payload.profiles
+    }
+
+    private func readPersistedData() throws -> Data {
+        let descriptor = fileURL.withUnsafeFileSystemRepresentation { path in
+            guard let path else { return Int32(-1) }
+            return Darwin.open(
+                path,
+                O_RDONLY | O_CLOEXEC | O_NOFOLLOW
+            )
+        }
+        guard descriptor >= 0 else {
+            if errno == ELOOP {
+                throw GitHubConnectionProfileStoreError.invalidBackingFile
+            }
+            throw POSIXError(
+                POSIXErrorCode(rawValue: errno) ?? .EIO
+            )
+        }
+
+        let handle = FileHandle(
+            fileDescriptor: descriptor,
+            closeOnDealloc: true
+        )
+        var metadata = stat()
+        guard fstat(descriptor, &metadata) == 0 else {
+            throw POSIXError(
+                POSIXErrorCode(rawValue: errno) ?? .EIO
+            )
+        }
+        guard metadata.st_mode & S_IFMT == S_IFREG else {
+            throw GitHubConnectionProfileStoreError.invalidBackingFile
+        }
+        guard metadata.st_size >= 0,
+              metadata.st_size <= Self.maximumPersistedBytes
+        else {
+            throw GitHubConnectionProfileStoreError.payloadTooLarge
+        }
+
+        let data = try handle.read(
+            upToCount: Self.maximumPersistedBytes + 1
+        ) ?? Data()
+        guard data.count <= Self.maximumPersistedBytes else {
+            throw GitHubConnectionProfileStoreError.payloadTooLarge
+        }
+        return data
     }
 
     private func writeProfiles(_ profiles: [GitHubConnectionProfile]) throws {
