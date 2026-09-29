@@ -183,6 +183,22 @@ func rejectsOwnerDirectoryWritableByGroupOrOthers(
     }
 }
 
+@Test
+func rejectsRootDirectoryWithExtendedACL() async throws {
+    let fixture = try LoaderDirectoryFixture()
+    defer { fixture.cleanup() }
+
+    try addWriteACL(at: fixture.rootURL)
+
+    await #expect(
+        throws: ExternalWidgetDirectoryLoaderError.unsafeRoot
+    ) {
+        try await ExternalWidgetDirectoryLoader(
+            rootURL: fixture.rootURL
+        ).load()
+    }
+}
+
 @Test(arguments: [0o775, 0o757])
 func rejectsRootDirectoryWritableByGroupOrOthers(
     permissions: Int
@@ -216,6 +232,24 @@ func rejectsSymlinkedJSONDocumentWithoutFollowingIt() async throws {
         at: fixture.rootURL.appendingPathComponent("linked.json"),
         withDestinationURL: outside
     )
+
+    await #expect(
+        throws: ExternalWidgetDirectoryLoaderError.unsafeDocumentEntry
+    ) {
+        try await ExternalWidgetDirectoryLoader(
+            rootURL: fixture.rootURL
+        ).load()
+    }
+}
+
+@Test
+func rejectsJSONDocumentWithExtendedACL() async throws {
+    let fixture = try LoaderDirectoryFixture()
+    defer { fixture.cleanup() }
+
+    let url = fixture.rootURL.appendingPathComponent("acl.json")
+    try loaderDocumentData(id: "external.acl.build").write(to: url)
+    try addWriteACL(at: url)
 
     await #expect(
         throws: ExternalWidgetDirectoryLoaderError.unsafeDocumentEntry
@@ -505,6 +539,33 @@ func preservesCancellationBeforeFilesystemWork() async throws {
 
     await #expect(throws: CancellationError.self) {
         try await task.value
+    }
+}
+
+private enum LoaderACLFixtureError: Error {
+    case chmodFailed(Int32)
+}
+
+private func addWriteACL(
+    at url: URL
+) throws {
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: "/bin/chmod")
+    process.arguments = [
+        "+a",
+        "everyone allow write",
+        url.path,
+    ]
+    process.standardOutput = FileHandle.nullDevice
+    process.standardError = FileHandle.nullDevice
+
+    try process.run()
+    process.waitUntilExit()
+
+    guard process.terminationStatus == 0 else {
+        throw LoaderACLFixtureError.chmodFailed(
+            process.terminationStatus
+        )
     }
 }
 
