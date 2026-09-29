@@ -221,6 +221,9 @@ func classifiesEnterpriseServerVersions(
     "3.22.0_foo",
     "3.22.0-",
     "3.22.0+",
+    "3.22.0-rc..1",
+    "3.22.0-.rc1",
+    "3.22.0-rc1.",
     "３.22.0",
 ])
 func malformedEnterpriseServerVersionDoesNotReceiveTestedClassification(
