@@ -87,6 +87,20 @@ func resolvesEnterpriseServerEndpoints() throws {
 }
 
 @Test
+func normalizesExplicitDefaultEnterpriseServerHTTPSPort() throws {
+    let endpoints = try GitHubEndpointResolver.resolve(
+        deploymentKind: .enterpriseServer,
+        webBaseURL: #require(
+            URL(string: "https://github.internal.example:443/")
+        )
+    )
+
+    #expect(endpoints.webBaseURL.absoluteString == "https://github.internal.example")
+    #expect(endpoints.restBaseURL.absoluteString == "https://github.internal.example/api/v3")
+    #expect(endpoints.graphQLURL.absoluteString == "https://github.internal.example/api/graphql")
+}
+
+@Test
 func preservesExplicitEnterpriseServerHTTPSPort() throws {
     let endpoints = try GitHubEndpointResolver.resolve(
         deploymentKind: .enterpriseServer,
