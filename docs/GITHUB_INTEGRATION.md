@@ -54,6 +54,9 @@ is treated as reauthentication-required before any bearer credential is sent.
 Legacy credentials that predate endpoint binding remain usable for resolver-
 constrained GitHub.com/GHE.com endpoints, while legacy GHES credentials require
 one reauthentication because GHES intentionally permits arbitrary HTTPS hosts.
+Endpoint identity uses the canonical HTTPS origin: an explicit default `:443`
+is equivalent to the implicit HTTPS port, while non-default GHES ports remain
+part of the identity.
 
 ### Developer preview client ID
 
