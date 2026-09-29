@@ -129,6 +129,31 @@ func rejectsUnsafeOrAmbiguousEnterpriseServerURLs(rawURL: String) throws {
 }
 
 @Test(arguments: [
+    (
+        GitHubDeploymentKind.githubDotCom,
+        "https://github.com:443",
+        "https://github.com"
+    ),
+    (
+        GitHubDeploymentKind.gheDotCom,
+        "https://acme.ghe.com:443",
+        "https://acme.ghe.com"
+    ),
+])
+func normalizesExplicitDefaultPortForHostedGitHub(
+    deploymentKind: GitHubDeploymentKind,
+    rawURL: String,
+    expectedWebURL: String
+) throws {
+    let endpoints = try GitHubEndpointResolver.resolve(
+        deploymentKind: deploymentKind,
+        webBaseURL: try #require(URL(string: rawURL))
+    )
+
+    #expect(endpoints.webBaseURL.absoluteString == expectedWebURL)
+}
+
+@Test(arguments: [
     (GitHubDeploymentKind.githubDotCom, "https://github.com:8443"),
     (GitHubDeploymentKind.gheDotCom, "https://acme.ghe.com:8443"),
 ])
