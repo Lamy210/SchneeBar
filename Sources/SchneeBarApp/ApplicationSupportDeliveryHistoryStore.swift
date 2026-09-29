@@ -1,13 +1,19 @@
+import Darwin
 import Foundation
 import SchneeBarCore
 
 enum DeliveryHistoryStoreError: Error, Equatable, Sendable {
     case unsupportedSchemaVersion(Int)
+    case invalidBackingFile
+    case payloadTooLarge
 }
 
 actor ApplicationSupportDeliveryHistoryStore: DeliveryHistoryStoring {
     private static let maximumEntriesPerScope = 200
     private static let maximumScopes = 100
+    // Internal defensive budget derived to stay well above the bounded
+    // 100-scope / 200-entry cache while preventing an unbounded local read.
+    private static let maximumPersistedBytes = 256 * 1024 * 1024
 
     private let fileURL: URL
     private let fileManager: FileManager
@@ -83,7 +89,7 @@ actor ApplicationSupportDeliveryHistoryStore: DeliveryHistoryStoring {
             )
         }
 
-        let data = try Data(contentsOf: fileURL)
+        let data = try readPersistedData()
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
         let payload = try decoder.decode(
@@ -98,6 +104,58 @@ actor ApplicationSupportDeliveryHistoryStore: DeliveryHistoryStoring {
             )
         }
         return payload
+    }
+
+    private func readPersistedData() throws -> Data {
+        let descriptor = fileURL.withUnsafeFileSystemRepresentation { path in
+            guard let path else { return Int32(-1) }
+            return Darwin.open(
+                path,
+                O_RDONLY | O_CLOEXEC | O_NOFOLLOW
+            )
+        }
+        guard descriptor >= 0 else {
+            if errno == ELOOP {
+                throw DeliveryHistoryStoreError.invalidBackingFile
+            }
+            throw POSIXError(
+                POSIXErrorCode(rawValue: errno) ?? .EIO
+            )
+        }
+
+        let handle = FileHandle(
+            fileDescriptor: descriptor,
+            closeOnDealloc: true
+        )
+        var metadata = stat()
+        guard fstat(descriptor, &metadata) == 0 else {
+            throw POSIXError(
+                POSIXErrorCode(rawValue: errno) ?? .EIO
+            )
+        }
+        guard metadata.st_mode & S_IFMT == S_IFREG else {
+            throw DeliveryHistoryStoreError.invalidBackingFile
+        }
+        guard metadata.st_size >= 0,
+              metadata.st_size <= off_t(Self.maximumPersistedBytes)
+        else {
+            throw DeliveryHistoryStoreError.payloadTooLarge
+        }
+
+        var data = Data()
+        while data.count <= Self.maximumPersistedBytes {
+            let remaining = Self.maximumPersistedBytes + 1 - data.count
+            guard let chunk = try handle.read(upToCount: remaining),
+                  !chunk.isEmpty
+            else {
+                break
+            }
+            data.append(chunk)
+        }
+        guard data.count <= Self.maximumPersistedBytes else {
+            throw DeliveryHistoryStoreError.payloadTooLarge
+        }
+        return data
     }
 
     private func writePayload(
