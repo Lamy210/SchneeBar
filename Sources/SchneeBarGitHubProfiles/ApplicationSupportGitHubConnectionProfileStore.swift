@@ -100,7 +100,9 @@ public actor ApplicationSupportGitHubConnectionProfileStore: GitHubConnectionPro
                 POSIXErrorCode(rawValue: errno) ?? .EIO
             )
         }
-        guard metadata.st_mode & S_IFMT == S_IFREG else {
+        guard metadata.st_mode & S_IFMT == S_IFREG,
+              metadata.st_nlink == 1
+        else {
             throw GitHubConnectionProfileStoreError.invalidBackingFile
         }
         guard metadata.st_size >= 0,
