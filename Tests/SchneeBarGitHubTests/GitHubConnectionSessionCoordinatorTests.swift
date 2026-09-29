@@ -102,7 +102,11 @@ func establishValidatesIdentityBeforePersistingCredential() async throws {
     #expect(session.account.identity.login == "octocat")
     #expect(session.inventory.installations.isEmpty)
     #expect(session.credentialKey.accountID == "42")
-    #expect(await store.credential(for: session.credentialKey) == credential)
+    let persisted = try #require(
+        await store.credential(for: session.credentialKey)
+    )
+    #expect(persisted.accessToken == credential.accessToken)
+    #expect(persisted.endpointIdentity == "https://github.com")
     #expect(await store.saves() == 1)
 }
 
@@ -256,6 +260,7 @@ func restoreRefreshesExpiringDeviceFlowCredentialAndPersistsRotation() async thr
     let stored = try #require(await store.credential(for: key))
     #expect(stored.accessToken == "ghu_new")
     #expect(stored.refreshToken == "ghr_new")
+    #expect(stored.endpointIdentity == "https://github.com")
 
     let requests = await transport.recordedRequests()
     #expect(requests.first?.httpMethod == "POST")
@@ -345,6 +350,112 @@ func restoreRejectsCredentialThatResolvesToAnotherAccount() async throws {
 }
 
 @Test
+func restoreRequiresReauthenticationForLegacyUnboundGHESCredential() async throws {
+    let transport = SessionQueueTransport([])
+    let store = MemoryGitHubCredentialStore()
+    let connection = try enterpriseSessionConnection()
+    let identity = GitHubAccountIdentity(id: "42", login: "octocat")
+    let key = GitHubCredentialKey(
+        connectionID: connection.id,
+        accountID: identity.id
+    )
+    try await store.save(
+        GitHubCredential(accessToken: "ghes-legacy-token"),
+        for: key
+    )
+    let coordinator = makeCoordinator(
+        transport: transport,
+        store: store
+    )
+
+    await #expect(
+        throws: GitHubConnectionSessionError.reauthenticationRequired
+    ) {
+        try await coordinator.restore(
+            connection: connection,
+            identity: identity
+        )
+    }
+
+    #expect(await transport.recordedRequests().isEmpty)
+}
+
+@Test
+func restoreRejectsGHESCredentialBoundToAnotherEndpointBeforeRequest() async throws {
+    let transport = SessionQueueTransport([])
+    let store = MemoryGitHubCredentialStore()
+    let connection = try enterpriseSessionConnection()
+    let identity = GitHubAccountIdentity(id: "42", login: "octocat")
+    let key = GitHubCredentialKey(
+        connectionID: connection.id,
+        accountID: identity.id
+    )
+    try await store.save(
+        GitHubCredential(
+            accessToken: "ghes-bound-token",
+            endpointIdentity: "https://attacker.example"
+        ),
+        for: key
+    )
+    let coordinator = makeCoordinator(
+        transport: transport,
+        store: store
+    )
+
+    await #expect(
+        throws: GitHubConnectionSessionError.reauthenticationRequired
+    ) {
+        try await coordinator.restore(
+            connection: connection,
+            identity: identity
+        )
+    }
+
+    #expect(await transport.recordedRequests().isEmpty)
+}
+
+@Test
+func restoreAcceptsGHESCredentialBoundToCanonicalEndpoint() async throws {
+    let transport = SessionQueueTransport([
+        SessionStubResponse(userJSON(id: 42, login: "octocat")),
+        SessionStubResponse(userJSON(id: 42, login: "octocat")),
+        SessionStubResponse(#"{"total_count":0,"installations":[]}"#),
+    ])
+    let store = MemoryGitHubCredentialStore()
+    let connection = try enterpriseSessionConnection()
+    let identity = GitHubAccountIdentity(id: "42", login: "octocat")
+    let key = GitHubCredentialKey(
+        connectionID: connection.id,
+        accountID: identity.id
+    )
+    try await store.save(
+        GitHubCredential(
+            accessToken: "ghes-bound-token",
+            endpointIdentity: "https://github.internal.example"
+        ),
+        for: key
+    )
+    let coordinator = makeCoordinator(
+        transport: transport,
+        store: store
+    )
+
+    let session = try await coordinator.restore(
+        connection: connection,
+        identity: identity
+    )
+
+    #expect(session.account.identity == identity)
+    let requests = await transport.recordedRequests()
+    #expect(!requests.isEmpty)
+    #expect(
+        requests.allSatisfy {
+            $0.url?.host == "github.internal.example"
+        }
+    )
+}
+
+@Test
 func restoreFailsWhenCredentialIsMissing() async throws {
     let transport = SessionQueueTransport([])
     let store = MemoryGitHubCredentialStore()
@@ -398,6 +509,17 @@ private func sessionConnection() throws -> GitHubConnection {
         displayName: "GitHub.com",
         deploymentKind: .githubDotCom,
         webBaseURL: try #require(URL(string: "https://github.com"))
+    )
+}
+
+private func enterpriseSessionConnection() throws -> GitHubConnection {
+    GitHubConnection(
+        id: UUID(uuidString: "00000000-0000-0000-0000-000000000043")!,
+        displayName: "Internal GitHub",
+        deploymentKind: .enterpriseServer,
+        webBaseURL: try #require(
+            URL(string: "https://github.internal.example")
+        )
     )
 }
 
