@@ -62,6 +62,8 @@ Before the first stable release, add a protected release workflow/environment th
 
 Signing certificates, private keys, App Store Connect API credentials, and notarization credentials must exist only in the protected release environment. They must never be available to pull-request jobs.
 
+The stable workflow also separates build execution from signing. Checkout, tests, visual smoke, and the unsigned universal build run in a secret-free job. That job uploads only a bounded ZIP plus SHA-256 checksum. The protected `release` signing/notarization job downloads and validates that artifact, does not checkout repository source, and does not run Tuist or tests before importing Apple credentials.
+
 ### Stable release environment
 
 The stable workflow uses a protected GitHub Actions environment named `release`. Configure approval/protection rules before enabling stable publication.
