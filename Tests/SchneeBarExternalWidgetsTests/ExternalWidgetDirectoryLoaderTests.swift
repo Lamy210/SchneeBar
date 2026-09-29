@@ -122,6 +122,48 @@ func rejectsSymlinkedRootDirectory() async throws {
     }
 }
 
+@Test(arguments: [0o775, 0o757])
+func rejectsOwnerDirectoryWritableByGroupOrOthers(
+    permissions: Int
+) async throws {
+    let fixture = try LoaderDirectoryFixture()
+    defer { fixture.cleanup() }
+
+    try FileManager.default.setAttributes(
+        [.posixPermissions: permissions],
+        ofItemAtPath: fixture.baseURL.path
+    )
+
+    await #expect(
+        throws: ExternalWidgetDirectoryLoaderError.unsafeRoot
+    ) {
+        try await ExternalWidgetDirectoryLoader(
+            rootURL: fixture.rootURL
+        ).load()
+    }
+}
+
+@Test(arguments: [0o775, 0o757])
+func rejectsRootDirectoryWritableByGroupOrOthers(
+    permissions: Int
+) async throws {
+    let fixture = try LoaderDirectoryFixture()
+    defer { fixture.cleanup() }
+
+    try FileManager.default.setAttributes(
+        [.posixPermissions: permissions],
+        ofItemAtPath: fixture.rootURL.path
+    )
+
+    await #expect(
+        throws: ExternalWidgetDirectoryLoaderError.unsafeRoot
+    ) {
+        try await ExternalWidgetDirectoryLoader(
+            rootURL: fixture.rootURL
+        ).load()
+    }
+}
+
 @Test
 func rejectsSymlinkedJSONDocumentWithoutFollowingIt() async throws {
     let fixture = try LoaderDirectoryFixture()
