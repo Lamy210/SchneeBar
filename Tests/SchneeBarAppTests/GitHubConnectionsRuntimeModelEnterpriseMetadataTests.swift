@@ -31,14 +31,17 @@ private actor EnterpriseMetadataProfileStore: GitHubConnectionProfileStore {
 
 private actor EnterpriseMetadataCredentialStore: GitHubCredentialStore {
     private let key: GitHubCredentialKey
-    private let credential = GitHubCredential(
-        accessToken: "enterprise-metadata-token"
-    )
+    private let credential: GitHubCredential
 
     init(profile: GitHubConnectionProfile) {
         key = GitHubCredentialKey(
             connectionID: profile.id,
             accountID: profile.account.id
+        )
+        credential = GitHubCredential(
+            accessToken: "enterprise-metadata-token",
+            endpointIdentity:
+                profile.connection.webBaseURL.absoluteString
         )
     }
 
