@@ -217,6 +217,10 @@ func classifiesEnterpriseServerVersions(
     "3.22preview.0",
     "3.22.",
     "3.22.0.extra",
+    "3.22.0garbage",
+    "3.22.0_foo",
+    "3.22.0-",
+    "3.22.0+",
     "３.22.0",
 ])
 func malformedEnterpriseServerVersionDoesNotReceiveTestedClassification(
@@ -231,10 +235,23 @@ func malformedEnterpriseServerVersionDoesNotReceiveTestedClassification(
     )
 }
 
-@Test
-func parsesEnterpriseServerVersionSuffixWithoutRejectingDiscovery() {
-    let version = GitHubEnterpriseServerVersion(parsing: "3.22.0-rc1")
-    #expect(version == GitHubEnterpriseServerVersion(major: 3, minor: 22, patch: 0))
+@Test(arguments: [
+    "3.22.0-rc1",
+    "3.22.0-rc.1",
+    "3.22.0+build1",
+])
+func parsesEnterpriseServerVersionSuffixWithoutRejectingDiscovery(
+    rawVersion: String
+) {
+    let version = GitHubEnterpriseServerVersion(parsing: rawVersion)
+    #expect(
+        version
+            == GitHubEnterpriseServerVersion(
+                major: 3,
+                minor: 22,
+                patch: 0
+            )
+    )
 }
 
 @Test
