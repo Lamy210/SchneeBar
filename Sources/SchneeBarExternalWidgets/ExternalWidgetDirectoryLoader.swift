@@ -151,6 +151,7 @@ public struct ExternalWidgetDirectoryLoader: Sendable {
         defer {
             Darwin.close(trustedParentDescriptor)
         }
+        try validateTrustedDirectory(trustedParentDescriptor)
 
         let ownerDescriptor = ownerName.withCString {
             Darwin.openat(
@@ -165,7 +166,7 @@ public struct ExternalWidgetDirectoryLoader: Sendable {
         defer {
             Darwin.close(ownerDescriptor)
         }
-        try validateAppOwnedDirectory(ownerDescriptor)
+        try validateTrustedDirectory(ownerDescriptor)
 
         let rootDescriptor = rootName.withCString {
             Darwin.openat(
@@ -179,7 +180,7 @@ public struct ExternalWidgetDirectoryLoader: Sendable {
         }
 
         do {
-            try validateAppOwnedDirectory(rootDescriptor)
+            try validateTrustedDirectory(rootDescriptor)
         } catch {
             Darwin.close(rootDescriptor)
             throw error
@@ -187,7 +188,7 @@ public struct ExternalWidgetDirectoryLoader: Sendable {
         return rootDescriptor
     }
 
-    private func validateAppOwnedDirectory(
+    private func validateTrustedDirectory(
         _ fileDescriptor: Int32
     ) throws {
         var metadata = stat()
