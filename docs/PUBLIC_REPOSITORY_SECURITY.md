@@ -14,6 +14,7 @@ SchneeBar is public. Pull-request code from forks must be treated as untrusted.
 - Dependabot tracks Action updates.
 - Release signing/notarization must live in a separate protected workflow/environment.
 - Stable Developer ID PKCS#12 material, signing passwords, App Store Connect API private keys, key IDs, issuer IDs, and Apple Team identity values must be scoped to the protected `release` environment and never referenced by pull-request jobs.
+- Stable repository checkout, tests, visual smoke, and Release build run in a separate secret-free job. The protected signing/notarization job downloads only a bounded checksummed unsigned app artifact; it does not checkout the repository, run Tuist, execute tests, or launch repository-built code before Apple credentials are used.
 - Stable signing uses an ephemeral keychain; decoded PKCS#12/API-key files and that keychain must be removed on success or failure.
 - The manual preview-release workflow splits read-only build/package work from publication: repository code is built/tested only with `actions: read` + `contents: read`; `contents: write` exists only in a checkout-free publish job that verifies and uploads the bounded release payload. It must not receive Apple signing/notarization secrets.
 - Release publication must bind to an explicit full expected commit SHA and refuse a moving/unreviewed `main` head.
