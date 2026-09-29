@@ -617,6 +617,47 @@ func restoreAcceptsGHESCredentialBoundToCanonicalEndpoint() async throws {
 }
 
 @Test
+func restoreRejectsGHESCredentialAcrossDifferentCustomPortBeforeRequest() async throws {
+    let transport = SessionQueueTransport([])
+    let store = MemoryGitHubCredentialStore()
+    let connection = GitHubConnection(
+        id: UUID(uuidString: "00000000-0000-0000-0000-000000000043")!,
+        displayName: "Internal GitHub",
+        deploymentKind: .enterpriseServer,
+        webBaseURL: try #require(
+            URL(string: "https://github.internal.example:8443")
+        )
+    )
+    let identity = GitHubAccountIdentity(id: "42", login: "octocat")
+    let key = GitHubCredentialKey(
+        connectionID: connection.id,
+        accountID: identity.id
+    )
+    try await store.save(
+        GitHubCredential(
+            accessToken: "ghes-bound-token",
+            endpointIdentity: "https://github.internal.example"
+        ),
+        for: key
+    )
+    let coordinator = makeCoordinator(
+        transport: transport,
+        store: store
+    )
+
+    await #expect(
+        throws: GitHubConnectionSessionError.reauthenticationRequired
+    ) {
+        try await coordinator.restore(
+            connection: connection,
+            identity: identity
+        )
+    }
+
+    #expect(await transport.recordedRequests().isEmpty)
+}
+
+@Test
 func restoreAcceptsGHESCredentialAcrossExplicitDefaultHTTPSPort() async throws {
     let transport = SessionQueueTransport([
         SessionStubResponse(userJSON(id: 42, login: "octocat")),
