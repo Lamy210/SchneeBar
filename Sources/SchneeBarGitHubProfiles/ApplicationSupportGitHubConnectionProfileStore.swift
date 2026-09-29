@@ -102,9 +102,16 @@ public actor ApplicationSupportGitHubConnectionProfileStore: GitHubConnectionPro
             throw GitHubConnectionProfileStoreError.payloadTooLarge
         }
 
-        let data = try handle.read(
-            upToCount: Self.maximumPersistedBytes + 1
-        ) ?? Data()
+        var data = Data()
+        while data.count <= Self.maximumPersistedBytes {
+            let remaining = Self.maximumPersistedBytes + 1 - data.count
+            guard let chunk = try handle.read(upToCount: remaining),
+                  !chunk.isEmpty
+            else {
+                break
+            }
+            data.append(chunk)
+        }
         guard data.count <= Self.maximumPersistedBytes else {
             throw GitHubConnectionProfileStoreError.payloadTooLarge
         }
