@@ -215,11 +215,12 @@ public struct ExternalWidgetDirectoryLoader: Sendable {
     private func hasExtendedACL(
         _ fileDescriptor: Int32
     ) -> Bool {
+        errno = 0
         guard let acl = acl_get_fd_np(
             fileDescriptor,
             ACL_TYPE_EXTENDED
         ) else {
-            return false
+            return errno != ENOENT
         }
         defer {
             acl_free(UnsafeMutableRawPointer(acl))
