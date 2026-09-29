@@ -38,7 +38,9 @@ concurrency:
       && inputs.tag
       || format('pr-{0}', github.event.pull_request.number)
     }}
-  cancel-in-progress: false
+  # Supersede stale PR validation runs, but never cancel a manually
+  # dispatched stable release for the same tag.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   validate-stable-build:
