@@ -67,12 +67,18 @@ public actor ApplicationSupportGitHubConnectionProfileStore: GitHubConnectionPro
     }
 
     private func readPersistedData() throws -> Data {
-        let descriptor = fileURL.withUnsafeFileSystemRepresentation { path in
-            guard let path else { return Int32(-1) }
-            return Darwin.open(
-                path,
-                O_RDONLY | O_CLOEXEC | O_NOFOLLOW
-            )
+        var descriptor = Int32(-1)
+        let hasFileSystemRepresentation =
+            fileURL.withUnsafeFileSystemRepresentation { path in
+                guard let path else { return false }
+                descriptor = Darwin.open(
+                    path,
+                    O_RDONLY | O_CLOEXEC | O_NOFOLLOW
+                )
+                return true
+            }
+        guard hasFileSystemRepresentation else {
+            throw GitHubConnectionProfileStoreError.invalidBackingFile
         }
         guard descriptor >= 0 else {
             if errno == ELOOP {
