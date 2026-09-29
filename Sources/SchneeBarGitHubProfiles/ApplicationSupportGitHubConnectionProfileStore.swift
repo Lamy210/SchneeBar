@@ -97,7 +97,7 @@ public actor ApplicationSupportGitHubConnectionProfileStore: GitHubConnectionPro
             throw GitHubConnectionProfileStoreError.invalidBackingFile
         }
         guard metadata.st_size >= 0,
-              metadata.st_size <= Self.maximumPersistedBytes
+              metadata.st_size <= off_t(Self.maximumPersistedBytes)
         else {
             throw GitHubConnectionProfileStoreError.payloadTooLarge
         }
