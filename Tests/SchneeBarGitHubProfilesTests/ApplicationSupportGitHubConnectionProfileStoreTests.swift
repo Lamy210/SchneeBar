@@ -155,6 +155,25 @@ func profileStoreRejectsOversizedBackingFileBeforeDecode() async throws {
 }
 
 @Test
+func profileStoreDoesNotWritePayloadItCannotReadBack() async throws {
+    let context = try temporaryProfileStore()
+    defer { try? FileManager.default.removeItem(at: context.directory) }
+
+    var profile = try makeProfile()
+    profile.clientID = String(
+        repeating: "a",
+        count: 8 * 1024 * 1024 + 1
+    )
+
+    await #expect(
+        throws: GitHubConnectionProfileStoreError.payloadTooLarge
+    ) {
+        try await context.store.save(profile)
+    }
+    #expect(!FileManager.default.fileExists(atPath: context.fileURL.path))
+}
+
+@Test
 func profileStoreRejectsDirectoryBackingPath() async throws {
     let context = try temporaryProfileStore()
     defer { try? FileManager.default.removeItem(at: context.directory) }
