@@ -181,6 +181,9 @@ actor ApplicationSupportDeliveryHistoryStore: DeliveryHistoryStoring {
         encoder.dateEncodingStrategy = .iso8601
         encoder.outputFormatting = [.sortedKeys]
         let data = try encoder.encode(payload)
+        guard data.count <= Self.maximumPersistedBytes else {
+            throw DeliveryHistoryStoreError.payloadTooLarge
+        }
         try data.write(to: fileURL, options: .atomic)
 
         try? fileManager.setAttributes(
