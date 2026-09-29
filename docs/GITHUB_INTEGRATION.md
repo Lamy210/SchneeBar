@@ -48,6 +48,13 @@ For the local-first public desktop client, the initial preferred GitHub.com flow
 
 Tokens are stored in macOS Keychain. A GitHub App private key is never shipped in the desktop client.
 
+Newly persisted credentials are bound inside the Keychain payload to the
+canonical GitHub web endpoint that established them. A stored binding mismatch
+is treated as reauthentication-required before any bearer credential is sent.
+Legacy credentials that predate endpoint binding remain usable for resolver-
+constrained GitHub.com/GHE.com endpoints, while legacy GHES credentials require
+one reauthentication because GHES intentionally permits arbitrary HTTPS hosts.
+
 ### Developer preview client ID
 
 The current developer preview does not bundle a SchneeBar-owned GitHub App client ID. A tester must provide the public client ID of a GitHub App with Device Flow enabled in the connection onboarding form.
