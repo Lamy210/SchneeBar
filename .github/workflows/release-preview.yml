@@ -17,6 +17,11 @@ on:
         required: true
         type: string
 
+env:
+  SCHNEEBAR_MAX_RELEASE_ARCHIVE_BYTES: "536870912"
+  SCHNEEBAR_MAX_RELEASE_UNCOMPRESSED_BYTES: "1073741824"
+  SCHNEEBAR_MAX_RELEASE_ARCHIVE_ENTRIES: "10000"
+
 permissions:
   contents: read
 
@@ -27,7 +32,9 @@ concurrency:
       && inputs.tag
       || format('pr-{0}', github.event.pull_request.number)
     }}
-  cancel-in-progress: false
+  # Supersede stale PR validation runs, but never cancel a manually
+  # dispatched preview publication for the same tag.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   validate-preview-build:
@@ -99,6 +106,63 @@ jobs:
 
           archive="${RUNNER_TEMP}/SchneeBar-0.1.0-preview-validation.zip"
           /usr/bin/ditto -c -k --sequesterRsrc --keepParent "${app}" "${archive}"
+          archive_bytes="$(wc -c < "${archive}" | tr -d ' ')"
+          if [[ "${archive_bytes}" -le 0 || "${archive_bytes}" -gt "${SCHNEEBAR_MAX_RELEASE_ARCHIVE_BYTES}" ]]; then
+            echo "Preview archive size is outside the allowed bound: ${archive_bytes} bytes" >&2
+            exit 1
+          fi
+
+          archive_totals="$(zipinfo -t "${archive}")"
+          archive_entry_total="$(awk 'END {print $1}' <<< "${archive_totals}")"
+          archive_uncompressed_bytes="$(awk 'END {print $3}' <<< "${archive_totals}")"
+          if [[ ! "${archive_entry_total}" =~ ^[0-9]+$ || ! "${archive_uncompressed_bytes}" =~ ^[0-9]+$ ]]; then
+            echo "Could not parse preview archive totals." >&2
+            printf '%s\n' "${archive_totals}" >&2
+            exit 1
+          fi
+          if [[ "${archive_entry_total}" -le 0 || "${archive_entry_total}" -gt "${SCHNEEBAR_MAX_RELEASE_ARCHIVE_ENTRIES}" ]]; then
+            echo "Preview archive entry count is outside the allowed bound: ${archive_entry_total}" >&2
+            exit 1
+          fi
+          if [[ "${archive_uncompressed_bytes}" -le 0 || "${archive_uncompressed_bytes}" -gt "${SCHNEEBAR_MAX_RELEASE_UNCOMPRESSED_BYTES}" ]]; then
+            echo "Preview archive uncompressed size is outside the allowed bound: ${archive_uncompressed_bytes} bytes" >&2
+            exit 1
+          fi
+
+          entry_count=0
+          while IFS= read -r entry; do
+            entry_count=$((entry_count + 1))
+            if [[ "${entry_count}" -gt "${SCHNEEBAR_MAX_RELEASE_ARCHIVE_ENTRIES}" ]]; then
+              echo "Preview archive has too many entries." >&2
+              exit 1
+            fi
+
+            case "${entry}" in
+              SchneeBar.app|SchneeBar.app/*) ;;
+              *)
+                echo "Unexpected preview archive entry: ${entry}" >&2
+                exit 1
+                ;;
+            esac
+
+            if [[ "${entry}" == /* || "${entry}" == *\\* ]]; then
+              echo "Unsafe preview archive path: ${entry}" >&2
+              exit 1
+            fi
+
+            case "/${entry}/" in
+              */../*|*/./*)
+                echo "Unsafe preview archive traversal component: ${entry}" >&2
+                exit 1
+                ;;
+            esac
+          done < <(zipinfo -1 "${archive}")
+
+          if [[ "${entry_count}" -ne "${archive_entry_total}" ]]; then
+            echo "Preview archive entry enumeration is ambiguous or malformed." >&2
+            echo "zipinfo total: ${archive_entry_total}; enumerated lines: ${entry_count}" >&2
+            exit 1
+          fi
           unzip -t "${archive}"
 
   build-preview-package:
@@ -276,6 +340,63 @@ jobs:
           notes="${output_dir}/release-notes.md"
 
           /usr/bin/ditto -c -k --sequesterRsrc --keepParent "${app}" "${archive}"
+          archive_bytes="$(wc -c < "${archive}" | tr -d ' ')"
+          if [[ "${archive_bytes}" -le 0 || "${archive_bytes}" -gt "${SCHNEEBAR_MAX_RELEASE_ARCHIVE_BYTES}" ]]; then
+            echo "Preview archive size is outside the allowed bound: ${archive_bytes} bytes" >&2
+            exit 1
+          fi
+
+          archive_totals="$(zipinfo -t "${archive}")"
+          archive_entry_total="$(awk 'END {print $1}' <<< "${archive_totals}")"
+          archive_uncompressed_bytes="$(awk 'END {print $3}' <<< "${archive_totals}")"
+          if [[ ! "${archive_entry_total}" =~ ^[0-9]+$ || ! "${archive_uncompressed_bytes}" =~ ^[0-9]+$ ]]; then
+            echo "Could not parse preview archive totals." >&2
+            printf '%s\n' "${archive_totals}" >&2
+            exit 1
+          fi
+          if [[ "${archive_entry_total}" -le 0 || "${archive_entry_total}" -gt "${SCHNEEBAR_MAX_RELEASE_ARCHIVE_ENTRIES}" ]]; then
+            echo "Preview archive entry count is outside the allowed bound: ${archive_entry_total}" >&2
+            exit 1
+          fi
+          if [[ "${archive_uncompressed_bytes}" -le 0 || "${archive_uncompressed_bytes}" -gt "${SCHNEEBAR_MAX_RELEASE_UNCOMPRESSED_BYTES}" ]]; then
+            echo "Preview archive uncompressed size is outside the allowed bound: ${archive_uncompressed_bytes} bytes" >&2
+            exit 1
+          fi
+
+          entry_count=0
+          while IFS= read -r entry; do
+            entry_count=$((entry_count + 1))
+            if [[ "${entry_count}" -gt "${SCHNEEBAR_MAX_RELEASE_ARCHIVE_ENTRIES}" ]]; then
+              echo "Preview archive has too many entries." >&2
+              exit 1
+            fi
+
+            case "${entry}" in
+              SchneeBar.app|SchneeBar.app/*) ;;
+              *)
+                echo "Unexpected preview archive entry: ${entry}" >&2
+                exit 1
+                ;;
+            esac
+
+            if [[ "${entry}" == /* || "${entry}" == *\\* ]]; then
+              echo "Unsafe preview archive path: ${entry}" >&2
+              exit 1
+            fi
+
+            case "/${entry}/" in
+              */../*|*/./*)
+                echo "Unsafe preview archive traversal component: ${entry}" >&2
+                exit 1
+                ;;
+            esac
+          done < <(zipinfo -1 "${archive}")
+
+          if [[ "${entry_count}" -ne "${archive_entry_total}" ]]; then
+            echo "Preview archive entry enumeration is ambiguous or malformed." >&2
+            echo "zipinfo total: ${archive_entry_total}; enumerated lines: ${entry_count}" >&2
+            exit 1
+          fi
           unzip -t "${archive}"
 
           (
@@ -393,6 +514,63 @@ jobs:
             exit 1
           fi
 
+          archive_bytes="$(wc -c < "${archive}" | tr -d ' ')"
+          if [[ "${archive_bytes}" -le 0 || "${archive_bytes}" -gt "${SCHNEEBAR_MAX_RELEASE_ARCHIVE_BYTES}" ]]; then
+            echo "Preview archive size is outside the allowed bound: ${archive_bytes} bytes" >&2
+            exit 1
+          fi
+
+          archive_totals="$(zipinfo -t "${archive}")"
+          archive_entry_total="$(awk 'END {print $1}' <<< "${archive_totals}")"
+          archive_uncompressed_bytes="$(awk 'END {print $3}' <<< "${archive_totals}")"
+          if [[ ! "${archive_entry_total}" =~ ^[0-9]+$ || ! "${archive_uncompressed_bytes}" =~ ^[0-9]+$ ]]; then
+            echo "Could not parse preview archive totals." >&2
+            printf '%s\n' "${archive_totals}" >&2
+            exit 1
+          fi
+          if [[ "${archive_entry_total}" -le 0 || "${archive_entry_total}" -gt "${SCHNEEBAR_MAX_RELEASE_ARCHIVE_ENTRIES}" ]]; then
+            echo "Preview archive entry count is outside the allowed bound: ${archive_entry_total}" >&2
+            exit 1
+          fi
+          if [[ "${archive_uncompressed_bytes}" -le 0 || "${archive_uncompressed_bytes}" -gt "${SCHNEEBAR_MAX_RELEASE_UNCOMPRESSED_BYTES}" ]]; then
+            echo "Preview archive uncompressed size is outside the allowed bound: ${archive_uncompressed_bytes} bytes" >&2
+            exit 1
+          fi
+
+          entry_count=0
+          while IFS= read -r entry; do
+            entry_count=$((entry_count + 1))
+            if [[ "${entry_count}" -gt "${SCHNEEBAR_MAX_RELEASE_ARCHIVE_ENTRIES}" ]]; then
+              echo "Preview archive has too many entries." >&2
+              exit 1
+            fi
+
+            case "${entry}" in
+              SchneeBar.app|SchneeBar.app/*) ;;
+              *)
+                echo "Unexpected preview archive entry: ${entry}" >&2
+                exit 1
+                ;;
+            esac
+
+            if [[ "${entry}" == /* || "${entry}" == *\\* ]]; then
+              echo "Unsafe preview archive path: ${entry}" >&2
+              exit 1
+            fi
+
+            case "/${entry}/" in
+              */../*|*/./*)
+                echo "Unsafe preview archive traversal component: ${entry}" >&2
+                exit 1
+                ;;
+            esac
+          done < <(zipinfo -1 "${archive}")
+
+          if [[ "${entry_count}" -ne "${archive_entry_total}" ]]; then
+            echo "Preview archive entry enumeration is ambiguous or malformed." >&2
+            echo "zipinfo total: ${archive_entry_total}; enumerated lines: ${entry_count}" >&2
+            exit 1
+          fi
           (
             cd release-payload
             sha256sum -c "$(basename "${checksum}")"
