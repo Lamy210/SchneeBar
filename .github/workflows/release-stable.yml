@@ -21,6 +21,9 @@ on:
         required: true
         type: string
 
+env:
+  SCHNEEBAR_MAX_RELEASE_ARCHIVE_BYTES: "536870912"
+
 permissions:
   contents: read
 
@@ -100,6 +103,11 @@ jobs:
           archive="$RUNNER_TEMP/SchneeBar-unsigned-signing-input-validation.zip"
 
           ditto -c -k --keepParent "$app" "$archive"
+          archive_bytes="$(wc -c < "$archive" | tr -d ' ')"
+          if [[ "$archive_bytes" -le 0 || "$archive_bytes" -gt "$SCHNEEBAR_MAX_RELEASE_ARCHIVE_BYTES" ]]; then
+            echo "Release archive size is outside the allowed bound: $archive_bytes bytes" >&2
+            exit 1
+          fi
           unzip -t "$archive"
 
           entry_count=0
@@ -357,6 +365,11 @@ jobs:
           checksum="$archive.sha256"
 
           ditto -c -k --keepParent "$app" "$archive"
+          archive_bytes="$(wc -c < "$archive" | tr -d ' ')"
+          if [[ "$archive_bytes" -le 0 || "$archive_bytes" -gt "$SCHNEEBAR_MAX_RELEASE_ARCHIVE_BYTES" ]]; then
+            echo "Release archive size is outside the allowed bound: $archive_bytes bytes" >&2
+            exit 1
+          fi
           unzip -t "$archive"
 
           (
@@ -410,6 +423,11 @@ jobs:
           test -f "$archive"
           test -f "$checksum"
 
+          archive_bytes="$(wc -c < "$archive" | tr -d ' ')"
+          if [[ "$archive_bytes" -le 0 || "$archive_bytes" -gt "$SCHNEEBAR_MAX_RELEASE_ARCHIVE_BYTES" ]]; then
+            echo "Release archive size is outside the allowed bound: $archive_bytes bytes" >&2
+            exit 1
+          fi
           if find signing-input -type l -print -quit | grep -q .; then
             echo "Signing input must not contain symbolic links." >&2
             exit 1
@@ -676,6 +694,11 @@ jobs:
           notes="$output_dir/release-notes.md"
 
           ditto -c -k --sequesterRsrc --keepParent "$app" "$archive"
+          archive_bytes="$(wc -c < "$archive" | tr -d ' ')"
+          if [[ "$archive_bytes" -le 0 || "$archive_bytes" -gt "$SCHNEEBAR_MAX_RELEASE_ARCHIVE_BYTES" ]]; then
+            echo "Release archive size is outside the allowed bound: $archive_bytes bytes" >&2
+            exit 1
+          fi
           unzip -t "$archive"
 
           (
@@ -758,6 +781,11 @@ jobs:
           test -f "$archive"
           test -f "$checksum"
 
+          archive_bytes="$(wc -c < "$archive" | tr -d ' ')"
+          if [[ "$archive_bytes" -le 0 || "$archive_bytes" -gt "$SCHNEEBAR_MAX_RELEASE_ARCHIVE_BYTES" ]]; then
+            echo "Release archive size is outside the allowed bound: $archive_bytes bytes" >&2
+            exit 1
+          fi
           (
             cd release-payload
             shasum -a 256 -c "$(basename "$checksum")"
@@ -860,6 +888,11 @@ jobs:
           test -f "$checksum"
           test -f "$notes"
 
+          archive_bytes="$(wc -c < "$archive" | tr -d ' ')"
+          if [[ "$archive_bytes" -le 0 || "$archive_bytes" -gt "$SCHNEEBAR_MAX_RELEASE_ARCHIVE_BYTES" ]]; then
+            echo "Release archive size is outside the allowed bound: $archive_bytes bytes" >&2
+            exit 1
+          fi
           if find release-payload -type l -print -quit | grep -q .; then
             echo "Release payload must not contain symbolic links." >&2
             exit 1
