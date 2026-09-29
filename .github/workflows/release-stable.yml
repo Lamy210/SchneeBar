@@ -6,6 +6,8 @@ on:
       - ".github/workflows/release-stable.yml"
       - "Project.swift"
       - "docs/RELEASE.md"
+      - "docs/RELEASE_ASSET_PROVENANCE.md"
+      - "docs/PUBLIC_REPOSITORY_SECURITY.md"
       - "SECURITY.md"
       - "LICENSE"
       - "DISTRIBUTION_TERMS.md"
