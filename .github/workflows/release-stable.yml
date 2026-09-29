@@ -177,15 +177,14 @@ jobs:
             exit 1
           fi
 
-  build-sign-notarize:
-    name: Build, sign, and notarize stable app
+  build-stable-unsigned:
+    name: Build stable unsigned candidate
     if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
-    environment: release
     permissions:
       actions: read
       contents: read
     runs-on: macos-26
-    timeout-minutes: 60
+    timeout-minutes: 45
 
     steps:
       - name: Checkout
@@ -244,6 +243,119 @@ jobs:
             echo "Stable release requires docs/RELEASE_ASSET_PROVENANCE.md." >&2
             exit 1
           fi
+
+
+      - name: Package bounded unsigned signing input
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          app="$RUNNER_TEMP/SchneeBarStableDerivedData/Build/Products/Release/SchneeBar.app"
+          test -d "$app"
+
+          output_dir="$RUNNER_TEMP/stable-signing-input"
+          mkdir -p "$output_dir"
+          archive="$output_dir/SchneeBar-unsigned-signing-input.zip"
+          checksum="$archive.sha256"
+
+          ditto -c -k --sequesterRsrc --keepParent "$app" "$archive"
+          unzip -t "$archive"
+
+          (
+            cd "$output_dir"
+            shasum -a 256 "$(basename "$archive")" > "$(basename "$checksum")"
+            shasum -a 256 -c "$(basename "$checksum")"
+          )
+
+      - name: Upload bounded unsigned signing input
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: schneebar-stable-signing-input-${{ github.run_id }}
+          path: ${{ runner.temp }}/stable-signing-input
+          if-no-files-found: error
+          retention-days: 1
+
+  sign-notarize:
+    name: Sign and notarize stable app
+    needs: build-stable-unsigned
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    environment: release
+    permissions:
+      actions: read
+      contents: read
+    runs-on: macos-26
+    timeout-minutes: 45
+
+    steps:
+      - name: Download bounded unsigned signing input
+        uses: actions/download-artifact@70fc10c6e5e1ce46ad2ea6f2b72d43f7d47b13c3 # v8.0.0
+        with:
+          name: schneebar-stable-signing-input-${{ github.run_id }}
+          path: signing-input
+
+      - name: Verify bounded unsigned signing input
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+          EXPECTED_SHA: ${{ inputs.expected_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          test "$GITHUB_SHA" = "$EXPECTED_SHA"
+
+          if [[ ! "$RELEASE_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            echo "Refusing to sign a non-stable tag: $RELEASE_TAG" >&2
+            exit 1
+          fi
+
+          archive="signing-input/SchneeBar-unsigned-signing-input.zip"
+          checksum="$archive.sha256"
+          test -f "$archive"
+          test -f "$checksum"
+
+          if find signing-input -type l -print -quit | grep -q .; then
+            echo "Signing input must not contain symbolic links." >&2
+            exit 1
+          fi
+
+          file_count="$(find signing-input -type f | wc -l | tr -d ' ')"
+          if [[ "$file_count" != "2" ]]; then
+            echo "Unexpected signing-input file count: $file_count" >&2
+            find signing-input -type f -print >&2
+            exit 1
+          fi
+
+          (
+            cd signing-input
+            shasum -a 256 -c "$(basename "$checksum")"
+            unzip -t "$(basename "$archive")"
+          )
+
+          extract_dir="$RUNNER_TEMP/stable-signing-app"
+          mkdir -p "$extract_dir"
+          ditto -x -k "$archive" "$extract_dir"
+
+          app="$extract_dir/SchneeBar.app"
+          binary="$app/Contents/MacOS/SchneeBar"
+          marketing_version="$(printf '%s' "$RELEASE_TAG" | cut -c2-)"
+
+          test -d "$app"
+          test -x "$binary"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$app/Contents/Info.plist")" = "dev.lamy.schneebar"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app/Contents/Info.plist")" = "$marketing_version"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$app/Contents/Info.plist")" = "$GITHUB_RUN_NUMBER"
+
+          archs="$(lipo -archs "$binary")"
+          for arch in arm64 x86_64; do
+            if [[ " $archs " != *" $arch "* ]]; then
+              echo "Signing input is missing required architecture $arch; found: $archs" >&2
+              exit 1
+            fi
+          done
+
+          echo "SCHNEEBAR_STABLE_APP=$app" >> "$GITHUB_ENV"
+          echo "SCHNEEBAR_MARKETING_VERSION=$marketing_version" >> "$GITHUB_ENV"
+          echo "SCHNEEBAR_ARTIFACT_VERSION=$marketing_version" >> "$GITHUB_ENV"
 
       - name: Require signing and notarization secrets
         env:
@@ -366,7 +478,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          app="$RUNNER_TEMP/SchneeBarStableDerivedData/Build/Products/Release/SchneeBar.app"
+          app="$SCHNEEBAR_STABLE_APP"
           test -d "$app"
 
           for embedded in \
@@ -428,7 +540,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          app="$RUNNER_TEMP/SchneeBarStableDerivedData/Build/Products/Release/SchneeBar.app"
+          app="$SCHNEEBAR_STABLE_APP"
           submission="$RUNNER_TEMP/SchneeBar-notarization.zip"
           key="$RUNNER_TEMP/AuthKey_$APPLE_NOTARY_KEY_ID.p8"
 
@@ -450,7 +562,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          app="$RUNNER_TEMP/SchneeBarStableDerivedData/Build/Products/Release/SchneeBar.app"
+          app="$SCHNEEBAR_STABLE_APP"
 
           xcrun stapler staple "$app"
           xcrun stapler validate "$app"
@@ -461,25 +573,23 @@ jobs:
         id: package
         env:
           RELEASE_TAG: ${{ inputs.tag }}
-          MARKETING_VERSION: ${{ steps.version.outputs.marketing_version }}
-          ARTIFACT_VERSION: ${{ steps.version.outputs.artifact_version }}
         shell: bash
         run: |
           set -euo pipefail
 
-          app="$RUNNER_TEMP/SchneeBarStableDerivedData/Build/Products/Release/SchneeBar.app"
+          app="$SCHNEEBAR_STABLE_APP"
           actual_bundle_identifier="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$app/Contents/Info.plist")"
           actual_marketing_version="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app/Contents/Info.plist")"
           actual_build_number="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$app/Contents/Info.plist")"
 
           test "$actual_bundle_identifier" = "dev.lamy.schneebar"
-          test "$actual_marketing_version" = "$MARKETING_VERSION"
+          test "$actual_marketing_version" = "$SCHNEEBAR_MARKETING_VERSION"
           test "$actual_build_number" = "$GITHUB_RUN_NUMBER"
 
           output_dir="$RUNNER_TEMP/stable-release"
           mkdir -p "$output_dir"
 
-          archive="$output_dir/SchneeBar-$ARTIFACT_VERSION.zip"
+          archive="$output_dir/SchneeBar-$SCHNEEBAR_ARTIFACT_VERSION.zip"
           checksum="$archive.sha256"
           notes="$output_dir/release-notes.md"
 
@@ -500,7 +610,7 @@ jobs:
           - macOS 15 or later
           - Universal app: Apple Silicon (arm64) + Intel (x86_64)
           - Built from commit $GITHUB_SHA
-          - Marketing version: $MARKETING_VERSION
+          - Marketing version: $SCHNEEBAR_MARKETING_VERSION
           - Build number: $GITHUB_RUN_NUMBER
           - Developer ID signed with Hardened Runtime
           - Notarized and stapled by Apple
@@ -535,7 +645,7 @@ jobs:
 
   validate-stable-intel-runtime:
     name: Validate stable Intel runtime
-    needs: build-sign-notarize
+    needs: sign-notarize
     if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
     permissions:
       actions: read
@@ -628,7 +738,7 @@ jobs:
   publish-stable:
     name: Publish stable release
     needs:
-      - build-sign-notarize
+      - sign-notarize
       - validate-stable-intel-runtime
     if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
     environment: release
