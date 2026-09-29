@@ -127,6 +127,33 @@ func profileStoreRejectsSymlinkBackingFile() async throws {
 }
 
 @Test
+func profileStoreRejectsHardLinkedBackingFile() async throws {
+    let context = try temporaryProfileStore()
+    defer { try? FileManager.default.removeItem(at: context.directory) }
+
+    try FileManager.default.createDirectory(
+        at: context.directory,
+        withIntermediateDirectories: true
+    )
+    let target = context.directory.appendingPathComponent(
+        "target.json",
+        isDirectory: false
+    )
+    try Data(#"{"profiles":[],"schemaVersion":1}"#.utf8)
+        .write(to: target)
+    try FileManager.default.linkItem(
+        at: target,
+        to: context.fileURL
+    )
+
+    await #expect(
+        throws: GitHubConnectionProfileStoreError.invalidBackingFile
+    ) {
+        try await context.store.loadAll()
+    }
+}
+
+@Test
 func profileStoreRejectsDanglingSymlinkBackingFile() async throws {
     let context = try temporaryProfileStore()
     defer { try? FileManager.default.removeItem(at: context.directory) }
