@@ -98,11 +98,12 @@ public enum GitHubEndpointResolver {
             throw GitHubEndpointResolverError.pathNotAllowed
         }
 
-        if deploymentKind != .enterpriseServer {
-            guard components.port == nil || components.port == 443 else {
+        if let port = components.port {
+            if port == 443 {
+                components.port = nil
+            } else if deploymentKind != .enterpriseServer {
                 throw GitHubEndpointResolverError.nonStandardPortNotAllowed
             }
-            components.port = nil
         }
 
         components.scheme = "https"
