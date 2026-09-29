@@ -87,6 +87,20 @@ func resolvesEnterpriseServerEndpoints() throws {
 }
 
 @Test
+func normalizesExplicitDefaultEnterpriseServerHTTPSPort() throws {
+    let endpoints = try GitHubEndpointResolver.resolve(
+        deploymentKind: .enterpriseServer,
+        webBaseURL: #require(
+            URL(string: "https://github.internal.example:443/")
+        )
+    )
+
+    #expect(endpoints.webBaseURL.absoluteString == "https://github.internal.example")
+    #expect(endpoints.restBaseURL.absoluteString == "https://github.internal.example/api/v3")
+    #expect(endpoints.graphQLURL.absoluteString == "https://github.internal.example/api/graphql")
+}
+
+@Test
 func preservesExplicitEnterpriseServerHTTPSPort() throws {
     let endpoints = try GitHubEndpointResolver.resolve(
         deploymentKind: .enterpriseServer,
@@ -112,6 +126,31 @@ func rejectsUnsafeOrAmbiguousEnterpriseServerURLs(rawURL: String) throws {
             webBaseURL: url
         )
     }
+}
+
+@Test(arguments: [
+    (
+        GitHubDeploymentKind.githubDotCom,
+        "https://github.com:443",
+        "https://github.com"
+    ),
+    (
+        GitHubDeploymentKind.gheDotCom,
+        "https://acme.ghe.com:443",
+        "https://acme.ghe.com"
+    ),
+])
+func normalizesExplicitDefaultPortForHostedGitHub(
+    deploymentKind: GitHubDeploymentKind,
+    rawURL: String,
+    expectedWebURL: String
+) throws {
+    let endpoints = try GitHubEndpointResolver.resolve(
+        deploymentKind: deploymentKind,
+        webBaseURL: try #require(URL(string: rawURL))
+    )
+
+    #expect(endpoints.webBaseURL.absoluteString == expectedWebURL)
 }
 
 @Test(arguments: [

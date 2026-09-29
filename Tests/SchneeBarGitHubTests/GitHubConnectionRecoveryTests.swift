@@ -103,7 +103,9 @@ func recoverMatchingAccountValidatesBeforeReplacingCredential() async throws {
     #expect(session.account.identity.id == expected.id)
     #expect(session.account.identity.login == "octocat-renamed")
     #expect(session.credentialKey == key)
-    #expect(await store.credential(for: key) == recoveryCredential)
+    let persisted = try #require(await store.credential(for: key))
+    #expect(persisted.accessToken == recoveryCredential.accessToken)
+    #expect(persisted.endpointIdentity == "https://github.com")
     #expect(await store.saves() == baselineSaves + 1)
     #expect(await store.deletes() == 0)
 }
@@ -246,7 +248,11 @@ func recoverOneAccountDoesNotMutateAnotherAccountOnSameEndpoint() async throws {
         credential: accountANew
     )
 
-    #expect(await store.credential(for: accountAKey) == accountANew)
+    let persistedA = try #require(
+        await store.credential(for: accountAKey)
+    )
+    #expect(persistedA.accessToken == accountANew.accessToken)
+    #expect(persistedA.endpointIdentity == "https://github.com")
     #expect(await store.credential(for: accountBKey) == accountBOld)
 }
 

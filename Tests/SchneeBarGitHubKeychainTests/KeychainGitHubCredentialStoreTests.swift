@@ -19,7 +19,8 @@ func keychainCredentialStoreRoundTripsUpdatesAndDeletesCredential() async throws
         accessToken: "test-access-token-1",
         refreshToken: "test-refresh-token-1",
         accessTokenExpiresAt: Date(timeIntervalSince1970: 1_000),
-        refreshTokenExpiresAt: Date(timeIntervalSince1970: 2_000)
+        refreshTokenExpiresAt: Date(timeIntervalSince1970: 2_000),
+        endpointIdentity: "https://github.internal.example"
     )
     try await store.save(first, for: key)
     #expect(try await store.load(for: key) == first)
@@ -28,7 +29,8 @@ func keychainCredentialStoreRoundTripsUpdatesAndDeletesCredential() async throws
         accessToken: "test-access-token-2",
         refreshToken: "test-refresh-token-2",
         accessTokenExpiresAt: Date(timeIntervalSince1970: 3_000),
-        refreshTokenExpiresAt: Date(timeIntervalSince1970: 4_000)
+        refreshTokenExpiresAt: Date(timeIntervalSince1970: 4_000),
+        endpointIdentity: "https://github.com"
     )
     try await store.save(updated, for: key)
     #expect(try await store.load(for: key) == updated)

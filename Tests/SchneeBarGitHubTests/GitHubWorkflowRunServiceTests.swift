@@ -141,6 +141,42 @@ func missingCredentialFailsBeforeActionsRequest() async throws {
 }
 
 @Test
+func actionsPollingRejectsMismatchedGHESCredentialBeforeRequest() async throws {
+    let connection = try serviceEnterpriseConnection()
+    let identity = GitHubAccountIdentity(id: "100", login: "octocat")
+    let key = GitHubCredentialKey(connectionID: connection.id, accountID: identity.id)
+    let credentialStore = ServiceCredentialStore()
+    try await credentialStore.save(
+        GitHubCredential(
+            accessToken: "ghes-service-token",
+            endpointIdentity: "https://redirected.internal.example"
+        ),
+        for: key
+    )
+
+    let actionsTransport = ServiceQueueTransport([])
+    let service = GitHubWorkflowRunService(
+        sessionCoordinator: GitHubConnectionSessionCoordinator(
+            credentialStore: credentialStore
+        ),
+        actionsClient: GitHubActionsClient(transport: actionsTransport)
+    )
+
+    await #expect(
+        throws: GitHubConnectionSessionError.reauthenticationRequired
+    ) {
+        try await service.workflowRuns(
+            connection: connection,
+            identity: identity,
+            clientID: nil,
+            repository: try serviceEnterpriseRepository()
+        )
+    }
+
+    #expect(await actionsTransport.recordedRequests().isEmpty)
+}
+
+@Test
 func actionsPollingRefreshesExpiringCredentialWithoutInventoryDiscovery() async throws {
     let now = Date(timeIntervalSince1970: 1_789_200_000)
     let connection = try serviceConnection()
@@ -200,6 +236,7 @@ func actionsPollingRefreshesExpiringCredentialWithoutInventoryDiscovery() async 
     let persisted = try #require(try await credentialStore.load(for: key))
     #expect(persisted.accessToken == "new_access")
     #expect(persisted.refreshToken == "new_refresh")
+    #expect(persisted.endpointIdentity == "https://github.com")
 }
 
 @Test
@@ -275,6 +312,31 @@ private func serviceConnection() throws -> GitHubConnection {
         displayName: "GitHub.com",
         deploymentKind: .githubDotCom,
         webBaseURL: try #require(URL(string: "https://github.com"))
+    )
+}
+
+private func serviceEnterpriseConnection() throws -> GitHubConnection {
+    GitHubConnection(
+        id: UUID(uuidString: "30000000-0000-0000-0000-000000000002")!,
+        displayName: "Internal GitHub",
+        deploymentKind: .enterpriseServer,
+        webBaseURL: try #require(
+            URL(string: "https://github.internal.example")
+        )
+    )
+}
+
+private func serviceEnterpriseRepository() throws -> GitHubRepositoryAccess {
+    GitHubRepositoryAccess(
+        id: 43,
+        name: "project",
+        fullName: "octocat/project",
+        isPrivate: true,
+        webURL: try #require(
+            URL(string: "https://github.internal.example/octocat/project")
+        ),
+        ownerLogin: "octocat",
+        permissions: GitHubRepositoryPermissions(pull: true)
     )
 }
 
