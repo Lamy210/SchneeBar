@@ -94,7 +94,7 @@ func rebindEstablishedGHESSessionPreservesEndpointBinding() async throws {
         displayName: "Existing GHES",
         deploymentKind: .enterpriseServer,
         webBaseURL: try #require(
-            URL(string: "https://github.internal.example")
+            URL(string: "https://github.internal.example:443")
         )
     )
     let identity = GitHubAccountIdentity(
