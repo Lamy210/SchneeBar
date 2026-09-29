@@ -100,6 +100,78 @@ func unsupportedSchemaVersionIsRejectedWithoutOverwritingFile() async throws {
 }
 
 @Test
+func profileStoreRejectsSymlinkBackingFile() async throws {
+    let context = try temporaryProfileStore()
+    defer { try? FileManager.default.removeItem(at: context.directory) }
+
+    try FileManager.default.createDirectory(
+        at: context.directory,
+        withIntermediateDirectories: true
+    )
+    let target = context.directory.appendingPathComponent(
+        "target.json",
+        isDirectory: false
+    )
+    try Data(#"{"profiles":[],"schemaVersion":1}"#.utf8)
+        .write(to: target)
+    try FileManager.default.createSymbolicLink(
+        at: context.fileURL,
+        withDestinationURL: target
+    )
+
+    await #expect(
+        throws: GitHubConnectionProfileStoreError.invalidBackingFile
+    ) {
+        try await context.store.loadAll()
+    }
+}
+
+@Test
+func profileStoreRejectsOversizedBackingFileBeforeDecode() async throws {
+    let context = try temporaryProfileStore()
+    defer { try? FileManager.default.removeItem(at: context.directory) }
+
+    try FileManager.default.createDirectory(
+        at: context.directory,
+        withIntermediateDirectories: true
+    )
+    #expect(
+        FileManager.default.createFile(
+            atPath: context.fileURL.path,
+            contents: nil
+        )
+    )
+    let handle = try FileHandle(forWritingTo: context.fileURL)
+    defer { try? handle.close() }
+    try handle.truncate(
+        atOffset: UInt64(8 * 1024 * 1024 + 1)
+    )
+
+    await #expect(
+        throws: GitHubConnectionProfileStoreError.payloadTooLarge
+    ) {
+        try await context.store.loadAll()
+    }
+}
+
+@Test
+func profileStoreRejectsDirectoryBackingPath() async throws {
+    let context = try temporaryProfileStore()
+    defer { try? FileManager.default.removeItem(at: context.directory) }
+
+    try FileManager.default.createDirectory(
+        at: context.fileURL,
+        withIntermediateDirectories: true
+    )
+
+    await #expect(
+        throws: GitHubConnectionProfileStoreError.invalidBackingFile
+    ) {
+        try await context.store.loadAll()
+    }
+}
+
+@Test
 func repositoryMonitoringSelectionHonorsAllAndSelectedModes() {
     #expect(GitHubRepositoryMonitoringSelection.allAccessible.includes(repositoryID: 999))
 
