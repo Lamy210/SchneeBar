@@ -165,6 +165,7 @@ public struct ExternalWidgetDirectoryLoader: Sendable {
         defer {
             Darwin.close(ownerDescriptor)
         }
+        try validateAppOwnedDirectory(ownerDescriptor)
 
         let rootDescriptor = rootName.withCString {
             Darwin.openat(
@@ -176,7 +177,33 @@ public struct ExternalWidgetDirectoryLoader: Sendable {
         guard rootDescriptor >= 0 else {
             return try rootOpenFailure()
         }
+
+        do {
+            try validateAppOwnedDirectory(rootDescriptor)
+        } catch {
+            Darwin.close(rootDescriptor)
+            throw error
+        }
         return rootDescriptor
+    }
+
+    private func validateAppOwnedDirectory(
+        _ fileDescriptor: Int32
+    ) throws {
+        var metadata = stat()
+        guard Darwin.fstat(fileDescriptor, &metadata) == 0 else {
+            throw ExternalWidgetDirectoryLoaderError.rootUnavailable
+        }
+
+        let writableByOthers = metadata.st_mode
+            & mode_t(S_IWGRP | S_IWOTH)
+
+        guard fileType(of: metadata) == mode_t(S_IFDIR),
+              metadata.st_uid == Darwin.geteuid(),
+              writableByOthers == 0
+        else {
+            throw ExternalWidgetDirectoryLoaderError.unsafeRoot
+        }
     }
 
     private func rootOpenFailure() throws -> Int32? {
