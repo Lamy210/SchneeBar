@@ -27,18 +27,22 @@ public struct ExternalWidgetDirectoryLoader: Sendable {
 
     private let rootURL: URL
     private let adapter: ExternalWidgetDocumentAdapter
+    private let expectedOwnerUID: uid_t
 
     public init() {
         rootURL = Self.defaultRootURL
         adapter = .init()
+        expectedOwnerUID = Darwin.geteuid()
     }
 
     init(
         rootURL: URL,
-        adapter: ExternalWidgetDocumentAdapter = .init()
+        adapter: ExternalWidgetDocumentAdapter = .init(),
+        expectedOwnerUID: uid_t = Darwin.geteuid()
     ) {
         self.rootURL = rootURL
         self.adapter = adapter
+        self.expectedOwnerUID = expectedOwnerUID
     }
 
     static var defaultRootURL: URL {
@@ -200,7 +204,7 @@ public struct ExternalWidgetDirectoryLoader: Sendable {
             & mode_t(S_IWGRP | S_IWOTH)
 
         guard fileType(of: metadata) == mode_t(S_IFDIR),
-              metadata.st_uid == Darwin.geteuid(),
+              metadata.st_uid == expectedOwnerUID,
               writableByOthers == 0
         else {
             throw ExternalWidgetDirectoryLoaderError.unsafeRoot
