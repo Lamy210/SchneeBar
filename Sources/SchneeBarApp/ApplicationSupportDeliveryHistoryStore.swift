@@ -1,4 +1,3 @@
-import Darwin
 import Foundation
 import SchneeBarCore
 
@@ -105,66 +104,16 @@ actor ApplicationSupportDeliveryHistoryStore: DeliveryHistoryStoring {
     }
 
     private func readPersistedDataIfPresent() throws -> Data? {
-        var descriptor = Int32(-1)
-        let hasFileSystemRepresentation =
-            fileURL.withUnsafeFileSystemRepresentation { path in
-                guard let path else { return false }
-                descriptor = Darwin.open(
-                    path,
-                    O_RDONLY | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK
-                )
-                return true
-            }
-        guard hasFileSystemRepresentation else {
-            throw DeliveryHistoryStoreError.invalidBackingFile
-        }
-        guard descriptor >= 0 else {
-            if errno == ENOENT {
-                return nil
-            }
-            if errno == ELOOP {
-                throw DeliveryHistoryStoreError.invalidBackingFile
-            }
-            throw POSIXError(
-                POSIXErrorCode(rawValue: errno) ?? .EIO
+        do {
+            return try BoundedRegularFileReader.readIfPresent(
+                at: fileURL,
+                maximumBytes: Self.maximumPersistedBytes
             )
-        }
-
-        let handle = FileHandle(
-            fileDescriptor: descriptor,
-            closeOnDealloc: true
-        )
-        var metadata = stat()
-        guard fstat(descriptor, &metadata) == 0 else {
-            throw POSIXError(
-                POSIXErrorCode(rawValue: errno) ?? .EIO
-            )
-        }
-        guard metadata.st_mode & S_IFMT == S_IFREG,
-              metadata.st_nlink == 1
-        else {
+        } catch BoundedRegularFileReadError.unsafeBackingFile {
             throw DeliveryHistoryStoreError.invalidBackingFile
-        }
-        guard metadata.st_size >= 0,
-              metadata.st_size <= off_t(Self.maximumPersistedBytes)
-        else {
+        } catch BoundedRegularFileReadError.payloadTooLarge {
             throw DeliveryHistoryStoreError.payloadTooLarge
         }
-
-        var data = Data()
-        while data.count <= Self.maximumPersistedBytes {
-            let remaining = Self.maximumPersistedBytes + 1 - data.count
-            guard let chunk = try handle.read(upToCount: remaining),
-                  !chunk.isEmpty
-            else {
-                break
-            }
-            data.append(chunk)
-        }
-        guard data.count <= Self.maximumPersistedBytes else {
-            throw DeliveryHistoryStoreError.payloadTooLarge
-        }
-        return data
     }
 
     private func writePayload(
