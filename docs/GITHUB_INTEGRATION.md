@@ -23,11 +23,6 @@ The model must support multiple simultaneous connections:
 
 No production code should assume `api.github.com` globally.
 
-For GHE.com, the configured web origin must be the dedicated tenant host
-`SUBDOMAIN.ghe.com`. SchneeBar derives REST as
-`api.SUBDOMAIN.ghe.com`; service/nested hosts and tenant labels that are not
-valid DNS labels fail before authentication starts.
-
 A connection owns at minimum:
 
 - web base URL
@@ -82,6 +77,7 @@ Enterprise evidence rules:
 - Partial access is preserved when accessible installations coexist with explicit SSO-required installations.
 - EMU is not inferred from usernames, domains, GHE.com hosting, repository visibility, or generic access failures. No enterprise-admin/SCIM permission is requested solely to classify account type.
 - GHES REST API versions use the evidence-backed release compatibility matrix. Unknown/untested releases do not inherit the newest version by assumption.
+- GHES `/meta` `installed_version` is treated as untrusted provider evidence: it is whitespace-normalized, control-character rejected, bounded by an internal defensive UTF-8 budget, and malformed major/minor components remain `unknownVersion` rather than being promoted into the tested range.
 - SchneeBar does not probe an undocumented GHES `/api/v3/versions` endpoint. Runtime negotiation requires an authoritative endpoint contract or reproducible GHES fixture first.
 
 Connection health may still expose operational states such as SSO required, VPN/private-network unavailable, permission missing, untested server version, and rate limiting when the underlying provider evidence supports them.
