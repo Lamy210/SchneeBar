@@ -14,6 +14,7 @@ public struct GitHubEnterpriseServerVersion: Codable, Comparable, Equatable, Sen
     public init?(parsing rawValue: String) {
         let components = rawValue.split(
             separator: ".",
+            maxSplits: 2,
             omittingEmptySubsequences: false
         )
         guard (2 ... 3).contains(components.count),
@@ -61,15 +62,37 @@ public struct GitHubEnterpriseServerVersion: Codable, Comparable, Equatable, Sen
     }
 
     private static func leadingInteger(in component: Substring) -> Int? {
-        let digits = component.utf8.prefix(while: {
+        let bytes = Array(component.utf8)
+        let digitCount = bytes.prefix(while: {
             $0 >= 48 && $0 <= 57
-        })
-        guard !digits.isEmpty,
-              let value = String(bytes: digits, encoding: .utf8)
-        else {
+        }).count
+
+        guard digitCount > 0 else {
             return nil
         }
-        return Int(value)
+
+        if digitCount < bytes.count {
+            let suffix = bytes[digitCount...]
+            guard let separator = suffix.first,
+                  separator == 45 || separator == 43,
+                  suffix.count > 1,
+                  suffix.dropFirst().allSatisfy(Self.isVersionSuffixByte)
+            else {
+                return nil
+            }
+        }
+
+        return Int(
+            String(decoding: bytes[..<digitCount], as: UTF8.self)
+        )
+    }
+
+    private static func isVersionSuffixByte(_ byte: UInt8) -> Bool {
+        (byte >= 48 && byte <= 57)
+            || (byte >= 65 && byte <= 90)
+            || (byte >= 97 && byte <= 122)
+            || byte == 45
+            || byte == 46
     }
 }
 
