@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 import SchneeBarCore
 @testable import SchneeBarExternalWidgets
@@ -118,6 +119,24 @@ func rejectsSymlinkedRootDirectory() async throws {
     ) {
         try await ExternalWidgetDirectoryLoader(
             rootURL: fixture.rootURL
+        ).load()
+    }
+}
+
+@Test
+func rejectsTrustedParentOwnedByUnexpectedUser() async throws {
+    let fixture = try LoaderDirectoryFixture()
+    defer { fixture.cleanup() }
+
+    let currentUID = Darwin.geteuid()
+    let unexpectedUID: uid_t = currentUID == 0 ? 1 : 0
+
+    await #expect(
+        throws: ExternalWidgetDirectoryLoaderError.unsafeRoot
+    ) {
+        try await ExternalWidgetDirectoryLoader(
+            rootURL: fixture.rootURL,
+            expectedOwnerUID: unexpectedUID
         ).load()
     }
 }
