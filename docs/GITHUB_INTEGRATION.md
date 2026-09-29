@@ -23,6 +23,11 @@ The model must support multiple simultaneous connections:
 
 No production code should assume `api.github.com` globally.
 
+For GHE.com, the configured web origin must be the dedicated tenant host
+`SUBDOMAIN.ghe.com`. SchneeBar derives REST as
+`api.SUBDOMAIN.ghe.com`; service/nested hosts and tenant labels that are not
+valid DNS labels fail before authentication starts.
+
 A connection owns at minimum:
 
 - web base URL

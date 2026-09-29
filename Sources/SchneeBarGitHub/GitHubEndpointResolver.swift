@@ -130,9 +130,34 @@ public enum GitHubEndpointResolver {
         }
 
         let tenant = labels[0]
-        return !tenant.isEmpty
-            && tenant != "api"
+        return tenant != "api"
             && tenant != "auth"
+            && isValidDNSLabel(tenant)
+    }
+
+    private static func isValidDNSLabel(
+        _ label: Substring
+    ) -> Bool {
+        guard !label.isEmpty,
+              label.utf8.count <= 63,
+              let first = label.utf8.first,
+              let last = label.utf8.last,
+              isASCIIAlphaNumeric(first),
+              isASCIIAlphaNumeric(last)
+        else {
+            return false
+        }
+
+        return label.utf8.allSatisfy {
+            isASCIIAlphaNumeric($0) || $0 == 45
+        }
+    }
+
+    private static func isASCIIAlphaNumeric(
+        _ value: UInt8
+    ) -> Bool {
+        (value >= 48 && value <= 57)
+            || (value >= 97 && value <= 122)
     }
 
     private static func requireComponents(_ url: URL) throws -> URLComponents {
