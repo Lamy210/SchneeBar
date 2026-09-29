@@ -52,11 +52,9 @@ public actor ApplicationSupportGitHubConnectionProfileStore: GitHubConnectionPro
     }
 
     private func readProfiles() throws -> [GitHubConnectionProfile] {
-        guard fileManager.fileExists(atPath: fileURL.path) else {
+        guard let data = try readPersistedDataIfPresent() else {
             return []
         }
-
-        let data = try readPersistedData()
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
         let payload = try decoder.decode(PersistedProfiles.self, from: data)
@@ -66,7 +64,7 @@ public actor ApplicationSupportGitHubConnectionProfileStore: GitHubConnectionPro
         return payload.profiles
     }
 
-    private func readPersistedData() throws -> Data {
+    private func readPersistedDataIfPresent() throws -> Data? {
         var descriptor = Int32(-1)
         let hasFileSystemRepresentation =
             fileURL.withUnsafeFileSystemRepresentation { path in
@@ -81,6 +79,9 @@ public actor ApplicationSupportGitHubConnectionProfileStore: GitHubConnectionPro
             throw GitHubConnectionProfileStoreError.invalidBackingFile
         }
         guard descriptor >= 0 else {
+            if errno == ENOENT {
+                return nil
+            }
             if errno == ELOOP {
                 throw GitHubConnectionProfileStoreError.invalidBackingFile
             }
