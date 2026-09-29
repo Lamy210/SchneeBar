@@ -89,6 +89,7 @@ jobs:
           app="${RUNNER_TEMP}/SchneeBarReleaseValidation/Build/Products/Release/SchneeBar.app"
           test -d "${app}"
 
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "${app}/Contents/Info.plist")" = "dev.lamy.schneebar"
           test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "${app}/Contents/Info.plist")" = "0.1.0"
           test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "${app}/Contents/Info.plist")" = "1"
 
@@ -105,7 +106,7 @@ jobs:
           /usr/bin/codesign --verify --deep --strict --verbose=2 "${app}"
 
           archive="${RUNNER_TEMP}/SchneeBar-0.1.0-preview-validation.zip"
-          /usr/bin/ditto -c -k --sequesterRsrc --keepParent "${app}" "${archive}"
+          /usr/bin/ditto -c -k --keepParent "${app}" "${archive}"
           archive_bytes="$(wc -c < "${archive}" | tr -d ' ')"
           if [[ "${archive_bytes}" -le 0 || "${archive_bytes}" -gt "${SCHNEEBAR_MAX_RELEASE_ARCHIVE_BYTES}" ]]; then
             echo "Preview archive size is outside the allowed bound: ${archive_bytes} bytes" >&2
@@ -306,9 +307,14 @@ jobs:
             exit 1
           fi
 
+          actual_bundle_identifier="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "${app}/Contents/Info.plist")"
           actual_marketing_version="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "${app}/Contents/Info.plist")"
           actual_build_number="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "${app}/Contents/Info.plist")"
 
+          if [[ "${actual_bundle_identifier}" != "dev.lamy.schneebar" ]]; then
+            echo "Unexpected CFBundleIdentifier: ${actual_bundle_identifier}" >&2
+            exit 1
+          fi
           if [[ "${actual_marketing_version}" != "${MARKETING_VERSION}" ]]; then
             echo "Unexpected CFBundleShortVersionString: ${actual_marketing_version}" >&2
             exit 1
@@ -339,7 +345,7 @@ jobs:
           checksum="${archive}.sha256"
           notes="${output_dir}/release-notes.md"
 
-          /usr/bin/ditto -c -k --sequesterRsrc --keepParent "${app}" "${archive}"
+          /usr/bin/ditto -c -k --keepParent "${app}" "${archive}"
           archive_bytes="$(wc -c < "${archive}" | tr -d ' ')"
           if [[ "${archive_bytes}" -le 0 || "${archive_bytes}" -gt "${SCHNEEBAR_MAX_RELEASE_ARCHIVE_BYTES}" ]]; then
             echo "Preview archive size is outside the allowed bound: ${archive_bytes} bytes" >&2
