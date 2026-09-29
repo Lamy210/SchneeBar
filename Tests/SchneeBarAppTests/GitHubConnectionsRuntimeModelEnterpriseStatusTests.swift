@@ -34,7 +34,10 @@ private actor EnterpriseStatusCredentialStore: GitHubCredentialStore {
             connectionID: profile.id,
             accountID: profile.account.id
         )
-        credential = GitHubCredential(accessToken: "enterprise-status-token")
+        credential = GitHubCredential(
+            accessToken: "enterprise-status-token",
+            endpointIdentity: profile.connection.webBaseURL.absoluteString
+        )
     }
 
     func load(for key: GitHubCredentialKey) async throws -> GitHubCredential? {
