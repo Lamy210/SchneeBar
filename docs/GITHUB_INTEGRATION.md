@@ -82,7 +82,7 @@ Enterprise evidence rules:
 - Partial access is preserved when accessible installations coexist with explicit SSO-required installations.
 - EMU is not inferred from usernames, domains, GHE.com hosting, repository visibility, or generic access failures. No enterprise-admin/SCIM permission is requested solely to classify account type.
 - GHES REST API versions use the evidence-backed release compatibility matrix. Unknown/untested releases do not inherit the newest version by assumption.
-- GHES `/meta` `installed_version` is treated as untrusted provider evidence: it is whitespace-normalized, control-character rejected, bounded by an internal defensive UTF-8 budget, and malformed major/minor components remain `unknownVersion` rather than being promoted into the tested range.
+- GHES `/meta` `installed_version` is treated as untrusted provider evidence: it is whitespace-normalized, control-character rejected, bounded by an internal defensive UTF-8 budget, major/minor components must be strict ASCII integers, and any patch suffix must use an explicit `-` or `+` separator with non-empty ASCII semver-like identifiers. Ambiguous or malformed evidence remains `unknownVersion` rather than being promoted into the tested range.
 - SchneeBar does not probe an undocumented GHES `/api/v3/versions` endpoint. Runtime negotiation requires an authoritative endpoint contract or reproducible GHES fixture first.
 
 Connection health may still expose operational states such as SSO required, VPN/private-network unavailable, permission missing, untested server version, and rate limiting when the underlying provider evidence supports them.
