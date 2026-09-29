@@ -91,6 +91,47 @@ jobs:
             fi
           done
 
+      - name: Validate bounded signing handoff archive
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          app="$RUNNER_TEMP/SchneeBarStableValidation/Build/Products/Release/SchneeBar.app"
+          archive="$RUNNER_TEMP/SchneeBar-unsigned-signing-input-validation.zip"
+
+          ditto -c -k --keepParent "$app" "$archive"
+          unzip -t "$archive"
+
+          entry_count=0
+          while IFS= read -r entry; do
+            entry_count=$((entry_count + 1))
+
+            case "$entry" in
+              SchneeBar.app|SchneeBar.app/*) ;;
+              *)
+                echo "Unexpected signing-input archive entry: $entry" >&2
+                exit 1
+                ;;
+            esac
+
+            if [[ "$entry" == /* || "$entry" == *\\* ]]; then
+              echo "Unsafe signing-input archive path: $entry" >&2
+              exit 1
+            fi
+
+            case "/$entry/" in
+              */../*|*/./*)
+                echo "Unsafe signing-input archive traversal component: $entry" >&2
+                exit 1
+                ;;
+            esac
+          done < <(zipinfo -1 "$archive")
+
+          if [[ "$entry_count" -eq 0 ]]; then
+            echo "Signing-input archive must not be empty." >&2
+            exit 1
+          fi
+
   validate-stable-intel-build:
     name: Validate stable Intel build
     if: github.event_name == 'pull_request'
@@ -315,7 +356,7 @@ jobs:
           archive="$output_dir/SchneeBar-unsigned-signing-input.zip"
           checksum="$archive.sha256"
 
-          ditto -c -k --sequesterRsrc --keepParent "$app" "$archive"
+          ditto -c -k --keepParent "$app" "$archive"
           unzip -t "$archive"
 
           (
@@ -386,6 +427,36 @@ jobs:
             shasum -a 256 -c "$(basename "$checksum")"
             unzip -t "$(basename "$archive")"
           )
+
+          entry_count=0
+          while IFS= read -r entry; do
+            entry_count=$((entry_count + 1))
+
+            case "$entry" in
+              SchneeBar.app|SchneeBar.app/*) ;;
+              *)
+                echo "Unexpected signing-input archive entry: $entry" >&2
+                exit 1
+                ;;
+            esac
+
+            if [[ "$entry" == /* || "$entry" == *\\* ]]; then
+              echo "Unsafe signing-input archive path: $entry" >&2
+              exit 1
+            fi
+
+            case "/$entry/" in
+              */../*|*/./*)
+                echo "Unsafe signing-input archive traversal component: $entry" >&2
+                exit 1
+                ;;
+            esac
+          done < <(zipinfo -1 "$archive")
+
+          if [[ "$entry_count" -eq 0 ]]; then
+            echo "Signing-input archive must not be empty." >&2
+            exit 1
+          fi
 
           extract_dir="$RUNNER_TEMP/stable-signing-app"
           mkdir -p "$extract_dir"
