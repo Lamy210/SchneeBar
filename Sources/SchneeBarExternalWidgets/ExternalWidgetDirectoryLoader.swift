@@ -245,19 +245,22 @@ public struct ExternalWidgetDirectoryLoader: Sendable {
         )
 
         while status == 0 {
-            guard let entry else {
+            guard let currentEntry = entry else {
                 return true
             }
 
             var tag = acl_tag_t(0)
-            guard acl_get_tag_type(entry, &tag) == 0 else {
+            guard acl_get_tag_type(
+                currentEntry,
+                &tag
+            ) == 0 else {
                 return true
             }
 
             if tag == ACL_EXTENDED_ALLOW {
                 var permissionSet: acl_permset_t?
                 guard acl_get_permset(
-                    entry,
+                    currentEntry,
                     &permissionSet
                 ) == 0,
                 let permissionSet
@@ -279,6 +282,7 @@ public struct ExternalWidgetDirectoryLoader: Sendable {
                 }
             }
 
+            entry = nil
             status = acl_get_entry(
                 acl,
                 ACL_NEXT_ENTRY.rawValue,
