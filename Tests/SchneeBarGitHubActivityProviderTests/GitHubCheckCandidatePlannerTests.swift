@@ -143,6 +143,48 @@ func globalBudgetGivesEachRepositoryOneCandidateBeforeSecondCandidates() throws 
 }
 
 @Test
+func plannerPreservesProviderRepositoryPriority() throws {
+    let planner = GitHubCheckCandidatePlanner()
+    let repositories = [
+        try candidateRepository(id: 3, name: "gamma"),
+        try candidateRepository(id: 1, name: "alpha"),
+        try candidateRepository(id: 2, name: "beta"),
+    ]
+
+    let candidates = planner.candidates(
+        repositories: repositories,
+        reviewRequestsByRepositoryID: [
+            1: [
+                try candidateReview(
+                    number: 10,
+                    sha: String(repeating: "a", count: 40),
+                    updatedAt: 100
+                ),
+            ],
+            2: [
+                try candidateReview(
+                    number: 20,
+                    sha: String(repeating: "b", count: 40),
+                    updatedAt: 100
+                ),
+            ],
+            3: [
+                try candidateReview(
+                    number: 30,
+                    sha: String(repeating: "c", count: 40),
+                    updatedAt: 100
+                ),
+            ],
+        ],
+        workflowEvidenceByRepositoryID: [:],
+        maximumTotal: 2,
+        maximumPerRepository: 1
+    )
+
+    #expect(candidates.map(\.repositoryID) == [3, 1])
+}
+
+@Test
 func sparseRepositoriesDoNotWasteGlobalCheckBudget() throws {
     let planner = GitHubCheckCandidatePlanner()
     let repositories = [
