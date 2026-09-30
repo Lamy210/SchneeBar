@@ -285,7 +285,7 @@ func reenabledCheckCapabilityReentersPollingAsColdRepository() async throws {
     let requestedRepositoryIDs = await checks.repositoryIDs()
     #expect(Set(requestedRepositoryIDs.prefix(2)) == Set([1, 2]))
     #expect(Set(requestedRepositoryIDs.dropFirst(2).prefix(2)) == Set([3, 4]))
-    #expect(Set(requestedRepositoryIDs.suffix(2)).contains(1))
+    #expect(Set(requestedRepositoryIDs.suffix(2)) == Set([1, 2]))
 }
 
 @Test
