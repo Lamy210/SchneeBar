@@ -176,10 +176,29 @@ public actor GitHubActivityProvider {
             workflowSelection.repositories,
             profile: profile
         )
+        workflowPollState = stateRecordingPollAttempts(
+            connectionID: profile.id,
+            repositoryIDs: workflowOutcomes.map(\.repositoryID),
+            timestamp: timestamp,
+            state: workflowPollState
+        )
+        guard !Task.isCancelled else {
+            return lastResultByConnectionID[profile.id] ?? .empty
+        }
+
         let reviewOutcomes = await loadReviewRepositories(
             reviewSelection.repositories,
             profile: profile
         )
+        reviewPollState = stateRecordingPollAttempts(
+            connectionID: profile.id,
+            repositoryIDs: reviewOutcomes.map(\.repositoryID),
+            timestamp: timestamp,
+            state: reviewPollState
+        )
+        guard !Task.isCancelled else {
+            return lastResultByConnectionID[profile.id] ?? .empty
+        }
 
         guard generationByConnectionID[profile.id, default: 0] == generation else {
             return lastResultByConnectionID[profile.id] ?? .empty
@@ -275,14 +294,6 @@ public actor GitHubActivityProvider {
                 maximumTotal: maximumCheckTargetsPerRefresh,
                 maximumPerRepository: maximumCheckTargetsPerRepository
             )
-            for candidate in checkCandidates {
-                let key = RepositoryPollKey(
-                    connectionID: profile.id,
-                    repositoryID: candidate.repositoryID
-                )
-                checkPollSequenceByRepository[key] = nextCheckPollSequence
-                nextCheckPollSequence &+= 1
-            }
             let validCandidateKeys = validCachedCheckCandidateKeys(
                 connectionID: profile.id,
                 repositories: checkEligible,
@@ -315,6 +326,14 @@ public actor GitHubActivityProvider {
             visibleWorkflowSHAsByRepositoryID: visibleWorkflowSHAsByRepositoryID,
             profile: profile
         )
+        recordCheckPollAttempts(
+            connectionID: profile.id,
+            candidates: checkCandidates,
+            outcomes: checkOutcomes
+        )
+        guard !Task.isCancelled else {
+            return lastResultByConnectionID[profile.id] ?? .empty
+        }
 
         guard generationByConnectionID[profile.id, default: 0] == generation else {
             return lastResultByConnectionID[profile.id] ?? .empty
@@ -499,11 +518,49 @@ public actor GitHubActivityProvider {
             )
         }
 
-        for repository in selected {
-            let key = RepositoryPollKey(connectionID: connectionID, repositoryID: repository.id)
+        return RepositoryRefreshSelection(repositories: selected, state: updatedState)
+    }
+
+    private func stateRecordingPollAttempts(
+        connectionID: UUID,
+        repositoryIDs: [Int64],
+        timestamp: Date,
+        state: [RepositoryPollKey: RepositoryPollState]
+    ) -> [RepositoryPollKey: RepositoryPollState] {
+        var updatedState = state
+        for repositoryID in repositoryIDs {
+            let key = RepositoryPollKey(
+                connectionID: connectionID,
+                repositoryID: repositoryID
+            )
             updatedState[key, default: RepositoryPollState()].lastPolledAt = timestamp
         }
-        return RepositoryRefreshSelection(repositories: selected, state: updatedState)
+        return updatedState
+    }
+
+    private func recordCheckPollAttempts(
+        connectionID: UUID,
+        candidates: [GitHubCheckCandidate],
+        outcomes: [CheckLoadOutcome]
+    ) {
+        let attemptedKeys = Set(outcomes.map(\.key))
+        for candidate in candidates {
+            let candidateKey = CheckPollKey(
+                connectionID: connectionID,
+                repositoryID: candidate.repositoryID,
+                headSHA: candidate.headSHA
+            )
+            guard attemptedKeys.contains(candidateKey) else {
+                continue
+            }
+
+            let repositoryKey = RepositoryPollKey(
+                connectionID: connectionID,
+                repositoryID: candidate.repositoryID
+            )
+            checkPollSequenceByRepository[repositoryKey] = nextCheckPollSequence
+            nextCheckPollSequence &+= 1
+        }
     }
 
     private func checkCandidateSort(
@@ -999,11 +1056,16 @@ public actor GitHubActivityProvider {
             var iterator = elements.makeIterator()
             var activeTasks = 0
 
-            while activeTasks < maximumConcurrent,
+            while !Task.isCancelled,
+                  activeTasks < maximumConcurrent,
                   let element = iterator.next()
             {
                 group.addTask { await loadOne(element) }
                 activeTasks += 1
+            }
+
+            if Task.isCancelled {
+                group.cancelAll()
             }
 
             var outcomes: [Outcome] = []
@@ -1011,6 +1073,12 @@ public actor GitHubActivityProvider {
             while let outcome = await group.next() {
                 outcomes.append(outcome)
                 activeTasks -= 1
+
+                if Task.isCancelled {
+                    group.cancelAll()
+                    continue
+                }
+
                 if let element = iterator.next() {
                     group.addTask { await loadOne(element) }
                     activeTasks += 1
@@ -1162,4 +1230,36 @@ private enum ReviewLoadOutcome: Sendable {
 private enum CheckLoadOutcome: Sendable {
     case success(key: CheckPollKey, activities: [ActivityItem])
     case failure(key: CheckPollKey, failure: GitHubActivityTargetFailure)
+}
+
+private extension WorkflowLoadOutcome {
+    var repositoryID: Int64 {
+        switch self {
+        case let .success(repository, _, _, _):
+            repository.id
+        case let .failure(failure):
+            failure.repositoryID
+        }
+    }
+}
+
+private extension ReviewLoadOutcome {
+    var repositoryID: Int64 {
+        switch self {
+        case let .success(repositoryID, _):
+            repositoryID
+        case let .failure(failure):
+            failure.repositoryID
+        }
+    }
+}
+
+private extension CheckLoadOutcome {
+    var key: CheckPollKey {
+        switch self {
+        case let .success(key, _),
+             let .failure(key, _):
+            key
+        }
+    }
 }

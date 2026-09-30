@@ -153,6 +153,66 @@ private actor DeepFairBudgetReviewLoader: GitHubReviewRequestLoading {
     }
 }
 
+private actor BudgetCancellationGate {
+    private var isOpen = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    func wait() async {
+        if isOpen {
+            return
+        }
+        await withCheckedContinuation { continuation in
+            waiters.append(continuation)
+        }
+    }
+
+    func open() {
+        guard !isOpen else { return }
+        isOpen = true
+        let continuations = waiters
+        waiters.removeAll()
+        for continuation in continuations {
+            continuation.resume()
+        }
+    }
+}
+
+private actor CancellationAwareBudgetCheckLoader: GitHubCheckRunLoading {
+    private let releaseGate = BudgetCancellationGate()
+    private var calls: [Int64] = []
+    private var shouldBlock = true
+
+    func checkRuns(
+        connection: GitHubConnection,
+        identity: GitHubAccountIdentity,
+        clientID: String?,
+        repository: GitHubRepositoryAccess,
+        headSHA: String
+    ) async throws -> [GitHubCheckRun] {
+        calls.append(repository.id)
+        if shouldBlock {
+            await releaseGate.wait()
+            try Task.checkCancellation()
+        }
+        return []
+    }
+
+    func waitUntilCallCount(_ expectedCount: Int) async {
+        while calls.count < expectedCount {
+            await Task.yield()
+        }
+    }
+
+    func release() async {
+        shouldBlock = false
+        await releaseGate.open()
+    }
+
+    func repositoryIDs() -> [Int64] {
+        calls
+    }
+}
+
 private actor BudgetCheckLoader: GitHubCheckRunLoading {
     private var calls: [(Int64, String)] = []
 
@@ -289,6 +349,60 @@ func checkPollingRotatesSecondCandidateGrantsBetweenRefreshes() async throws {
     #expect(Array(requestedRepositoryIDs.prefix(4)) == [1, 2, 3, 1])
     #expect(Array(requestedRepositoryIDs.dropFirst(4).prefix(4)) == [2, 3, 1, 2])
     #expect(Array(requestedRepositoryIDs.suffix(4)) == [3, 1, 2, 3])
+}
+
+@Test
+func cancelledCheckRefreshStopsQueuedTargetsAndPrioritizesUnattemptedRepositories() async throws {
+    let repositories = try (1 ... 4).map { id in
+        try budgetRepository(id: Int64(id))
+    }
+    let checks = CancellationAwareBudgetCheckLoader()
+    let provider = GitHubActivityProvider(
+        workflowRunLoader: BudgetWorkflowLoader(),
+        reviewRequestLoader: FairBudgetReviewLoader(),
+        checkRunLoader: checks,
+        maximumConcurrentRepositories: 2,
+        maximumRepositoriesPerRefresh: 4,
+        maximumReviewRepositoriesPerRefresh: 4,
+        maximumCheckTargetsPerRefresh: 4,
+        maximumCheckTargetsPerRepository: 1,
+        minimumColdRepositoriesPerRefresh: 4,
+        minimumColdReviewRepositoriesPerRefresh: 4,
+        now: { Date(timeIntervalSince1970: 100) }
+    )
+    let profile = try budgetProfile()
+    let inventory = try budgetInventory(repositories: repositories)
+    let capabilities = budgetCapabilities(repositories: repositories)
+
+    let cancelledRefresh = Task {
+        await provider.load(
+            profile: profile,
+            inventory: inventory,
+            capabilities: capabilities
+        )
+    }
+
+    await checks.waitUntilCallCount(2)
+    cancelledRefresh.cancel()
+    await checks.release()
+    _ = await cancelledRefresh.value
+
+    let cancelledRepositoryIDs = await checks.repositoryIDs()
+    #expect(cancelledRepositoryIDs.count == 2)
+    #expect(Set(cancelledRepositoryIDs) == Set([1, 2]))
+
+    _ = await provider.load(
+        profile: profile,
+        inventory: inventory,
+        capabilities: capabilities
+    )
+
+    let requestedRepositoryIDs = await checks.repositoryIDs()
+    #expect(requestedRepositoryIDs.count == 6)
+    #expect(
+        Set(requestedRepositoryIDs.dropFirst(2).prefix(2))
+            == Set([3, 4])
+    )
 }
 
 @Test
