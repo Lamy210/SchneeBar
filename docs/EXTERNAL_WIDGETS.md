@@ -172,12 +172,12 @@ Safety policy:
 - a missing SchneeBar owner directory or `ExternalWidgets` directory is an empty collection;
 - the trusted Application Support anchor is opened as a directory without following its final component;
 - the app-owned `SchneeBar` and `ExternalWidgets` path components are opened step-by-step with `openat(..., O_DIRECTORY | O_NOFOLLOW)`, so a symlinked app-owned parent or root is rejected;
-- the trusted Application Support anchor and both app-owned directory descriptors must be owned by the effective user, must not be writable by group or other users, and must not carry a non-empty macOS extended ACL; unsafe ownership/permissions/ACLs fail closed before app-owned path traversal or document enumeration;
+- the trusted Application Support anchor and both app-owned directory descriptors must be owned by the effective user and must not be writable by group or other users; macOS extended ACLs are accepted only when they do not contain an ALLOW entry granting mutation rights such as write/append/delete/permission-change/ownership-change; unsafe ownership, BSD permissions, mutating ACL grants, or ACL inspection failures fail closed before app-owned path traversal or document enumeration;
 - directory entries are enumerated from a duplicated descriptor for the already-open root, not by resolving the path again;
 - child files are opened with `openat(..., O_NOFOLLOW | O_NONBLOCK)`;
 - only direct-child, case-sensitive `.json` filenames are considered;
 - symbolic links, hard links, and non-regular `.json` entries fail closed;
-- each opened `.json` document must be owned by the effective user, must not be writable by group or other users, and must not carry a non-empty macOS extended ACL;
+- each opened `.json` document must be owned by the effective user and must not be writable by group or other users; non-mutating or deny-only macOS ACL entries are allowed, while mutating ALLOW entries or ACL inspection failures fail closed;
 - JSON filenames are limited to 255 UTF-8 bytes and control characters are rejected before opening;
 - fd-based enumeration stops and fails closed after 256 direct directory entries, including non-JSON entries;
 - at most 32 JSON documents are accepted;
