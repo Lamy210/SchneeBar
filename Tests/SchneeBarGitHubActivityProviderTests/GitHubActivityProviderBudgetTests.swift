@@ -99,6 +99,32 @@ private actor BudgetReviewLoader: GitHubReviewRequestLoading {
     func count() -> Int { calls.count }
 }
 
+private actor FairBudgetReviewLoader: GitHubReviewRequestLoading {
+    func reviewRequests(
+        connection: GitHubConnection,
+        identity: GitHubAccountIdentity,
+        clientID: String?,
+        repository: GitHubRepositoryAccess
+    ) async throws -> [GitHubReviewRequest] {
+        [
+            GitHubReviewRequest(
+                number: Int(repository.id),
+                title: "Review \(repository.id)",
+                headSHA: String(
+                    format: "%040llx",
+                    repository.id * 100 + 1
+                ),
+                isDraft: false,
+                updatedAt: Date(timeIntervalSince1970: 100),
+                requestedReviewerIDs: ["42"],
+                webURL: repository.webURL.appendingPathComponent(
+                    "pull/\(repository.id)"
+                )
+            ),
+        ]
+    }
+}
+
 private actor BudgetCheckLoader: GitHubCheckRunLoading {
     private var calls: [(Int64, String)] = []
 
@@ -114,6 +140,10 @@ private actor BudgetCheckLoader: GitHubCheckRunLoading {
     }
 
     func count() -> Int { calls.count }
+
+    func repositoryIDs() -> [Int64] {
+        calls.map(\.0)
+    }
 }
 
 @Test
@@ -154,6 +184,46 @@ func periodicRefreshNeverExceedsSixteenActivitySourceListRequests() async throws
     #expect(result.surface(.workflows).attemptedTargetCount == 8)
     #expect(result.surface(.reviewRequests).attemptedTargetCount == 4)
     #expect(result.surface(.checks).attemptedTargetCount == 4)
+}
+
+@Test
+func checkPollingRotatesAcrossRepositoriesBetweenRefreshes() async throws {
+    let repositories = try (1 ... 6).map { id in
+        try budgetRepository(id: Int64(id))
+    }
+    let checks = BudgetCheckLoader()
+    let provider = GitHubActivityProvider(
+        workflowRunLoader: BudgetWorkflowLoader(),
+        reviewRequestLoader: FairBudgetReviewLoader(),
+        checkRunLoader: checks,
+        maximumConcurrentRepositories: 2,
+        maximumRepositoriesPerRefresh: 6,
+        maximumReviewRepositoriesPerRefresh: 6,
+        maximumCheckTargetsPerRefresh: 4,
+        maximumCheckTargetsPerRepository: 2,
+        minimumColdRepositoriesPerRefresh: 6,
+        minimumColdReviewRepositoriesPerRefresh: 6,
+        now: { Date(timeIntervalSince1970: 100) }
+    )
+    let profile = try budgetProfile()
+    let inventory = try budgetInventory(repositories: repositories)
+    let capabilities = budgetCapabilities(repositories: repositories)
+
+    _ = await provider.load(
+        profile: profile,
+        inventory: inventory,
+        capabilities: capabilities
+    )
+    _ = await provider.load(
+        profile: profile,
+        inventory: inventory,
+        capabilities: capabilities
+    )
+
+    let requestedRepositoryIDs = await checks.repositoryIDs()
+    #expect(Array(requestedRepositoryIDs.prefix(4)) == [1, 2, 3, 4])
+    #expect(Array(requestedRepositoryIDs.suffix(4)) == [5, 6, 1, 2])
+    #expect(Set(requestedRepositoryIDs) == Set(repositories.map(\.id)))
 }
 
 @Test
