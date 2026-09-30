@@ -206,13 +206,13 @@ public struct ExternalWidgetDirectoryLoader: Sendable {
         guard fileType(of: metadata) == mode_t(S_IFDIR),
               metadata.st_uid == expectedOwnerUID,
               writableByOthers == 0,
-              !hasExtendedACL(fileDescriptor)
+              !hasMutatingExtendedACL(fileDescriptor)
         else {
             throw ExternalWidgetDirectoryLoaderError.unsafeRoot
         }
     }
 
-    private func hasExtendedACL(
+    private func hasMutatingExtendedACL(
         _ fileDescriptor: Int32
     ) -> Bool {
         errno = 0
@@ -226,12 +226,67 @@ public struct ExternalWidgetDirectoryLoader: Sendable {
             acl_free(UnsafeMutableRawPointer(acl))
         }
 
+        let mutatingPermissions: [acl_perm_t] = [
+            ACL_WRITE_DATA,
+            ACL_APPEND_DATA,
+            ACL_DELETE,
+            ACL_DELETE_CHILD,
+            ACL_WRITE_ATTRIBUTES,
+            ACL_WRITE_EXTATTRIBUTES,
+            ACL_WRITE_SECURITY,
+            ACL_CHANGE_OWNER,
+        ]
+
         var entry: acl_entry_t?
-        return acl_get_entry(
+        var status = acl_get_entry(
             acl,
             ACL_FIRST_ENTRY.rawValue,
             &entry
-        ) == 0
+        )
+
+        while status == 0 {
+            guard let entry else {
+                return true
+            }
+
+            var tag = acl_tag_t(0)
+            guard acl_get_tag_type(entry, &tag) == 0 else {
+                return true
+            }
+
+            if tag == ACL_EXTENDED_ALLOW {
+                var permissionSet: acl_permset_t?
+                guard acl_get_permset(
+                    entry,
+                    &permissionSet
+                ) == 0,
+                let permissionSet
+                else {
+                    return true
+                }
+
+                for permission in mutatingPermissions {
+                    let result = acl_get_perm_np(
+                        permissionSet,
+                        permission
+                    )
+                    if result == 1 {
+                        return true
+                    }
+                    if result == -1 {
+                        return true
+                    }
+                }
+            }
+
+            status = acl_get_entry(
+                acl,
+                ACL_NEXT_ENTRY.rawValue,
+                &entry
+            )
+        }
+
+        return status == -1
     }
 
     private func rootOpenFailure() throws -> Int32? {
@@ -351,7 +406,7 @@ public struct ExternalWidgetDirectoryLoader: Sendable {
               metadata.st_nlink == 1,
               metadata.st_uid == expectedOwnerUID,
               writableByOthers == 0,
-              !hasExtendedACL(fileDescriptor)
+              !hasMutatingExtendedACL(fileDescriptor)
         else {
             throw ExternalWidgetDirectoryLoaderError
                 .unsafeDocumentEntry
