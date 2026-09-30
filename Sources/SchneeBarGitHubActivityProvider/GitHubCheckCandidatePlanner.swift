@@ -16,7 +16,6 @@ struct GitHubCheckCandidatePlanner: Sendable {
         guard maximumTotal > 0, maximumPerRepository > 0 else { return [] }
 
         let repositoryCandidates = repositories
-            .sorted(by: repositorySort)
             .map { repository in
                 candidates(
                     repository: repository,
@@ -93,16 +92,6 @@ struct GitHubCheckCandidatePlanner: Sendable {
         }
 
         return result
-    }
-
-    private func repositorySort(
-        lhs: GitHubRepositoryAccess,
-        rhs: GitHubRepositoryAccess
-    ) -> Bool {
-        if lhs.fullName != rhs.fullName {
-            return lhs.fullName < rhs.fullName
-        }
-        return lhs.id < rhs.id
     }
 
     private func reviewSort(
