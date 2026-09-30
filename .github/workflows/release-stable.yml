@@ -1,0 +1,1343 @@
+name: Release Stable
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/release-stable.yml"
+      - "Project.swift"
+      - "docs/RELEASE.md"
+      - "docs/RELEASE_ASSET_PROVENANCE.md"
+      - "docs/PUBLIC_REPOSITORY_SECURITY.md"
+      - "SECURITY.md"
+      - "LICENSE"
+      - "DISTRIBUTION_TERMS.md"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Stable tag, for example v0.1.0"
+        required: true
+        default: "v0.1.0"
+        type: string
+      expected_sha:
+        description: "Exact reviewed main commit SHA to release"
+        required: true
+        type: string
+
+env:
+  SCHNEEBAR_MAX_RELEASE_ARCHIVE_BYTES: "536870912"
+  SCHNEEBAR_MAX_RELEASE_UNCOMPRESSED_BYTES: "1073741824"
+  SCHNEEBAR_MAX_RELEASE_ARCHIVE_ENTRIES: "10000"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: >-
+    release-stable-${{
+      github.event_name == 'workflow_dispatch'
+      && inputs.tag
+      || format('pr-{0}', github.event.pull_request.number)
+    }}
+  # Supersede stale PR validation runs, but never cancel a manually
+  # dispatched stable release for the same tag.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  validate-stable-build:
+    name: Validate stable release build
+    if: github.event_name == 'pull_request'
+    runs-on: macos-26
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+
+      - name: Install pinned tools
+        uses: jdx/mise-action@9e7f7633ff6f6d6048a9418a68d48f288f50eb14 # v4.2.3
+        with:
+          version: "2026.9.5"
+          github_token: ""
+          cache_save: false
+
+      - name: Select Xcode 26.6
+        run: sudo xcode-select -s /Applications/Xcode_26.6.app/Contents/Developer
+
+      - name: Generate project
+        run: tuist generate
+
+      - name: Validate universal Release build
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          xcodebuild \
+            -project SchneeBar.xcodeproj \
+            -scheme SchneeBar \
+            -configuration Release \
+            -destination 'platform=macOS' \
+            -derivedDataPath "$RUNNER_TEMP/SchneeBarStableValidation" \
+            -skipMacroValidation \
+            CODE_SIGNING_ALLOWED=NO \
+            ONLY_ACTIVE_ARCH=NO \
+            ARCHS="arm64 x86_64" \
+            MARKETING_VERSION="0.1.0" \
+            CURRENT_PROJECT_VERSION="1" \
+            build
+
+          app="$RUNNER_TEMP/SchneeBarStableValidation/Build/Products/Release/SchneeBar.app"
+          test -d "$app"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$app/Contents/Info.plist")" = "dev.lamy.schneebar"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app/Contents/Info.plist")" = "0.1.0"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$app/Contents/Info.plist")" = "1"
+
+          binary="$app/Contents/MacOS/SchneeBar"
+          archs="$(lipo -archs "$binary")"
+          for arch in arm64 x86_64; do
+            if [[ " $archs " != *" $arch "* ]]; then
+              echo "Missing required architecture $arch; found: $archs" >&2
+              exit 1
+            fi
+          done
+
+      - name: Validate bounded signing handoff archive
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          app="$RUNNER_TEMP/SchneeBarStableValidation/Build/Products/Release/SchneeBar.app"
+          archive="$RUNNER_TEMP/SchneeBar-unsigned-signing-input-validation.zip"
+
+          ditto -c -k --keepParent "$app" "$archive"
+          archive_bytes="$(wc -c < "$archive" | tr -d ' ')"
+          if [[ "$archive_bytes" -le 0 || "$archive_bytes" -gt "$SCHNEEBAR_MAX_RELEASE_ARCHIVE_BYTES" ]]; then
+            echo "Release archive size is outside the allowed bound: $archive_bytes bytes" >&2
+            exit 1
+          fi
+          archive_totals="$(zipinfo -t "$archive")"
+          archive_entry_total="$(awk 'END {print $1}' <<< "$archive_totals")"
+          archive_uncompressed_bytes="$(awk 'END {print $3}' <<< "$archive_totals")"
+          if [[ ! "$archive_entry_total" =~ ^[0-9]+$ || ! "$archive_uncompressed_bytes" =~ ^[0-9]+$ ]]; then
+            echo "Could not parse release archive totals." >&2
+            printf '%s\n' "$archive_totals" >&2
+            exit 1
+          fi
+          if [[ "$archive_entry_total" -le 0 || "$archive_entry_total" -gt "$SCHNEEBAR_MAX_RELEASE_ARCHIVE_ENTRIES" ]]; then
+            echo "Release archive entry count is outside the allowed bound: $archive_entry_total" >&2
+            exit 1
+          fi
+          if [[ "$archive_uncompressed_bytes" -le 0 || "$archive_uncompressed_bytes" -gt "$SCHNEEBAR_MAX_RELEASE_UNCOMPRESSED_BYTES" ]]; then
+            echo "Release archive uncompressed size is outside the allowed bound: $archive_uncompressed_bytes bytes" >&2
+            exit 1
+          fi
+          unzip -t "$archive"
+
+          entry_count=0
+          while IFS= read -r entry; do
+            entry_count=$((entry_count + 1))
+            if [[ "$entry_count" -gt "$SCHNEEBAR_MAX_RELEASE_ARCHIVE_ENTRIES" ]]; then
+              echo "Signing-input archive has too many entries." >&2
+              exit 1
+            fi
+
+            case "$entry" in
+              SchneeBar.app|SchneeBar.app/*) ;;
+              *)
+                echo "Unexpected signing-input archive entry: $entry" >&2
+                exit 1
+                ;;
+            esac
+
+            if [[ "$entry" == /* || "$entry" == *\\* ]]; then
+              echo "Unsafe signing-input archive path: $entry" >&2
+              exit 1
+            fi
+            if [[ "$entry" =~ [[:cntrl:]] ]]; then
+              echo "Signing-input archive path contains control characters." >&2
+              exit 1
+            fi
+
+            case "/$entry/" in
+              */../*|*/./*)
+                echo "Unsafe signing-input archive traversal component: $entry" >&2
+                exit 1
+                ;;
+            esac
+          done < <(zipinfo -1 "$archive")
+
+          if [[ "$entry_count" -eq 0 ]]; then
+            echo "Signing-input archive must not be empty." >&2
+            exit 1
+          fi
+          if [[ "$entry_count" -ne "$archive_entry_total" ]]; then
+            echo "Signing-input archive entry enumeration is ambiguous or malformed." >&2
+            echo "zipinfo total: $archive_entry_total; enumerated lines: $entry_count" >&2
+            exit 1
+          fi
+
+          duplicate_entries="$(zipinfo -1 "$archive" | LC_ALL=C sort | uniq -d)"
+          if [[ -n "$duplicate_entries" ]]; then
+            echo "Signing-input archive contains duplicate entry paths." >&2
+            printf '%s\n' "$duplicate_entries" >&2
+            exit 1
+          fi
+
+          metadata_entry_count=0
+          while IFS= read -r metadata; do
+            mode="${metadata%% *}"
+            case "$mode" in
+              d?????????|-?????????)
+                metadata_entry_count=$((metadata_entry_count + 1))
+                ;;
+              l?????????|b?????????|c?????????|p?????????|s?????????)
+                echo "Signing-input archive contains an unsupported filesystem entry type: $mode" >&2
+                exit 1
+                ;;
+            esac
+          done < <(zipinfo -l "$archive")
+
+          if [[ "$metadata_entry_count" -ne "$archive_entry_total" ]]; then
+            echo "Signing-input archive entry metadata is ambiguous or unsupported." >&2
+            echo "zipinfo total: $archive_entry_total; typed entries: $metadata_entry_count" >&2
+            exit 1
+          fi
+
+  validate-stable-intel-build:
+    name: Validate stable Intel build
+    if: github.event_name == 'pull_request'
+    runs-on: macos-26-intel
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+
+      - name: Install pinned tools
+        uses: jdx/mise-action@9e7f7633ff6f6d6048a9418a68d48f288f50eb14 # v4.2.3
+        with:
+          version: "2026.9.5"
+          github_token: ""
+          cache_save: false
+
+      - name: Select Xcode 26.6
+        run: sudo xcode-select -s /Applications/Xcode_26.6.app/Contents/Developer
+
+      - name: Generate project
+        run: tuist generate
+
+      - name: Build and launch x86_64 Release app
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          test "$(uname -m)" = "x86_64"
+
+          xcodebuild \
+            -project SchneeBar.xcodeproj \
+            -scheme SchneeBar \
+            -configuration Release \
+            -destination 'platform=macOS' \
+            -derivedDataPath "$RUNNER_TEMP/SchneeBarStableIntelValidation" \
+            -skipMacroValidation \
+            CODE_SIGNING_ALLOWED=NO \
+            ONLY_ACTIVE_ARCH=YES \
+            ARCHS="x86_64" \
+            MARKETING_VERSION="0.1.0" \
+            CURRENT_PROJECT_VERSION="1" \
+            build
+
+          app="$RUNNER_TEMP/SchneeBarStableIntelValidation/Build/Products/Release/SchneeBar.app"
+          binary="$app/Contents/MacOS/SchneeBar"
+
+          test -d "$app"
+          test -x "$binary"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$app/Contents/Info.plist")" = "dev.lamy.schneebar"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app/Contents/Info.plist")" = "0.1.0"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$app/Contents/Info.plist")" = "1"
+
+          archs="$(lipo -archs "$binary")"
+          if [[ " $archs " != *" x86_64 "* ]]; then
+            echo "Intel validation build is missing x86_64: $archs" >&2
+            exit 1
+          fi
+
+          stdout="$RUNNER_TEMP/schneebar-pr-intel.stdout"
+          stderr="$RUNNER_TEMP/schneebar-pr-intel.stderr"
+          "$binary" >"$stdout" 2>"$stderr" &
+          pid=$!
+
+          cleanup() {
+            if kill -0 "$pid" 2>/dev/null; then
+              kill -TERM "$pid" 2>/dev/null || true
+              for _ in {1..20}; do
+                if ! kill -0 "$pid" 2>/dev/null; then
+                  break
+                fi
+                sleep 0.25
+              done
+              kill -KILL "$pid" 2>/dev/null || true
+            fi
+            wait "$pid" 2>/dev/null || true
+          }
+          trap cleanup EXIT
+
+          sleep 5
+          if ! kill -0 "$pid" 2>/dev/null; then
+            echo "SchneeBar exited before the PR Intel runtime smoke completed." >&2
+            cat "$stdout" >&2 || true
+            cat "$stderr" >&2 || true
+            exit 1
+          fi
+
+  build-stable-unsigned:
+    name: Build stable unsigned candidate
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    permissions:
+      actions: read
+      contents: read
+    runs-on: macos-26
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+
+      - name: Install pinned tools
+        uses: jdx/mise-action@9e7f7633ff6f6d6048a9418a68d48f288f50eb14 # v4.2.3
+        with:
+          version: "2026.9.5"
+          github_token: ""
+          cache_save: false
+
+      - name: Select Xcode 26.6
+        run: sudo xcode-select -s /Applications/Xcode_26.6.app/Contents/Developer
+
+      - name: Validate stable release input
+        id: version
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+          EXPECTED_SHA: ${{ inputs.expected_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ ! "$RELEASE_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            echo "Expected a stable tag such as v0.1.0" >&2
+            exit 1
+          fi
+          if [[ ! "$EXPECTED_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "expected_sha must be a full 40-character commit SHA" >&2
+            exit 1
+          fi
+          if [[ "$GITHUB_SHA" != "$EXPECTED_SHA" ]]; then
+            echo "Refusing to release unexpected main commit." >&2
+            echo "Expected: $EXPECTED_SHA" >&2
+            echo "Actual:   $GITHUB_SHA" >&2
+            exit 1
+          fi
+
+          marketing_version="$(printf '%s' "$RELEASE_TAG" | cut -c2-)"
+          echo "marketing_version=$marketing_version" >> "$GITHUB_OUTPUT"
+          echo "artifact_version=$marketing_version" >> "$GITHUB_OUTPUT"
+
+          if git ls-remote --exit-code --tags origin "refs/tags/$RELEASE_TAG" >/dev/null 2>&1; then
+            echo "Tag already exists: $RELEASE_TAG" >&2
+            exit 1
+          fi
+
+          if [[ ! -f LICENSE && ! -f DISTRIBUTION_TERMS.md ]]; then
+            echo "Stable release requires LICENSE or DISTRIBUTION_TERMS.md." >&2
+            exit 1
+          fi
+          if [[ ! -f docs/RELEASE_ASSET_PROVENANCE.md ]]; then
+            echo "Stable release requires docs/RELEASE_ASSET_PROVENANCE.md." >&2
+            exit 1
+          fi
+
+
+      - name: Verify exact-main push gates
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          for workflow in ci.yml codeql.yml; do
+            run_json="$(gh run list \
+              --commit "$GITHUB_SHA" \
+              --branch main \
+              --event push \
+              --workflow "$workflow" \
+              --limit 1 \
+              --json headSha,status,conclusion)"
+
+            if ! jq -e \
+              --arg sha "$GITHUB_SHA" \
+              'length == 1
+               and .[0].headSha == $sha
+               and .[0].status == "completed"
+               and .[0].conclusion == "success"' \
+              <<<"$run_json" >/dev/null; then
+              echo "Required push workflow is not green for $GITHUB_SHA: $workflow" >&2
+              echo "$run_json" >&2
+              exit 1
+            fi
+          done
+
+      - name: Generate project
+        run: tuist generate
+
+      - name: Test stable release candidate
+        run: tuist test -- -skipMacroValidation CODE_SIGNING_ALLOWED=NO
+
+      - name: Render deterministic release smoke
+        run: tuist run SchneeBarVisualSnapshotCLI -- --output "$RUNNER_TEMP/stable-visual-smoke"
+
+      - name: Build unsigned universal Release app
+        env:
+          MARKETING_VERSION: ${{ steps.version.outputs.marketing_version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcodebuild \
+            -project SchneeBar.xcodeproj \
+            -scheme SchneeBar \
+            -configuration Release \
+            -destination 'platform=macOS' \
+            -derivedDataPath "$RUNNER_TEMP/SchneeBarStableDerivedData" \
+            -skipMacroValidation \
+            CODE_SIGNING_ALLOWED=NO \
+            ONLY_ACTIVE_ARCH=NO \
+            ARCHS="arm64 x86_64" \
+            MARKETING_VERSION="$MARKETING_VERSION" \
+            CURRENT_PROJECT_VERSION="$GITHUB_RUN_NUMBER" \
+            build
+
+      - name: Package bounded unsigned signing input
+        env:
+          MARKETING_VERSION: ${{ steps.version.outputs.marketing_version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          app="$RUNNER_TEMP/SchneeBarStableDerivedData/Build/Products/Release/SchneeBar.app"
+          test -d "$app"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$app/Contents/Info.plist")" = "dev.lamy.schneebar"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app/Contents/Info.plist")" = "$MARKETING_VERSION"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$app/Contents/Info.plist")" = "$GITHUB_RUN_NUMBER"
+
+          output_dir="$RUNNER_TEMP/stable-signing-input"
+          mkdir -p "$output_dir"
+          archive="$output_dir/SchneeBar-unsigned-signing-input.zip"
+          checksum="$archive.sha256"
+
+          ditto -c -k --keepParent "$app" "$archive"
+          archive_bytes="$(wc -c < "$archive" | tr -d ' ')"
+          if [[ "$archive_bytes" -le 0 || "$archive_bytes" -gt "$SCHNEEBAR_MAX_RELEASE_ARCHIVE_BYTES" ]]; then
+            echo "Release archive size is outside the allowed bound: $archive_bytes bytes" >&2
+            exit 1
+          fi
+          archive_totals="$(zipinfo -t "$archive")"
+          archive_entry_total="$(awk 'END {print $1}' <<< "$archive_totals")"
+          archive_uncompressed_bytes="$(awk 'END {print $3}' <<< "$archive_totals")"
+          if [[ ! "$archive_entry_total" =~ ^[0-9]+$ || ! "$archive_uncompressed_bytes" =~ ^[0-9]+$ ]]; then
+            echo "Could not parse release archive totals." >&2
+            printf '%s\n' "$archive_totals" >&2
+            exit 1
+          fi
+          if [[ "$archive_entry_total" -le 0 || "$archive_entry_total" -gt "$SCHNEEBAR_MAX_RELEASE_ARCHIVE_ENTRIES" ]]; then
+            echo "Release archive entry count is outside the allowed bound: $archive_entry_total" >&2
+            exit 1
+          fi
+          if [[ "$archive_uncompressed_bytes" -le 0 || "$archive_uncompressed_bytes" -gt "$SCHNEEBAR_MAX_RELEASE_UNCOMPRESSED_BYTES" ]]; then
+            echo "Release archive uncompressed size is outside the allowed bound: $archive_uncompressed_bytes bytes" >&2
+            exit 1
+          fi
+          unzip -t "$archive"
+
+          (
+            cd "$output_dir"
+            shasum -a 256 "$(basename "$archive")" > "$(basename "$checksum")"
+            shasum -a 256 -c "$(basename "$checksum")"
+          )
+
+      - name: Upload bounded unsigned signing input
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: schneebar-stable-signing-input-${{ github.run_id }}
+          path: ${{ runner.temp }}/stable-signing-input
+          if-no-files-found: error
+          retention-days: 1
+
+  sign-notarize:
+    name: Sign and notarize stable app
+    needs: build-stable-unsigned
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    environment: release
+    permissions:
+      actions: read
+    runs-on: macos-26
+    timeout-minutes: 45
+
+    steps:
+      - name: Download bounded unsigned signing input
+        uses: actions/download-artifact@70fc10c6e5e1ce46ad2ea6f2b72d43f7d47b13c3 # v8.0.0
+        with:
+          name: schneebar-stable-signing-input-${{ github.run_id }}
+          path: signing-input
+
+      - name: Verify bounded unsigned signing input
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+          EXPECTED_SHA: ${{ inputs.expected_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          test "$GITHUB_SHA" = "$EXPECTED_SHA"
+
+          if [[ ! "$RELEASE_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            echo "Refusing to sign a non-stable tag: $RELEASE_TAG" >&2
+            exit 1
+          fi
+
+          archive="signing-input/SchneeBar-unsigned-signing-input.zip"
+          checksum="$archive.sha256"
+          test -f "$archive"
+          test -f "$checksum"
+
+          archive_bytes="$(wc -c < "$archive" | tr -d ' ')"
+          if [[ "$archive_bytes" -le 0 || "$archive_bytes" -gt "$SCHNEEBAR_MAX_RELEASE_ARCHIVE_BYTES" ]]; then
+            echo "Release archive size is outside the allowed bound: $archive_bytes bytes" >&2
+            exit 1
+          fi
+          archive_totals="$(zipinfo -t "$archive")"
+          archive_entry_total="$(awk 'END {print $1}' <<< "$archive_totals")"
+          archive_uncompressed_bytes="$(awk 'END {print $3}' <<< "$archive_totals")"
+          if [[ ! "$archive_entry_total" =~ ^[0-9]+$ || ! "$archive_uncompressed_bytes" =~ ^[0-9]+$ ]]; then
+            echo "Could not parse release archive totals." >&2
+            printf '%s\n' "$archive_totals" >&2
+            exit 1
+          fi
+          if [[ "$archive_entry_total" -le 0 || "$archive_entry_total" -gt "$SCHNEEBAR_MAX_RELEASE_ARCHIVE_ENTRIES" ]]; then
+            echo "Release archive entry count is outside the allowed bound: $archive_entry_total" >&2
+            exit 1
+          fi
+          if [[ "$archive_uncompressed_bytes" -le 0 || "$archive_uncompressed_bytes" -gt "$SCHNEEBAR_MAX_RELEASE_UNCOMPRESSED_BYTES" ]]; then
+            echo "Release archive uncompressed size is outside the allowed bound: $archive_uncompressed_bytes bytes" >&2
+            exit 1
+          fi
+          if find signing-input -type l -print -quit | grep -q .; then
+            echo "Signing input must not contain symbolic links." >&2
+            exit 1
+          fi
+
+          file_count="$(find signing-input -type f | wc -l | tr -d ' ')"
+          if [[ "$file_count" != "2" ]]; then
+            echo "Unexpected signing-input file count: $file_count" >&2
+            find signing-input -type f -print >&2
+            exit 1
+          fi
+
+          (
+            cd signing-input
+            shasum -a 256 -c "$(basename "$checksum")"
+            unzip -t "$(basename "$archive")"
+          )
+
+          entry_count=0
+          while IFS= read -r entry; do
+            entry_count=$((entry_count + 1))
+            if [[ "$entry_count" -gt "$SCHNEEBAR_MAX_RELEASE_ARCHIVE_ENTRIES" ]]; then
+              echo "Signing-input archive has too many entries." >&2
+              exit 1
+            fi
+
+            case "$entry" in
+              SchneeBar.app|SchneeBar.app/*) ;;
+              *)
+                echo "Unexpected signing-input archive entry: $entry" >&2
+                exit 1
+                ;;
+            esac
+
+            if [[ "$entry" == /* || "$entry" == *\\* ]]; then
+              echo "Unsafe signing-input archive path: $entry" >&2
+              exit 1
+            fi
+            if [[ "$entry" =~ [[:cntrl:]] ]]; then
+              echo "Signing-input archive path contains control characters." >&2
+              exit 1
+            fi
+
+            case "/$entry/" in
+              */../*|*/./*)
+                echo "Unsafe signing-input archive traversal component: $entry" >&2
+                exit 1
+                ;;
+            esac
+          done < <(zipinfo -1 "$archive")
+
+          if [[ "$entry_count" -eq 0 ]]; then
+            echo "Signing-input archive must not be empty." >&2
+            exit 1
+          fi
+          if [[ "$entry_count" -ne "$archive_entry_total" ]]; then
+            echo "Signing-input archive entry enumeration is ambiguous or malformed." >&2
+            echo "zipinfo total: $archive_entry_total; enumerated lines: $entry_count" >&2
+            exit 1
+          fi
+
+          duplicate_entries="$(zipinfo -1 "$archive" | LC_ALL=C sort | uniq -d)"
+          if [[ -n "$duplicate_entries" ]]; then
+            echo "Signing-input archive contains duplicate entry paths." >&2
+            printf '%s\n' "$duplicate_entries" >&2
+            exit 1
+          fi
+
+          metadata_entry_count=0
+          while IFS= read -r metadata; do
+            mode="${metadata%% *}"
+            case "$mode" in
+              d?????????|-?????????)
+                metadata_entry_count=$((metadata_entry_count + 1))
+                ;;
+              l?????????|b?????????|c?????????|p?????????|s?????????)
+                echo "Signing-input archive contains an unsupported filesystem entry type: $mode" >&2
+                exit 1
+                ;;
+            esac
+          done < <(zipinfo -l "$archive")
+
+          if [[ "$metadata_entry_count" -ne "$archive_entry_total" ]]; then
+            echo "Signing-input archive entry metadata is ambiguous or unsupported." >&2
+            echo "zipinfo total: $archive_entry_total; typed entries: $metadata_entry_count" >&2
+            exit 1
+          fi
+
+          extract_dir="$RUNNER_TEMP/stable-signing-app"
+          mkdir -p "$extract_dir"
+          ditto -x -k "$archive" "$extract_dir"
+
+          app="$extract_dir/SchneeBar.app"
+          binary="$app/Contents/MacOS/SchneeBar"
+          marketing_version="$(printf '%s' "$RELEASE_TAG" | cut -c2-)"
+
+          root_entry_count="$(find "$extract_dir" -mindepth 1 -maxdepth 1 -print | wc -l | tr -d ' ')"
+          if [[ "$root_entry_count" != "1" ]]; then
+            echo "Signing input must expand to exactly one root entry." >&2
+            find "$extract_dir" -mindepth 1 -maxdepth 1 -print >&2
+            exit 1
+          fi
+          if find "$extract_dir" -type l -print -quit | grep -q .; then
+            echo "Signing input must not contain symbolic links." >&2
+            find "$extract_dir" -type l -print >&2
+            exit 1
+          fi
+          if find "$extract_dir" ! -type f ! -type d -print -quit | grep -q .; then
+            echo "Signing input contains an unsupported filesystem entry." >&2
+            find "$extract_dir" ! -type f ! -type d -print >&2
+            exit 1
+          fi
+
+          test -d "$app"
+          test -x "$binary"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$app/Contents/Info.plist")" = "dev.lamy.schneebar"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app/Contents/Info.plist")" = "$marketing_version"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$app/Contents/Info.plist")" = "$GITHUB_RUN_NUMBER"
+
+          archs="$(lipo -archs "$binary")"
+          for arch in arm64 x86_64; do
+            if [[ " $archs " != *" $arch "* ]]; then
+              echo "Signing input is missing required architecture $arch; found: $archs" >&2
+              exit 1
+            fi
+          done
+
+          echo "SCHNEEBAR_STABLE_APP=$app" >> "$GITHUB_ENV"
+          echo "SCHNEEBAR_MARKETING_VERSION=$marketing_version" >> "$GITHUB_ENV"
+          echo "SCHNEEBAR_ARTIFACT_VERSION=$marketing_version" >> "$GITHUB_ENV"
+
+      - name: Require signing and notarization secrets
+        env:
+          APPLE_DEVELOPER_ID_P12_BASE64: ${{ secrets.APPLE_DEVELOPER_ID_P12_BASE64 }}
+          APPLE_DEVELOPER_ID_P12_PASSWORD: ${{ secrets.APPLE_DEVELOPER_ID_P12_PASSWORD }}
+          APPLE_DEVELOPER_ID_APPLICATION: ${{ secrets.APPLE_DEVELOPER_ID_APPLICATION }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_NOTARY_KEY_ID: ${{ secrets.APPLE_NOTARY_KEY_ID }}
+          APPLE_NOTARY_ISSUER_ID: ${{ secrets.APPLE_NOTARY_ISSUER_ID }}
+          APPLE_NOTARY_KEY_P8_BASE64: ${{ secrets.APPLE_NOTARY_KEY_P8_BASE64 }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          for name in \
+            APPLE_DEVELOPER_ID_P12_BASE64 \
+            APPLE_DEVELOPER_ID_P12_PASSWORD \
+            APPLE_DEVELOPER_ID_APPLICATION \
+            APPLE_TEAM_ID \
+            APPLE_NOTARY_KEY_ID \
+            APPLE_NOTARY_ISSUER_ID \
+            APPLE_NOTARY_KEY_P8_BASE64
+          do
+            if [[ -z "${!name}" ]]; then
+              echo "Missing required release secret: $name" >&2
+              exit 1
+            fi
+          done
+
+      - name: Import Developer ID certificate
+        env:
+          APPLE_DEVELOPER_ID_P12_BASE64: ${{ secrets.APPLE_DEVELOPER_ID_P12_BASE64 }}
+          APPLE_DEVELOPER_ID_P12_PASSWORD: ${{ secrets.APPLE_DEVELOPER_ID_P12_PASSWORD }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          keychain="$RUNNER_TEMP/schneebar-release.keychain-db"
+          keychain_password="$(openssl rand -hex 32)"
+          p12="$RUNNER_TEMP/developer-id.p12"
+
+          printf '%s' "$APPLE_DEVELOPER_ID_P12_BASE64" | base64 -D > "$p12"
+          chmod 600 "$p12"
+
+          security create-keychain -p "$keychain_password" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$keychain_password" "$keychain"
+          security import "$p12" \
+            -k "$keychain" \
+            -P "$APPLE_DEVELOPER_ID_P12_PASSWORD" \
+            -T /usr/bin/codesign
+          security set-key-partition-list \
+            -S apple-tool:,apple: \
+            -s \
+            -k "$keychain_password" \
+            "$keychain"
+          rm -f "$p12"
+          echo "SCHNEEBAR_SIGNING_KEYCHAIN=$keychain" >> "$GITHUB_ENV"
+
+      - name: Sign with Developer ID and Hardened Runtime
+        env:
+          APPLE_DEVELOPER_ID_APPLICATION: ${{ secrets.APPLE_DEVELOPER_ID_APPLICATION }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          app="$SCHNEEBAR_STABLE_APP"
+          test -d "$app"
+
+          for embedded in \
+            "$app/Contents/Frameworks" \
+            "$app/Contents/PlugIns" \
+            "$app/Contents/XPCServices" \
+            "$app/Contents/Helpers" \
+            "$app/Contents/Library/LoginItems" \
+            "$app/Contents/Library/LaunchServices"
+          do
+            if [[ -d "$embedded" ]] && find "$embedded" -mindepth 1 -print -quit | grep -q .; then
+              echo "Unexpected embedded runtime code requires an explicit stable-release audit: $embedded" >&2
+              find "$embedded" -mindepth 1 -maxdepth 2 -print >&2
+              exit 1
+            fi
+          done
+
+          binary="$app/Contents/MacOS/SchneeBar"
+          archs="$(lipo -archs "$binary")"
+          for arch in arm64 x86_64; do
+            if [[ " $archs " != *" $arch "* ]]; then
+              echo "Missing required architecture $arch; found: $archs" >&2
+              exit 1
+            fi
+          done
+
+          codesign \
+            --force \
+            --options runtime \
+            --timestamp \
+            --keychain "$SCHNEEBAR_SIGNING_KEYCHAIN" \
+            --sign "$APPLE_DEVELOPER_ID_APPLICATION" \
+            "$app"
+
+          codesign --verify --deep --strict --verbose=2 "$app"
+
+          signature="$(codesign -dv --verbose=4 "$app" 2>&1)"
+          printf '%s\n' "$signature"
+
+          grep -F "Authority=$APPLE_DEVELOPER_ID_APPLICATION" <<<"$signature" >/dev/null
+          grep -F "TeamIdentifier=$APPLE_TEAM_ID" <<<"$signature" >/dev/null
+          grep -E 'flags=0x[0-9a-fA-F]+\(runtime\)' <<<"$signature" >/dev/null
+
+          entitlements="$RUNNER_TEMP/signed-entitlements.plist"
+          : > "$entitlements"
+          codesign -d --entitlements :- "$app" >"$entitlements" 2>/dev/null || true
+          if grep -q '<key>' "$entitlements"; then
+            echo "Unexpected signing entitlements are present." >&2
+            cat "$entitlements" >&2
+            exit 1
+          fi
+
+      - name: Submit for notarization
+        env:
+          APPLE_NOTARY_KEY_ID: ${{ secrets.APPLE_NOTARY_KEY_ID }}
+          APPLE_NOTARY_ISSUER_ID: ${{ secrets.APPLE_NOTARY_ISSUER_ID }}
+          APPLE_NOTARY_KEY_P8_BASE64: ${{ secrets.APPLE_NOTARY_KEY_P8_BASE64 }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          app="$SCHNEEBAR_STABLE_APP"
+          submission="$RUNNER_TEMP/SchneeBar-notarization.zip"
+          key="$RUNNER_TEMP/AuthKey_$APPLE_NOTARY_KEY_ID.p8"
+
+          printf '%s' "$APPLE_NOTARY_KEY_P8_BASE64" | base64 -D > "$key"
+          chmod 600 "$key"
+
+          ditto -c -k --keepParent "$app" "$submission"
+
+          xcrun notarytool submit "$submission" \
+            --key "$key" \
+            --key-id "$APPLE_NOTARY_KEY_ID" \
+            --issuer "$APPLE_NOTARY_ISSUER_ID" \
+            --wait
+
+          rm -f "$key" "$submission"
+
+      - name: Staple and assess
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          app="$SCHNEEBAR_STABLE_APP"
+
+          xcrun stapler staple "$app"
+          xcrun stapler validate "$app"
+          spctl --assess --type execute --verbose=4 "$app"
+          codesign --verify --deep --strict --verbose=2 "$app"
+
+      - name: Package stable release payload
+        id: package
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          app="$SCHNEEBAR_STABLE_APP"
+          actual_bundle_identifier="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$app/Contents/Info.plist")"
+          actual_marketing_version="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app/Contents/Info.plist")"
+          actual_build_number="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$app/Contents/Info.plist")"
+
+          test "$actual_bundle_identifier" = "dev.lamy.schneebar"
+          test "$actual_marketing_version" = "$SCHNEEBAR_MARKETING_VERSION"
+          test "$actual_build_number" = "$GITHUB_RUN_NUMBER"
+
+          output_dir="$RUNNER_TEMP/stable-release"
+          mkdir -p "$output_dir"
+
+          archive="$output_dir/SchneeBar-$SCHNEEBAR_ARTIFACT_VERSION.zip"
+          checksum="$archive.sha256"
+          notes="$output_dir/release-notes.md"
+
+          ditto -c -k --keepParent "$app" "$archive"
+          archive_bytes="$(wc -c < "$archive" | tr -d ' ')"
+          if [[ "$archive_bytes" -le 0 || "$archive_bytes" -gt "$SCHNEEBAR_MAX_RELEASE_ARCHIVE_BYTES" ]]; then
+            echo "Release archive size is outside the allowed bound: $archive_bytes bytes" >&2
+            exit 1
+          fi
+          archive_totals="$(zipinfo -t "$archive")"
+          archive_entry_total="$(awk 'END {print $1}' <<< "$archive_totals")"
+          archive_uncompressed_bytes="$(awk 'END {print $3}' <<< "$archive_totals")"
+          if [[ ! "$archive_entry_total" =~ ^[0-9]+$ || ! "$archive_uncompressed_bytes" =~ ^[0-9]+$ ]]; then
+            echo "Could not parse release archive totals." >&2
+            printf '%s\n' "$archive_totals" >&2
+            exit 1
+          fi
+          if [[ "$archive_entry_total" -le 0 || "$archive_entry_total" -gt "$SCHNEEBAR_MAX_RELEASE_ARCHIVE_ENTRIES" ]]; then
+            echo "Release archive entry count is outside the allowed bound: $archive_entry_total" >&2
+            exit 1
+          fi
+          if [[ "$archive_uncompressed_bytes" -le 0 || "$archive_uncompressed_bytes" -gt "$SCHNEEBAR_MAX_RELEASE_UNCOMPRESSED_BYTES" ]]; then
+            echo "Release archive uncompressed size is outside the allowed bound: $archive_uncompressed_bytes bytes" >&2
+            exit 1
+          fi
+          entry_count=0
+          while IFS= read -r entry; do
+            entry_count=$((entry_count + 1))
+            if [[ "$entry_count" -gt "$SCHNEEBAR_MAX_RELEASE_ARCHIVE_ENTRIES" ]]; then
+              echo "Stable release archive has too many entries." >&2
+              exit 1
+            fi
+
+            case "$entry" in
+              SchneeBar.app|SchneeBar.app/*) ;;
+              *)
+                echo "Unexpected stable release archive entry: $entry" >&2
+                exit 1
+                ;;
+            esac
+
+            if [[ "$entry" == /* || "$entry" == *\\* ]]; then
+              echo "Unsafe stable release archive path: $entry" >&2
+              exit 1
+            fi
+            if [[ "$entry" =~ [[:cntrl:]] ]]; then
+              echo "Stable release archive path contains control characters." >&2
+              exit 1
+            fi
+
+            case "/$entry/" in
+              */../*|*/./*)
+                echo "Unsafe stable release archive traversal component: $entry" >&2
+                exit 1
+                ;;
+            esac
+          done < <(zipinfo -1 "$archive")
+
+          if [[ "$entry_count" -ne "$archive_entry_total" ]]; then
+            echo "Stable release archive entry enumeration is ambiguous or malformed." >&2
+            echo "zipinfo total: $archive_entry_total; enumerated lines: $entry_count" >&2
+            exit 1
+          fi
+
+          duplicate_entries="$(zipinfo -1 "$archive" | LC_ALL=C sort | uniq -d)"
+          if [[ -n "$duplicate_entries" ]]; then
+            echo "Stable release archive contains duplicate entry paths." >&2
+            printf '%s\n' "$duplicate_entries" >&2
+            exit 1
+          fi
+
+          metadata_entry_count=0
+          while IFS= read -r metadata; do
+            mode="${metadata%% *}"
+            case "$mode" in
+              d?????????|-?????????)
+                metadata_entry_count=$((metadata_entry_count + 1))
+                ;;
+              l?????????|b?????????|c?????????|p?????????|s?????????)
+                echo "Stable release archive contains an unsupported filesystem entry type: $mode" >&2
+                exit 1
+                ;;
+            esac
+          done < <(zipinfo -l "$archive")
+
+          if [[ "$metadata_entry_count" -ne "$archive_entry_total" ]]; then
+            echo "Stable release archive entry metadata is ambiguous or unsupported." >&2
+            echo "zipinfo total: $archive_entry_total; typed entries: $metadata_entry_count" >&2
+            exit 1
+          fi
+          unzip -t "$archive"
+
+          (
+            cd "$output_dir"
+            shasum -a 256 "$(basename "$archive")" > "$(basename "$checksum")"
+            shasum -a 256 -c "$(basename "$checksum")"
+          )
+
+          cat > "$notes" <<EOF
+          ## SchneeBar $RELEASE_TAG
+
+          Stable macOS release.
+
+          - macOS 15 or later
+          - Universal app: Apple Silicon (arm64) + Intel (x86_64)
+          - Built from commit $GITHUB_SHA
+          - Marketing version: $SCHNEEBAR_MARKETING_VERSION
+          - Build number: $GITHUB_RUN_NUMBER
+          - Developer ID signed with Hardened Runtime
+          - Notarized and stapled by Apple
+
+          Distribution terms are defined by the repository root LICENSE or DISTRIBUTION_TERMS.md applicable to this release.
+
+          The attached SHA-256 file can be used to verify the downloaded archive.
+          EOF
+
+      - name: Delete temporary release credentials
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f \
+            "$RUNNER_TEMP/developer-id.p12" \
+            "$RUNNER_TEMP"/AuthKey_*.p8 \
+            "$RUNNER_TEMP/SchneeBar-notarization.zip"
+
+          keychain="${SCHNEEBAR_SIGNING_KEYCHAIN:-$RUNNER_TEMP/schneebar-release.keychain-db}"
+          if [[ -e "$keychain" ]]; then
+            security delete-keychain "$keychain" || rm -f "$keychain"
+          fi
+
+      - name: Upload bounded stable payload
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: schneebar-stable-payload-${{ github.run_id }}
+          path: ${{ runner.temp }}/stable-release
+          if-no-files-found: error
+          retention-days: 1
+
+  validate-stable-intel-runtime:
+    name: Validate stable Intel runtime
+    needs: sign-notarize
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    permissions:
+      actions: read
+    runs-on: macos-26-intel
+    timeout-minutes: 15
+
+    steps:
+      - name: Download bounded stable payload
+        uses: actions/download-artifact@70fc10c6e5e1ce46ad2ea6f2b72d43f7d47b13c3 # v8.0.0
+        with:
+          name: schneebar-stable-payload-${{ github.run_id }}
+          path: release-payload
+
+      - name: Verify and launch Intel slice
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+          EXPECTED_SHA: ${{ inputs.expected_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          test "$GITHUB_SHA" = "$EXPECTED_SHA"
+
+          artifact_version="$(printf '%s' "$RELEASE_TAG" | cut -c2-)"
+          archive="release-payload/SchneeBar-$artifact_version.zip"
+          checksum="$archive.sha256"
+
+          test -f "$archive"
+          test -f "$checksum"
+
+          archive_bytes="$(wc -c < "$archive" | tr -d ' ')"
+          if [[ "$archive_bytes" -le 0 || "$archive_bytes" -gt "$SCHNEEBAR_MAX_RELEASE_ARCHIVE_BYTES" ]]; then
+            echo "Release archive size is outside the allowed bound: $archive_bytes bytes" >&2
+            exit 1
+          fi
+          archive_totals="$(zipinfo -t "$archive")"
+          archive_entry_total="$(awk 'END {print $1}' <<< "$archive_totals")"
+          archive_uncompressed_bytes="$(awk 'END {print $3}' <<< "$archive_totals")"
+          if [[ ! "$archive_entry_total" =~ ^[0-9]+$ || ! "$archive_uncompressed_bytes" =~ ^[0-9]+$ ]]; then
+            echo "Could not parse release archive totals." >&2
+            printf '%s\n' "$archive_totals" >&2
+            exit 1
+          fi
+          if [[ "$archive_entry_total" -le 0 || "$archive_entry_total" -gt "$SCHNEEBAR_MAX_RELEASE_ARCHIVE_ENTRIES" ]]; then
+            echo "Release archive entry count is outside the allowed bound: $archive_entry_total" >&2
+            exit 1
+          fi
+          if [[ "$archive_uncompressed_bytes" -le 0 || "$archive_uncompressed_bytes" -gt "$SCHNEEBAR_MAX_RELEASE_UNCOMPRESSED_BYTES" ]]; then
+            echo "Release archive uncompressed size is outside the allowed bound: $archive_uncompressed_bytes bytes" >&2
+            exit 1
+          fi
+          entry_count=0
+          while IFS= read -r entry; do
+            entry_count=$((entry_count + 1))
+            if [[ "$entry_count" -gt "$SCHNEEBAR_MAX_RELEASE_ARCHIVE_ENTRIES" ]]; then
+              echo "Stable release archive has too many entries." >&2
+              exit 1
+            fi
+
+            case "$entry" in
+              SchneeBar.app|SchneeBar.app/*) ;;
+              *)
+                echo "Unexpected stable release archive entry: $entry" >&2
+                exit 1
+                ;;
+            esac
+
+            if [[ "$entry" == /* || "$entry" == *\\* ]]; then
+              echo "Unsafe stable release archive path: $entry" >&2
+              exit 1
+            fi
+            if [[ "$entry" =~ [[:cntrl:]] ]]; then
+              echo "Stable release archive path contains control characters." >&2
+              exit 1
+            fi
+
+            case "/$entry/" in
+              */../*|*/./*)
+                echo "Unsafe stable release archive traversal component: $entry" >&2
+                exit 1
+                ;;
+            esac
+          done < <(zipinfo -1 "$archive")
+
+          if [[ "$entry_count" -ne "$archive_entry_total" ]]; then
+            echo "Stable release archive entry enumeration is ambiguous or malformed." >&2
+            echo "zipinfo total: $archive_entry_total; enumerated lines: $entry_count" >&2
+            exit 1
+          fi
+
+          duplicate_entries="$(zipinfo -1 "$archive" | LC_ALL=C sort | uniq -d)"
+          if [[ -n "$duplicate_entries" ]]; then
+            echo "Stable release archive contains duplicate entry paths." >&2
+            printf '%s\n' "$duplicate_entries" >&2
+            exit 1
+          fi
+
+          metadata_entry_count=0
+          while IFS= read -r metadata; do
+            mode="${metadata%% *}"
+            case "$mode" in
+              d?????????|-?????????)
+                metadata_entry_count=$((metadata_entry_count + 1))
+                ;;
+              l?????????|b?????????|c?????????|p?????????|s?????????)
+                echo "Stable release archive contains an unsupported filesystem entry type: $mode" >&2
+                exit 1
+                ;;
+            esac
+          done < <(zipinfo -l "$archive")
+
+          if [[ "$metadata_entry_count" -ne "$archive_entry_total" ]]; then
+            echo "Stable release archive entry metadata is ambiguous or unsupported." >&2
+            echo "zipinfo total: $archive_entry_total; typed entries: $metadata_entry_count" >&2
+            exit 1
+          fi
+          (
+            cd release-payload
+            shasum -a 256 -c "$(basename "$checksum")"
+            unzip -t "$(basename "$archive")"
+          )
+
+          extract_dir="$RUNNER_TEMP/intel-runtime"
+          mkdir -p "$extract_dir"
+          ditto -x -k "$archive" "$extract_dir"
+
+          app="$extract_dir/SchneeBar.app"
+          binary="$app/Contents/MacOS/SchneeBar"
+
+          test -d "$app"
+          test -x "$binary"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$app/Contents/Info.plist")" = "dev.lamy.schneebar"
+          test "$(uname -m)" = "x86_64"
+
+          archs="$(lipo -archs "$binary")"
+          if [[ " $archs " != *" x86_64 "* ]]; then
+            echo "Packaged app is missing x86_64: $archs" >&2
+            exit 1
+          fi
+
+          codesign --verify --deep --strict --verbose=2 "$app"
+          xcrun stapler validate "$app"
+          spctl --assess --type execute --verbose=4 "$app"
+
+          stdout="$RUNNER_TEMP/schneebar-intel.stdout"
+          stderr="$RUNNER_TEMP/schneebar-intel.stderr"
+          "$binary" >"$stdout" 2>"$stderr" &
+          pid=$!
+
+          cleanup() {
+            if kill -0 "$pid" 2>/dev/null; then
+              kill -TERM "$pid" 2>/dev/null || true
+              for _ in {1..20}; do
+                if ! kill -0 "$pid" 2>/dev/null; then
+                  break
+                fi
+                sleep 0.25
+              done
+              kill -KILL "$pid" 2>/dev/null || true
+            fi
+            wait "$pid" 2>/dev/null || true
+          }
+          trap cleanup EXIT
+
+          sleep 5
+          if ! kill -0 "$pid" 2>/dev/null; then
+            echo "SchneeBar exited before the Intel runtime smoke completed." >&2
+            cat "$stdout" >&2 || true
+            cat "$stderr" >&2 || true
+            exit 1
+          fi
+
+          echo "SchneeBar remained alive on the x86_64 runner for the runtime smoke."
+
+  publish-stable:
+    name: Publish stable release
+    needs:
+      - sign-notarize
+      - validate-stable-intel-runtime
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    environment: release
+    permissions:
+      actions: read
+      contents: write
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Download bounded stable payload
+        uses: actions/download-artifact@70fc10c6e5e1ce46ad2ea6f2b72d43f7d47b13c3 # v8.0.0
+        with:
+          name: schneebar-stable-payload-${{ github.run_id }}
+          path: release-payload
+
+      - name: Verify bounded stable payload
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+          EXPECTED_SHA: ${{ inputs.expected_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          test "$GITHUB_SHA" = "$EXPECTED_SHA"
+
+          if [[ ! "$RELEASE_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            echo "Refusing to publish a non-stable tag: $RELEASE_TAG" >&2
+            exit 1
+          fi
+
+          artifact_version="$(printf '%s' "$RELEASE_TAG" | cut -c2-)"
+          archive="release-payload/SchneeBar-$artifact_version.zip"
+          checksum="$archive.sha256"
+          notes="release-payload/release-notes.md"
+
+          test -f "$archive"
+          test -f "$checksum"
+          test -f "$notes"
+
+          archive_bytes="$(wc -c < "$archive" | tr -d ' ')"
+          if [[ "$archive_bytes" -le 0 || "$archive_bytes" -gt "$SCHNEEBAR_MAX_RELEASE_ARCHIVE_BYTES" ]]; then
+            echo "Release archive size is outside the allowed bound: $archive_bytes bytes" >&2
+            exit 1
+          fi
+          archive_totals="$(zipinfo -t "$archive")"
+          archive_entry_total="$(awk 'END {print $1}' <<< "$archive_totals")"
+          archive_uncompressed_bytes="$(awk 'END {print $3}' <<< "$archive_totals")"
+          if [[ ! "$archive_entry_total" =~ ^[0-9]+$ || ! "$archive_uncompressed_bytes" =~ ^[0-9]+$ ]]; then
+            echo "Could not parse release archive totals." >&2
+            printf '%s\n' "$archive_totals" >&2
+            exit 1
+          fi
+          if [[ "$archive_entry_total" -le 0 || "$archive_entry_total" -gt "$SCHNEEBAR_MAX_RELEASE_ARCHIVE_ENTRIES" ]]; then
+            echo "Release archive entry count is outside the allowed bound: $archive_entry_total" >&2
+            exit 1
+          fi
+          if [[ "$archive_uncompressed_bytes" -le 0 || "$archive_uncompressed_bytes" -gt "$SCHNEEBAR_MAX_RELEASE_UNCOMPRESSED_BYTES" ]]; then
+            echo "Release archive uncompressed size is outside the allowed bound: $archive_uncompressed_bytes bytes" >&2
+            exit 1
+          fi
+          entry_count=0
+          while IFS= read -r entry; do
+            entry_count=$((entry_count + 1))
+            if [[ "$entry_count" -gt "$SCHNEEBAR_MAX_RELEASE_ARCHIVE_ENTRIES" ]]; then
+              echo "Stable release archive has too many entries." >&2
+              exit 1
+            fi
+
+            case "$entry" in
+              SchneeBar.app|SchneeBar.app/*) ;;
+              *)
+                echo "Unexpected stable release archive entry: $entry" >&2
+                exit 1
+                ;;
+            esac
+
+            if [[ "$entry" == /* || "$entry" == *\\* ]]; then
+              echo "Unsafe stable release archive path: $entry" >&2
+              exit 1
+            fi
+            if [[ "$entry" =~ [[:cntrl:]] ]]; then
+              echo "Stable release archive path contains control characters." >&2
+              exit 1
+            fi
+
+            case "/$entry/" in
+              */../*|*/./*)
+                echo "Unsafe stable release archive traversal component: $entry" >&2
+                exit 1
+                ;;
+            esac
+          done < <(zipinfo -1 "$archive")
+
+          if [[ "$entry_count" -ne "$archive_entry_total" ]]; then
+            echo "Stable release archive entry enumeration is ambiguous or malformed." >&2
+            echo "zipinfo total: $archive_entry_total; enumerated lines: $entry_count" >&2
+            exit 1
+          fi
+
+          duplicate_entries="$(zipinfo -1 "$archive" | LC_ALL=C sort | uniq -d)"
+          if [[ -n "$duplicate_entries" ]]; then
+            echo "Stable release archive contains duplicate entry paths." >&2
+            printf '%s\n' "$duplicate_entries" >&2
+            exit 1
+          fi
+
+          metadata_entry_count=0
+          while IFS= read -r metadata; do
+            mode="${metadata%% *}"
+            case "$mode" in
+              d?????????|-?????????)
+                metadata_entry_count=$((metadata_entry_count + 1))
+                ;;
+              l?????????|b?????????|c?????????|p?????????|s?????????)
+                echo "Stable release archive contains an unsupported filesystem entry type: $mode" >&2
+                exit 1
+                ;;
+            esac
+          done < <(zipinfo -l "$archive")
+
+          if [[ "$metadata_entry_count" -ne "$archive_entry_total" ]]; then
+            echo "Stable release archive entry metadata is ambiguous or unsupported." >&2
+            echo "zipinfo total: $archive_entry_total; typed entries: $metadata_entry_count" >&2
+            exit 1
+          fi
+          if find release-payload -type l -print -quit | grep -q .; then
+            echo "Release payload must not contain symbolic links." >&2
+            exit 1
+          fi
+
+          mapfile -t payload_files < <(find release-payload -type f -print | LC_ALL=C sort)
+          if [[ "${#payload_files[@]}" -ne 3 ]]; then
+            echo "Unexpected release payload file count: ${#payload_files[@]}" >&2
+            printf '%s\n' "${payload_files[@]}" >&2
+            exit 1
+          fi
+
+          expected_files="$(
+            printf '%s\n' "$archive" "$checksum" "$notes" | LC_ALL=C sort
+          )"
+          actual_files="$(printf '%s\n' "${payload_files[@]}")"
+          if [[ "$actual_files" != "$expected_files" ]]; then
+            echo "Unexpected stable release payload contents." >&2
+            printf '%s\n' "${payload_files[@]}" >&2
+            exit 1
+          fi
+
+          (
+            cd release-payload
+            sha256sum -c "$(basename "$checksum")"
+            unzip -t "$(basename "$archive")"
+          )
+
+          grep -F "## SchneeBar $RELEASE_TAG" "$notes" >/dev/null
+          grep -F "Built from commit $GITHUB_SHA" "$notes" >/dev/null
+
+          if git ls-remote --exit-code --tags "https://github.com/$GITHUB_REPOSITORY.git" "refs/tags/$RELEASE_TAG" >/dev/null 2>&1; then
+            echo "Tag already exists: $RELEASE_TAG" >&2
+            exit 1
+          fi
+
+      - name: Create GitHub stable release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          artifact_version="$(printf '%s' "$RELEASE_TAG" | cut -c2-)"
+          archive="release-payload/SchneeBar-$artifact_version.zip"
+          checksum="$archive.sha256"
+          notes="release-payload/release-notes.md"
+
+          gh release create "$RELEASE_TAG" \
+            "$archive" \
+            "$checksum" \
+            --target "$GITHUB_SHA" \
+            --title "SchneeBar $RELEASE_TAG" \
+            --notes-file "$notes"

@@ -62,6 +62,42 @@ Before the first stable release, add a protected release workflow/environment th
 
 Signing certificates, private keys, App Store Connect API credentials, and notarization credentials must exist only in the protected release environment. They must never be available to pull-request jobs.
 
+The stable workflow also separates build execution from signing. Checkout, tests, visual smoke, and the unsigned universal build run in a secret-free job. That job uploads only a bounded ZIP plus SHA-256 checksum. The protected `release` signing/notarization job downloads and validates that artifact, does not checkout repository source, and does not run Tuist or tests before importing Apple credentials.
+
+Both the unsigned signing-input ZIP and the final stable release ZIP are capped at 512 MiB compressed, 1 GiB total uncompressed content, and 10,000 archive entries. These bounds are checked when the archive is created and again at downstream trust boundaries before extraction, Intel runtime validation, or publication. Both archive classes must enumerate exactly one `SchneeBar.app` root, reject absolute/backslash/traversal/control-character paths and duplicate names, and contain only regular-file or directory ZIP entries; symlink and special-file entries fail closed before extraction. Entry enumeration and typed-entry counts must agree with the ZIP central-directory total.
+
+### Stable release environment
+
+The stable workflow uses a protected GitHub Actions environment named `release`. Configure approval/protection rules before enabling stable publication.
+
+Required environment secrets:
+
+- `APPLE_DEVELOPER_ID_P12_BASE64`: base64-encoded Developer ID Application certificate + private key in PKCS#12 form;
+- `APPLE_DEVELOPER_ID_P12_PASSWORD`: PKCS#12 password;
+- `APPLE_DEVELOPER_ID_APPLICATION`: exact `codesign` authority string, for example the full `Developer ID Application: ... (TEAMID)` identity;
+- `APPLE_TEAM_ID`: Apple Developer Team ID;
+- `APPLE_NOTARY_KEY_ID`: App Store Connect API key ID;
+- `APPLE_NOTARY_ISSUER_ID`: App Store Connect issuer ID;
+- `APPLE_NOTARY_KEY_P8_BASE64`: base64-encoded App Store Connect private key.
+
+Do not use repository-level secrets for these values when a protected release environment can scope them more narrowly.
+
+The stable workflow is fail-closed and will not start publication unless:
+
+- the exact reviewed `main` SHA still matches `expected_sha`;
+- exact-SHA push CI and CodeQL are green;
+- a root `LICENSE` or `DISTRIBUTION_TERMS.md` exists;
+- `docs/RELEASE_ASSET_PROVENANCE.md` exists as the maintainer-reviewed record for distributed artwork/resources;
+- all required Apple secrets are present;
+- the Release app is universal `arm64 + x86_64`;
+- no unexpected embedded runtime code is present in Frameworks, PlugIns, XPCServices, Helpers, LoginItems, or LaunchServices without updating the explicit stable audit;
+- the Developer ID authority/team match the configured identity;
+- Hardened Runtime is present and no unexpected entitlements are signed;
+- notarization, stapling, Gatekeeper assessment, archive verification, and checksum verification all succeed;
+- the notarized/stapled packaged app launches and remains alive on the official `macos-26-intel` x64 runner before stable publication.
+
+Temporary PKCS#12/API-key files and the temporary signing keychain are deleted with an `always()` cleanup step.
+
 ## Versioning
 
 Git tags use semantic versioning:
