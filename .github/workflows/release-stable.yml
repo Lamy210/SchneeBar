@@ -797,7 +797,7 @@ jobs:
           printf '%s' "$APPLE_NOTARY_KEY_P8_BASE64" | base64 -D > "$key"
           chmod 600 "$key"
 
-          ditto -c -k --sequesterRsrc --keepParent "$app" "$submission"
+          ditto -c -k --keepParent "$app" "$submission"
 
           xcrun notarytool submit "$submission" \
             --key "$key" \
@@ -843,7 +843,7 @@ jobs:
           checksum="$archive.sha256"
           notes="$output_dir/release-notes.md"
 
-          ditto -c -k --sequesterRsrc --keepParent "$app" "$archive"
+          ditto -c -k --keepParent "$app" "$archive"
           archive_bytes="$(wc -c < "$archive" | tr -d ' ')"
           if [[ "$archive_bytes" -le 0 || "$archive_bytes" -gt "$SCHNEEBAR_MAX_RELEASE_ARCHIVE_BYTES" ]]; then
             echo "Release archive size is outside the allowed bound: $archive_bytes bytes" >&2
@@ -863,6 +863,71 @@ jobs:
           fi
           if [[ "$archive_uncompressed_bytes" -le 0 || "$archive_uncompressed_bytes" -gt "$SCHNEEBAR_MAX_RELEASE_UNCOMPRESSED_BYTES" ]]; then
             echo "Release archive uncompressed size is outside the allowed bound: $archive_uncompressed_bytes bytes" >&2
+            exit 1
+          fi
+          entry_count=0
+          while IFS= read -r entry; do
+            entry_count=$((entry_count + 1))
+            if [[ "$entry_count" -gt "$SCHNEEBAR_MAX_RELEASE_ARCHIVE_ENTRIES" ]]; then
+              echo "Stable release archive has too many entries." >&2
+              exit 1
+            fi
+
+            case "$entry" in
+              SchneeBar.app|SchneeBar.app/*) ;;
+              *)
+                echo "Unexpected stable release archive entry: $entry" >&2
+                exit 1
+                ;;
+            esac
+
+            if [[ "$entry" == /* || "$entry" == *\\* ]]; then
+              echo "Unsafe stable release archive path: $entry" >&2
+              exit 1
+            fi
+            if [[ "$entry" =~ [[:cntrl:]] ]]; then
+              echo "Stable release archive path contains control characters." >&2
+              exit 1
+            fi
+
+            case "/$entry/" in
+              */../*|*/./*)
+                echo "Unsafe stable release archive traversal component: $entry" >&2
+                exit 1
+                ;;
+            esac
+          done < <(zipinfo -1 "$archive")
+
+          if [[ "$entry_count" -ne "$archive_entry_total" ]]; then
+            echo "Stable release archive entry enumeration is ambiguous or malformed." >&2
+            echo "zipinfo total: $archive_entry_total; enumerated lines: $entry_count" >&2
+            exit 1
+          fi
+
+          duplicate_entries="$(zipinfo -1 "$archive" | LC_ALL=C sort | uniq -d)"
+          if [[ -n "$duplicate_entries" ]]; then
+            echo "Stable release archive contains duplicate entry paths." >&2
+            printf '%s\n' "$duplicate_entries" >&2
+            exit 1
+          fi
+
+          metadata_entry_count=0
+          while IFS= read -r metadata; do
+            mode="${metadata%% *}"
+            case "$mode" in
+              d?????????|-?????????)
+                metadata_entry_count=$((metadata_entry_count + 1))
+                ;;
+              l?????????|b?????????|c?????????|p?????????|s?????????)
+                echo "Stable release archive contains an unsupported filesystem entry type: $mode" >&2
+                exit 1
+                ;;
+            esac
+          done < <(zipinfo -l "$archive")
+
+          if [[ "$metadata_entry_count" -ne "$archive_entry_total" ]]; then
+            echo "Stable release archive entry metadata is ambiguous or unsupported." >&2
+            echo "zipinfo total: $archive_entry_total; typed entries: $metadata_entry_count" >&2
             exit 1
           fi
           unzip -t "$archive"
@@ -966,6 +1031,71 @@ jobs:
           fi
           if [[ "$archive_uncompressed_bytes" -le 0 || "$archive_uncompressed_bytes" -gt "$SCHNEEBAR_MAX_RELEASE_UNCOMPRESSED_BYTES" ]]; then
             echo "Release archive uncompressed size is outside the allowed bound: $archive_uncompressed_bytes bytes" >&2
+            exit 1
+          fi
+          entry_count=0
+          while IFS= read -r entry; do
+            entry_count=$((entry_count + 1))
+            if [[ "$entry_count" -gt "$SCHNEEBAR_MAX_RELEASE_ARCHIVE_ENTRIES" ]]; then
+              echo "Stable release archive has too many entries." >&2
+              exit 1
+            fi
+
+            case "$entry" in
+              SchneeBar.app|SchneeBar.app/*) ;;
+              *)
+                echo "Unexpected stable release archive entry: $entry" >&2
+                exit 1
+                ;;
+            esac
+
+            if [[ "$entry" == /* || "$entry" == *\\* ]]; then
+              echo "Unsafe stable release archive path: $entry" >&2
+              exit 1
+            fi
+            if [[ "$entry" =~ [[:cntrl:]] ]]; then
+              echo "Stable release archive path contains control characters." >&2
+              exit 1
+            fi
+
+            case "/$entry/" in
+              */../*|*/./*)
+                echo "Unsafe stable release archive traversal component: $entry" >&2
+                exit 1
+                ;;
+            esac
+          done < <(zipinfo -1 "$archive")
+
+          if [[ "$entry_count" -ne "$archive_entry_total" ]]; then
+            echo "Stable release archive entry enumeration is ambiguous or malformed." >&2
+            echo "zipinfo total: $archive_entry_total; enumerated lines: $entry_count" >&2
+            exit 1
+          fi
+
+          duplicate_entries="$(zipinfo -1 "$archive" | LC_ALL=C sort | uniq -d)"
+          if [[ -n "$duplicate_entries" ]]; then
+            echo "Stable release archive contains duplicate entry paths." >&2
+            printf '%s\n' "$duplicate_entries" >&2
+            exit 1
+          fi
+
+          metadata_entry_count=0
+          while IFS= read -r metadata; do
+            mode="${metadata%% *}"
+            case "$mode" in
+              d?????????|-?????????)
+                metadata_entry_count=$((metadata_entry_count + 1))
+                ;;
+              l?????????|b?????????|c?????????|p?????????|s?????????)
+                echo "Stable release archive contains an unsupported filesystem entry type: $mode" >&2
+                exit 1
+                ;;
+            esac
+          done < <(zipinfo -l "$archive")
+
+          if [[ "$metadata_entry_count" -ne "$archive_entry_total" ]]; then
+            echo "Stable release archive entry metadata is ambiguous or unsupported." >&2
+            echo "zipinfo total: $archive_entry_total; typed entries: $metadata_entry_count" >&2
             exit 1
           fi
           (
@@ -1089,6 +1219,71 @@ jobs:
           fi
           if [[ "$archive_uncompressed_bytes" -le 0 || "$archive_uncompressed_bytes" -gt "$SCHNEEBAR_MAX_RELEASE_UNCOMPRESSED_BYTES" ]]; then
             echo "Release archive uncompressed size is outside the allowed bound: $archive_uncompressed_bytes bytes" >&2
+            exit 1
+          fi
+          entry_count=0
+          while IFS= read -r entry; do
+            entry_count=$((entry_count + 1))
+            if [[ "$entry_count" -gt "$SCHNEEBAR_MAX_RELEASE_ARCHIVE_ENTRIES" ]]; then
+              echo "Stable release archive has too many entries." >&2
+              exit 1
+            fi
+
+            case "$entry" in
+              SchneeBar.app|SchneeBar.app/*) ;;
+              *)
+                echo "Unexpected stable release archive entry: $entry" >&2
+                exit 1
+                ;;
+            esac
+
+            if [[ "$entry" == /* || "$entry" == *\\* ]]; then
+              echo "Unsafe stable release archive path: $entry" >&2
+              exit 1
+            fi
+            if [[ "$entry" =~ [[:cntrl:]] ]]; then
+              echo "Stable release archive path contains control characters." >&2
+              exit 1
+            fi
+
+            case "/$entry/" in
+              */../*|*/./*)
+                echo "Unsafe stable release archive traversal component: $entry" >&2
+                exit 1
+                ;;
+            esac
+          done < <(zipinfo -1 "$archive")
+
+          if [[ "$entry_count" -ne "$archive_entry_total" ]]; then
+            echo "Stable release archive entry enumeration is ambiguous or malformed." >&2
+            echo "zipinfo total: $archive_entry_total; enumerated lines: $entry_count" >&2
+            exit 1
+          fi
+
+          duplicate_entries="$(zipinfo -1 "$archive" | LC_ALL=C sort | uniq -d)"
+          if [[ -n "$duplicate_entries" ]]; then
+            echo "Stable release archive contains duplicate entry paths." >&2
+            printf '%s\n' "$duplicate_entries" >&2
+            exit 1
+          fi
+
+          metadata_entry_count=0
+          while IFS= read -r metadata; do
+            mode="${metadata%% *}"
+            case "$mode" in
+              d?????????|-?????????)
+                metadata_entry_count=$((metadata_entry_count + 1))
+                ;;
+              l?????????|b?????????|c?????????|p?????????|s?????????)
+                echo "Stable release archive contains an unsupported filesystem entry type: $mode" >&2
+                exit 1
+                ;;
+            esac
+          done < <(zipinfo -l "$archive")
+
+          if [[ "$metadata_entry_count" -ne "$archive_entry_total" ]]; then
+            echo "Stable release archive entry metadata is ambiguous or unsupported." >&2
+            echo "zipinfo total: $archive_entry_total; typed entries: $metadata_entry_count" >&2
             exit 1
           fi
           if find release-payload -type l -print -quit | grep -q .; then
