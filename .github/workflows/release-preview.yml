@@ -172,7 +172,7 @@ jobs:
           duplicate_entries="$(zipinfo -1 "${archive}" | LC_ALL=C sort | uniq -d)"
           if [[ -n "${duplicate_entries}" ]]; then
             echo "Preview archive contains duplicate entry paths." >&2
-            printf '%s\\n' "${duplicate_entries}" >&2
+            printf '%s\n' "${duplicate_entries}" >&2
             exit 1
           fi
 
@@ -344,7 +344,7 @@ jobs:
           duplicate_entries="$(zipinfo -1 "${archive}" | LC_ALL=C sort | uniq -d)"
           if [[ -n "${duplicate_entries}" ]]; then
             echo "Preview archive contains duplicate entry paths." >&2
-            printf '%s\\n' "${duplicate_entries}" >&2
+            printf '%s\n' "${duplicate_entries}" >&2
             exit 1
           fi
 
@@ -622,7 +622,7 @@ jobs:
           duplicate_entries="$(zipinfo -1 "${archive}" | LC_ALL=C sort | uniq -d)"
           if [[ -n "${duplicate_entries}" ]]; then
             echo "Preview archive contains duplicate entry paths." >&2
-            printf '%s\\n' "${duplicate_entries}" >&2
+            printf '%s\n' "${duplicate_entries}" >&2
             exit 1
           fi
 
@@ -827,7 +827,7 @@ jobs:
           duplicate_entries="$(zipinfo -1 "${archive}" | LC_ALL=C sort | uniq -d)"
           if [[ -n "${duplicate_entries}" ]]; then
             echo "Preview archive contains duplicate entry paths." >&2
-            printf '%s\\n' "${duplicate_entries}" >&2
+            printf '%s\n' "${duplicate_entries}" >&2
             exit 1
           fi
 
