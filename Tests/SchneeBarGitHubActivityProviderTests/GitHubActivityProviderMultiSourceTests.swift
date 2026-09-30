@@ -150,7 +150,7 @@ func unknownReviewAndCheckCapabilitiesRemainRequestable() async throws {
         checkRunLoader: checkLoader,
         maximumConcurrentRepositories: 1
     )
-    let unknownEvidence: Set<GitHubCapabilityUncertaintyReason> = [
+    let unknownEvidence: Set<GitHubCapabilityUncertainty> = [
         .publicRepositoryPermissionNotProven,
     ]
     let capabilities = GitHubConnectionCapabilityAssessment(
