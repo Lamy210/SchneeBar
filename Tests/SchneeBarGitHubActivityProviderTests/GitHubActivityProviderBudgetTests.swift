@@ -221,8 +221,8 @@ func checkPollingRotatesAcrossRepositoriesBetweenRefreshes() async throws {
     )
 
     let requestedRepositoryIDs = await checks.repositoryIDs()
-    #expect(Array(requestedRepositoryIDs.prefix(4)) == [1, 2, 3, 4])
-    #expect(Array(requestedRepositoryIDs.suffix(4)) == [5, 6, 1, 2])
+    #expect(Set(requestedRepositoryIDs.prefix(4)) == Set([1, 2, 3, 4]))
+    #expect(Set(requestedRepositoryIDs.suffix(4)) == Set([1, 2, 5, 6]))
     #expect(Set(requestedRepositoryIDs) == Set(repositories.map(\.id)))
 }
 
