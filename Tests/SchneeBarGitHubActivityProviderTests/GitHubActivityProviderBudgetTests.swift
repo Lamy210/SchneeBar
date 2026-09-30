@@ -125,6 +125,34 @@ private actor FairBudgetReviewLoader: GitHubReviewRequestLoading {
     }
 }
 
+private actor DeepFairBudgetReviewLoader: GitHubReviewRequestLoading {
+    func reviewRequests(
+        connection: GitHubConnection,
+        identity: GitHubAccountIdentity,
+        clientID: String?,
+        repository: GitHubRepositoryAccess
+    ) async throws -> [GitHubReviewRequest] {
+        [1, 2].map { candidateIndex in
+            GitHubReviewRequest(
+                number: Int(repository.id * 10) + candidateIndex,
+                title: "Review \(repository.id)-\(candidateIndex)",
+                headSHA: String(
+                    format: "%040llx",
+                    repository.id * 100 + Int64(candidateIndex)
+                ),
+                isDraft: false,
+                updatedAt: Date(
+                    timeIntervalSince1970: TimeInterval(200 - candidateIndex)
+                ),
+                requestedReviewerIDs: ["42"],
+                webURL: repository.webURL.appendingPathComponent(
+                    "pull/\(repository.id * 10 + Int64(candidateIndex))"
+                )
+            )
+        }
+    }
+}
+
 private actor BudgetCheckLoader: GitHubCheckRunLoading {
     private var calls: [(Int64, String)] = []
 
@@ -224,6 +252,43 @@ func checkPollingRotatesAcrossRepositoriesBetweenRefreshes() async throws {
     #expect(Set(requestedRepositoryIDs.prefix(4)) == Set([1, 2, 3, 4]))
     #expect(Set(requestedRepositoryIDs.suffix(4)) == Set([1, 2, 5, 6]))
     #expect(Set(requestedRepositoryIDs) == Set(repositories.map(\.id)))
+}
+
+@Test
+func checkPollingRotatesSecondCandidateGrantsBetweenRefreshes() async throws {
+    let repositories = try (1 ... 3).map { id in
+        try budgetRepository(id: Int64(id))
+    }
+    let checks = BudgetCheckLoader()
+    let provider = GitHubActivityProvider(
+        workflowRunLoader: BudgetWorkflowLoader(),
+        reviewRequestLoader: DeepFairBudgetReviewLoader(),
+        checkRunLoader: checks,
+        maximumConcurrentRepositories: 2,
+        maximumRepositoriesPerRefresh: 3,
+        maximumReviewRepositoriesPerRefresh: 3,
+        maximumCheckTargetsPerRefresh: 4,
+        maximumCheckTargetsPerRepository: 2,
+        minimumColdRepositoriesPerRefresh: 3,
+        minimumColdReviewRepositoriesPerRefresh: 3,
+        now: { Date(timeIntervalSince1970: 100) }
+    )
+    let profile = try budgetProfile()
+    let inventory = try budgetInventory(repositories: repositories)
+    let capabilities = budgetCapabilities(repositories: repositories)
+
+    for _ in 0 ..< 3 {
+        _ = await provider.load(
+            profile: profile,
+            inventory: inventory,
+            capabilities: capabilities
+        )
+    }
+
+    let requestedRepositoryIDs = await checks.repositoryIDs()
+    #expect(Array(requestedRepositoryIDs.prefix(4)) == [1, 2, 3, 1])
+    #expect(Array(requestedRepositoryIDs.dropFirst(4).prefix(4)) == [2, 3, 1, 2])
+    #expect(Array(requestedRepositoryIDs.suffix(4)) == [3, 1, 2, 3])
 }
 
 @Test

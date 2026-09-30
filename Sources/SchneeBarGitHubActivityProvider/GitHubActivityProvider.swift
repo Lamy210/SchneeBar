@@ -26,7 +26,8 @@ public actor GitHubActivityProvider {
 
     private var workflowPollState: [RepositoryPollKey: RepositoryPollState] = [:]
     private var reviewPollState: [RepositoryPollKey: RepositoryPollState] = [:]
-    private var checkPollState: [RepositoryPollKey: RepositoryPollState] = [:]
+    private var checkPollSequenceByRepository: [RepositoryPollKey: UInt64] = [:]
+    private var nextCheckPollSequence: UInt64 = 0
     private var cachedWorkflowActivities: [RepositoryPollKey: [GitHubWorkflowActivity]] = [:]
     private var workflowEvidence: [RepositoryPollKey: [GitHubWorkflowEvidence]] = [:]
     private var workflowRecoveryTrackers: [RepositoryPollKey: GitHubWorkflowRecoveryTracker] = [:]
@@ -261,11 +262,10 @@ public actor GitHubActivityProvider {
         let checkCandidates: [GitHubCheckCandidate]
         if checkRunLoader != nil {
             let orderedCheckRepositories = checkEligible.sorted {
-                pollCandidateSort(
+                checkCandidateSort(
                     lhs: $0,
                     rhs: $1,
-                    connectionID: profile.id,
-                    state: checkPollState
+                    connectionID: profile.id
                 )
             }
             checkCandidates = checkCandidatePlanner.candidates(
@@ -275,13 +275,13 @@ public actor GitHubActivityProvider {
                 maximumTotal: maximumCheckTargetsPerRefresh,
                 maximumPerRepository: maximumCheckTargetsPerRepository
             )
-            for repositoryID in Set(checkCandidates.map(\.repositoryID)) {
+            for candidate in checkCandidates {
                 let key = RepositoryPollKey(
                     connectionID: profile.id,
-                    repositoryID: repositoryID
+                    repositoryID: candidate.repositoryID
                 )
-                checkPollState[key, default: RepositoryPollState()]
-                    .lastPolledAt = timestamp
+                checkPollSequenceByRepository[key] = nextCheckPollSequence
+                nextCheckPollSequence &+= 1
             }
             let validCandidateKeys = validCachedCheckCandidateKeys(
                 connectionID: profile.id,
@@ -381,7 +381,9 @@ public actor GitHubActivityProvider {
         generationByConnectionID[connectionID, default: 0] &+= 1
         workflowPollState = workflowPollState.filter { $0.key.connectionID != connectionID }
         reviewPollState = reviewPollState.filter { $0.key.connectionID != connectionID }
-        checkPollState = checkPollState.filter { $0.key.connectionID != connectionID }
+        checkPollSequenceByRepository = checkPollSequenceByRepository.filter {
+            $0.key.connectionID != connectionID
+        }
         cachedWorkflowActivities = cachedWorkflowActivities.filter { $0.key.connectionID != connectionID }
         workflowEvidence = workflowEvidence.filter { $0.key.connectionID != connectionID }
         workflowRecoveryTrackers = workflowRecoveryTrackers.filter {
@@ -504,6 +506,31 @@ public actor GitHubActivityProvider {
         return RepositoryRefreshSelection(repositories: selected, state: updatedState)
     }
 
+    private func checkCandidateSort(
+        lhs: GitHubRepositoryAccess,
+        rhs: GitHubRepositoryAccess,
+        connectionID: UUID
+    ) -> Bool {
+        let lhsKey = RepositoryPollKey(connectionID: connectionID, repositoryID: lhs.id)
+        let rhsKey = RepositoryPollKey(connectionID: connectionID, repositoryID: rhs.id)
+        let lhsSequence = checkPollSequenceByRepository[lhsKey]
+        let rhsSequence = checkPollSequenceByRepository[rhsKey]
+
+        switch (lhsSequence, rhsSequence) {
+        case (nil, nil):
+            return repositorySort(lhs: lhs, rhs: rhs)
+        case (nil, _):
+            return true
+        case (_, nil):
+            return false
+        case let (lhsSequence?, rhsSequence?):
+            if lhsSequence != rhsSequence {
+                return lhsSequence < rhsSequence
+            }
+            return repositorySort(lhs: lhs, rhs: rhs)
+        }
+    }
+
     private func pollCandidateSort(
         lhs: GitHubRepositoryAccess,
         rhs: GitHubRepositoryAccess,
@@ -541,7 +568,7 @@ public actor GitHubActivityProvider {
         reviewPollState = reviewPollState.filter { key, _ in
             key.connectionID != connectionID || validRepositoryIDs.contains(key.repositoryID)
         }
-        checkPollState = checkPollState.filter { key, _ in
+        checkPollSequenceByRepository = checkPollSequenceByRepository.filter { key, _ in
             key.connectionID != connectionID || validRepositoryIDs.contains(key.repositoryID)
         }
         cachedWorkflowActivities = cachedWorkflowActivities.filter { key, _ in
@@ -600,7 +627,7 @@ public actor GitHubActivityProvider {
         repositoryIDs: Set<Int64>
     ) {
         guard !repositoryIDs.isEmpty else { return }
-        checkPollState = checkPollState.filter { key, _ in
+        checkPollSequenceByRepository = checkPollSequenceByRepository.filter { key, _ in
             key.connectionID != connectionID || !repositoryIDs.contains(key.repositoryID)
         }
         cachedCheckActivities = cachedCheckActivities.filter { key, _ in
