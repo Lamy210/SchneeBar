@@ -199,6 +199,23 @@ func rejectsRootDirectoryWithExtendedACL() async throws {
     }
 }
 
+@Test
+func allowsReadOnlyExtendedACL() async throws {
+    let fixture = try LoaderDirectoryFixture()
+    defer { fixture.cleanup() }
+
+    try addACL(
+        "everyone allow read",
+        at: fixture.rootURL
+    )
+
+    let definitions = try await ExternalWidgetDirectoryLoader(
+        rootURL: fixture.rootURL
+    ).load()
+
+    #expect(definitions.isEmpty)
+}
+
 @Test(arguments: [0o775, 0o757])
 func rejectsRootDirectoryWritableByGroupOrOthers(
     permissions: Int
@@ -549,11 +566,21 @@ private enum LoaderACLFixtureError: Error {
 private func addWriteACL(
     at url: URL
 ) throws {
+    try addACL(
+        "everyone allow write",
+        at: url
+    )
+}
+
+private func addACL(
+    _ entry: String,
+    at url: URL
+) throws {
     let process = Process()
     process.executableURL = URL(fileURLWithPath: "/bin/chmod")
     process.arguments = [
         "+a",
-        "everyone allow write",
+        entry,
         url.path,
     ]
     process.standardOutput = FileHandle.nullDevice
