@@ -64,7 +64,7 @@ Signing certificates, private keys, App Store Connect API credentials, and notar
 
 The stable workflow also separates build execution from signing. Checkout, tests, visual smoke, and the unsigned universal build run in a secret-free job. That job uploads only a bounded ZIP plus SHA-256 checksum. The protected `release` signing/notarization job downloads and validates that artifact, does not checkout repository source, and does not run Tuist or tests before importing Apple credentials.
 
-Both the unsigned signing-input ZIP and the final stable release ZIP are capped at 512 MiB compressed, 1 GiB total uncompressed content, and 10,000 archive entries. These bounds are checked when the archive is created and again at downstream trust boundaries before extraction, Intel runtime validation, or publication. Signing-input entry enumeration must also agree with the ZIP central-directory total before extraction.
+Both the unsigned signing-input ZIP and the final stable release ZIP are capped at 512 MiB compressed, 1 GiB total uncompressed content, and 10,000 archive entries. These bounds are checked when the archive is created and again at downstream trust boundaries before extraction, Intel runtime validation, or publication. Both archive classes must enumerate exactly one `SchneeBar.app` root, reject absolute/backslash/traversal/control-character paths and duplicate names, and contain only regular-file or directory ZIP entries; symlink and special-file entries fail closed before extraction. Entry enumeration and typed-entry counts must agree with the ZIP central-directory total.
 
 ### Stable release environment
 
