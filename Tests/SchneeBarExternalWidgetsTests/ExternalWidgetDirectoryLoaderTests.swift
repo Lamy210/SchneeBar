@@ -216,6 +216,23 @@ func allowsReadOnlyExtendedACL() async throws {
     #expect(definitions.isEmpty)
 }
 
+@Test
+func allowsDenyOnlyMutatingACL() async throws {
+    let fixture = try LoaderDirectoryFixture()
+    defer { fixture.cleanup() }
+
+    try addACL(
+        "everyone deny write",
+        at: fixture.rootURL
+    )
+
+    let definitions = try await ExternalWidgetDirectoryLoader(
+        rootURL: fixture.rootURL
+    ).load()
+
+    #expect(definitions.isEmpty)
+}
+
 @Test(arguments: [0o775, 0o757])
 func rejectsRootDirectoryWritableByGroupOrOthers(
     permissions: Int
