@@ -184,6 +184,38 @@ func rejectsOwnerDirectoryWritableByGroupOrOthers(
 }
 
 @Test
+func rejectsTrustedParentWithMutatingExtendedACL() async throws {
+    let fixture = try LoaderDirectoryFixture()
+    defer { fixture.cleanup() }
+
+    try addWriteACL(at: fixture.anchorURL)
+
+    await #expect(
+        throws: ExternalWidgetDirectoryLoaderError.unsafeRoot
+    ) {
+        try await ExternalWidgetDirectoryLoader(
+            rootURL: fixture.rootURL
+        ).load()
+    }
+}
+
+@Test
+func rejectsOwnerDirectoryWithMutatingExtendedACL() async throws {
+    let fixture = try LoaderDirectoryFixture()
+    defer { fixture.cleanup() }
+
+    try addWriteACL(at: fixture.baseURL)
+
+    await #expect(
+        throws: ExternalWidgetDirectoryLoaderError.unsafeRoot
+    ) {
+        try await ExternalWidgetDirectoryLoader(
+            rootURL: fixture.rootURL
+        ).load()
+    }
+}
+
+@Test
 func rejectsRootDirectoryWithExtendedACL() async throws {
     let fixture = try LoaderDirectoryFixture()
     defer { fixture.cleanup() }
