@@ -148,8 +148,7 @@ public actor GitHubActivityProvider {
             repositories: workflowEligible,
             state: workflowPollState,
             maximumPerRefresh: maximumRepositoriesPerRefresh,
-            minimumColdPerRefresh: minimumColdRepositoriesPerRefresh,
-            timestamp: timestamp
+            minimumColdPerRefresh: minimumColdRepositoriesPerRefresh
         )
         workflowPollState = workflowSelection.state
 
@@ -160,8 +159,7 @@ public actor GitHubActivityProvider {
                 repositories: reviewEligible,
                 state: reviewPollState,
                 maximumPerRefresh: maximumReviewRepositoriesPerRefresh,
-                minimumColdPerRefresh: minimumColdReviewRepositoriesPerRefresh,
-                timestamp: timestamp
+                minimumColdPerRefresh: minimumColdReviewRepositoriesPerRefresh
             )
             reviewPollState = reviewSelection.state
         } else {
@@ -465,15 +463,14 @@ public actor GitHubActivityProvider {
         repositories: [GitHubRepositoryAccess],
         state: [RepositoryPollKey: RepositoryPollState],
         maximumPerRefresh: Int,
-        minimumColdPerRefresh: Int,
-        timestamp: Date
+        minimumColdPerRefresh: Int
     ) -> RepositoryRefreshSelection {
         let budget = min(maximumPerRefresh, repositories.count)
         guard budget > 0 else {
             return RepositoryRefreshSelection(repositories: [], state: state)
         }
 
-        var updatedState = state
+        let updatedState = state
         let hot = repositories
             .filter {
                 updatedState[
