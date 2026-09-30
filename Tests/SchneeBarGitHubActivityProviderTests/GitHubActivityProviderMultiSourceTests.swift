@@ -123,6 +123,75 @@ func capabilityUnavailableBlocksReviewAndChecksWithoutSourceRequests() async thr
 }
 
 @Test
+func unknownReviewAndCheckCapabilitiesRemainRequestable() async throws {
+    let repository = try multiSourceRepository(
+        id: 1,
+        fullName: "snow/app"
+    )
+    let sha = String(repeating: "d", count: 40)
+    let workflowLoader = MultiSourceWorkflowLoader(
+        responses: [
+            1: [
+                try multiSourceWorkflowRun(
+                    id: 12,
+                    repository: repository,
+                    headSHA: sha,
+                    status: .inProgress,
+                    conclusion: nil
+                ),
+            ],
+        ]
+    )
+    let reviewLoader = MultiSourceReviewLoader()
+    let checkLoader = MultiSourceCheckLoader()
+    let provider = GitHubActivityProvider(
+        workflowRunLoader: workflowLoader,
+        reviewRequestLoader: reviewLoader,
+        checkRunLoader: checkLoader,
+        maximumConcurrentRepositories: 1
+    )
+    let unknownEvidence: Set<GitHubCapabilityUncertaintyReason> = [
+        .publicRepositoryPermissionNotProven,
+    ]
+    let capabilities = GitHubConnectionCapabilityAssessment(
+        repositories: [
+            1: GitHubRepositoryCapabilityAssessment(
+                repositoryID: 1,
+                states: [
+                    .actions: .available,
+                    .pullRequests: .unknown(unknownEvidence),
+                    .checks: .unknown(unknownEvidence),
+                ]
+            ),
+        ]
+    )
+
+    let result = await provider.load(
+        profile: try multiSourceProfile(),
+        inventory: try multiSourceInventory(
+            repositories: [repository]
+        ),
+        capabilities: capabilities
+    )
+
+    #expect(await workflowLoader.requestedRepositoryIDs() == [1])
+    #expect(await reviewLoader.requestedRepositoryIDs() == [1])
+    #expect(
+        await checkLoader.requestedChecks()
+            == [
+                MultiSourceCheckRequest(
+                    repositoryID: 1,
+                    headSHA: sha
+                ),
+            ]
+    )
+    #expect(result.surface(.reviewRequests).blockedTargetCount == 0)
+    #expect(result.surface(.checks).blockedTargetCount == 0)
+    #expect(result.surface(.reviewRequests).attemptedTargetCount == 1)
+    #expect(result.surface(.checks).attemptedTargetCount == 1)
+}
+
+@Test
 func hiddenSuccessfulWorkflowStillDiscoversExternalFailedCheck() async throws {
     let repository = try multiSourceRepository(id: 1, fullName: "snow/app")
     let sha = String(repeating: "b", count: 40)
