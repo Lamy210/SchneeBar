@@ -227,6 +227,68 @@ func checkPollingRotatesAcrossRepositoriesBetweenRefreshes() async throws {
 }
 
 @Test
+func reenabledCheckCapabilityReentersPollingAsColdRepository() async throws {
+    let repositories = try (1 ... 4).map { id in
+        try budgetRepository(id: Int64(id))
+    }
+    let checks = BudgetCheckLoader()
+    let provider = GitHubActivityProvider(
+        workflowRunLoader: BudgetWorkflowLoader(),
+        reviewRequestLoader: FairBudgetReviewLoader(),
+        checkRunLoader: checks,
+        maximumConcurrentRepositories: 2,
+        maximumRepositoriesPerRefresh: 4,
+        maximumReviewRepositoriesPerRefresh: 4,
+        maximumCheckTargetsPerRefresh: 2,
+        maximumCheckTargetsPerRepository: 1,
+        minimumColdRepositoriesPerRefresh: 4,
+        minimumColdReviewRepositoriesPerRefresh: 4,
+        now: { Date(timeIntervalSince1970: 100) }
+    )
+    let profile = try budgetProfile()
+    let inventory = try budgetInventory(repositories: repositories)
+
+    _ = await provider.load(
+        profile: profile,
+        inventory: inventory,
+        capabilities: budgetCapabilities(repositories: repositories)
+    )
+
+    var blockedRepositories: [Int64: GitHubRepositoryCapabilityAssessment] = [:]
+    for repository in repositories {
+        blockedRepositories[repository.id] = GitHubRepositoryCapabilityAssessment(
+            repositoryID: repository.id,
+            states: [
+                .actions: .available,
+                .pullRequests: .available,
+                .checks: repository.id == 1
+                    ? .unavailable(.missingPermission)
+                    : .available,
+            ]
+        )
+    }
+
+    _ = await provider.load(
+        profile: profile,
+        inventory: inventory,
+        capabilities: GitHubConnectionCapabilityAssessment(
+            repositories: blockedRepositories
+        )
+    )
+
+    _ = await provider.load(
+        profile: profile,
+        inventory: inventory,
+        capabilities: budgetCapabilities(repositories: repositories)
+    )
+
+    let requestedRepositoryIDs = await checks.repositoryIDs()
+    #expect(Set(requestedRepositoryIDs.prefix(2)) == Set([1, 2]))
+    #expect(Set(requestedRepositoryIDs.dropFirst(2).prefix(2)) == Set([3, 4]))
+    #expect(Set(requestedRepositoryIDs.suffix(2)).contains(1))
+}
+
+@Test
 func retainedRepositoryCacheProjectsIntoBoundedSourceSnapshot() async throws {
     let repositories = try (1 ... 103).map { id in
         try budgetRepository(id: Int64(id))
