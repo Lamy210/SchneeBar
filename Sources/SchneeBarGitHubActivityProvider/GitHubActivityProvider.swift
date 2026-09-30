@@ -26,6 +26,7 @@ public actor GitHubActivityProvider {
 
     private var workflowPollState: [RepositoryPollKey: RepositoryPollState] = [:]
     private var reviewPollState: [RepositoryPollKey: RepositoryPollState] = [:]
+    private var checkPollState: [RepositoryPollKey: RepositoryPollState] = [:]
     private var cachedWorkflowActivities: [RepositoryPollKey: [GitHubWorkflowActivity]] = [:]
     private var workflowEvidence: [RepositoryPollKey: [GitHubWorkflowEvidence]] = [:]
     private var workflowRecoveryTrackers: [RepositoryPollKey: GitHubWorkflowRecoveryTracker] = [:]
@@ -259,13 +260,29 @@ public actor GitHubActivityProvider {
 
         let checkCandidates: [GitHubCheckCandidate]
         if checkRunLoader != nil {
+            let orderedCheckRepositories = checkEligible.sorted {
+                pollCandidateSort(
+                    lhs: $0,
+                    rhs: $1,
+                    connectionID: profile.id,
+                    state: checkPollState
+                )
+            }
             checkCandidates = checkCandidatePlanner.candidates(
-                repositories: checkEligible,
+                repositories: orderedCheckRepositories,
                 reviewRequestsByRepositoryID: reviewRequestsByRepositoryID,
                 workflowEvidenceByRepositoryID: workflowEvidenceByRepositoryID,
                 maximumTotal: maximumCheckTargetsPerRefresh,
                 maximumPerRepository: maximumCheckTargetsPerRepository
             )
+            for repositoryID in Set(checkCandidates.map(\.repositoryID)) {
+                let key = RepositoryPollKey(
+                    connectionID: profile.id,
+                    repositoryID: repositoryID
+                )
+                checkPollState[key, default: RepositoryPollState()]
+                    .lastPolledAt = timestamp
+            }
             let validCandidateKeys = validCachedCheckCandidateKeys(
                 connectionID: profile.id,
                 repositories: checkEligible,
@@ -364,6 +381,7 @@ public actor GitHubActivityProvider {
         generationByConnectionID[connectionID, default: 0] &+= 1
         workflowPollState = workflowPollState.filter { $0.key.connectionID != connectionID }
         reviewPollState = reviewPollState.filter { $0.key.connectionID != connectionID }
+        checkPollState = checkPollState.filter { $0.key.connectionID != connectionID }
         cachedWorkflowActivities = cachedWorkflowActivities.filter { $0.key.connectionID != connectionID }
         workflowEvidence = workflowEvidence.filter { $0.key.connectionID != connectionID }
         workflowRecoveryTrackers = workflowRecoveryTrackers.filter {
@@ -523,6 +541,9 @@ public actor GitHubActivityProvider {
         reviewPollState = reviewPollState.filter { key, _ in
             key.connectionID != connectionID || validRepositoryIDs.contains(key.repositoryID)
         }
+        checkPollState = checkPollState.filter { key, _ in
+            key.connectionID != connectionID || validRepositoryIDs.contains(key.repositoryID)
+        }
         cachedWorkflowActivities = cachedWorkflowActivities.filter { key, _ in
             key.connectionID != connectionID || validRepositoryIDs.contains(key.repositoryID)
         }
@@ -579,6 +600,9 @@ public actor GitHubActivityProvider {
         repositoryIDs: Set<Int64>
     ) {
         guard !repositoryIDs.isEmpty else { return }
+        checkPollState = checkPollState.filter { key, _ in
+            key.connectionID != connectionID || !repositoryIDs.contains(key.repositoryID)
+        }
         cachedCheckActivities = cachedCheckActivities.filter { key, _ in
             key.connectionID != connectionID || !repositoryIDs.contains(key.repositoryID)
         }
