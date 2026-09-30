@@ -238,14 +238,20 @@ public struct ExternalWidgetDirectoryLoader: Sendable {
         ]
 
         var entry: acl_entry_t?
+        errno = 0
         var status = acl_get_entry(
             acl,
             ACL_FIRST_ENTRY.rawValue,
             &entry
         )
 
-        while status == 0 {
-            guard let currentEntry = entry else {
+        while true {
+            if status == -1 {
+                return errno != EINVAL
+            }
+            guard status == 0,
+                  let currentEntry = entry
+            else {
                 return true
             }
 
@@ -283,14 +289,13 @@ public struct ExternalWidgetDirectoryLoader: Sendable {
             }
 
             entry = nil
+            errno = 0
             status = acl_get_entry(
                 acl,
                 ACL_NEXT_ENTRY.rawValue,
                 &entry
             )
         }
-
-        return status == -1
     }
 
     private func rootOpenFailure() throws -> Int32? {
