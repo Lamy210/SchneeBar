@@ -101,6 +101,7 @@ Implemented:
 - hidden successful Workflow evidence for Check candidate discovery
 - provider-neutral priority Inbox semantics across Reviews, Checks, and Workflows
 - fixed source-list request budgets across Workflow / Review / Check polling
+- bounded Check discovery distributes the global target budget round-robin across repositories before taking second candidates, preventing deterministic repository-order starvation
 - Actions / Reviews / Checks capability presentation
 - source-level activity failure/accounting with capability-only connection-health separation
 - repository-selection and reset isolation across all activity source caches
