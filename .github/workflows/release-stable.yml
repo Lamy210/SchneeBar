@@ -154,6 +154,10 @@ jobs:
               echo "Unsafe signing-input archive path: $entry" >&2
               exit 1
             fi
+            if [[ "$entry" =~ [[:cntrl:]] ]]; then
+              echo "Signing-input archive path contains control characters." >&2
+              exit 1
+            fi
 
             case "/$entry/" in
               */../*|*/./*)
@@ -170,6 +174,33 @@ jobs:
           if [[ "$entry_count" -ne "$archive_entry_total" ]]; then
             echo "Signing-input archive entry enumeration is ambiguous or malformed." >&2
             echo "zipinfo total: $archive_entry_total; enumerated lines: $entry_count" >&2
+            exit 1
+          fi
+
+          duplicate_entries="$(zipinfo -1 "$archive" | LC_ALL=C sort | uniq -d)"
+          if [[ -n "$duplicate_entries" ]]; then
+            echo "Signing-input archive contains duplicate entry paths." >&2
+            printf '%s\\n' "$duplicate_entries" >&2
+            exit 1
+          fi
+
+          metadata_entry_count=0
+          while IFS= read -r metadata; do
+            mode="${metadata%% *}"
+            case "$mode" in
+              d?????????|-?????????)
+                metadata_entry_count=$((metadata_entry_count + 1))
+                ;;
+              l?????????|b?????????|c?????????|p?????????|s?????????)
+                echo "Signing-input archive contains an unsupported filesystem entry type: $mode" >&2
+                exit 1
+                ;;
+            esac
+          done < <(zipinfo -l "$archive")
+
+          if [[ "$metadata_entry_count" -ne "$archive_entry_total" ]]; then
+            echo "Signing-input archive entry metadata is ambiguous or unsupported." >&2
+            echo "zipinfo total: $archive_entry_total; typed entries: $metadata_entry_count" >&2
             exit 1
           fi
 
@@ -539,6 +570,10 @@ jobs:
               echo "Unsafe signing-input archive path: $entry" >&2
               exit 1
             fi
+            if [[ "$entry" =~ [[:cntrl:]] ]]; then
+              echo "Signing-input archive path contains control characters." >&2
+              exit 1
+            fi
 
             case "/$entry/" in
               */../*|*/./*)
@@ -555,6 +590,33 @@ jobs:
           if [[ "$entry_count" -ne "$archive_entry_total" ]]; then
             echo "Signing-input archive entry enumeration is ambiguous or malformed." >&2
             echo "zipinfo total: $archive_entry_total; enumerated lines: $entry_count" >&2
+            exit 1
+          fi
+
+          duplicate_entries="$(zipinfo -1 "$archive" | LC_ALL=C sort | uniq -d)"
+          if [[ -n "$duplicate_entries" ]]; then
+            echo "Signing-input archive contains duplicate entry paths." >&2
+            printf '%s\\n' "$duplicate_entries" >&2
+            exit 1
+          fi
+
+          metadata_entry_count=0
+          while IFS= read -r metadata; do
+            mode="${metadata%% *}"
+            case "$mode" in
+              d?????????|-?????????)
+                metadata_entry_count=$((metadata_entry_count + 1))
+                ;;
+              l?????????|b?????????|c?????????|p?????????|s?????????)
+                echo "Signing-input archive contains an unsupported filesystem entry type: $mode" >&2
+                exit 1
+                ;;
+            esac
+          done < <(zipinfo -l "$archive")
+
+          if [[ "$metadata_entry_count" -ne "$archive_entry_total" ]]; then
+            echo "Signing-input archive entry metadata is ambiguous or unsupported." >&2
+            echo "zipinfo total: $archive_entry_total; typed entries: $metadata_entry_count" >&2
             exit 1
           fi
 
