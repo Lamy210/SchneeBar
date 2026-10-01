@@ -213,6 +213,41 @@ private actor CancellationAwareBudgetWorkflowLoader: GitHubWorkflowRunLoading {
     }
 }
 
+private actor CancellationAwareBudgetReviewLoader: GitHubReviewRequestLoading {
+    private let releaseGate = BudgetCancellationGate()
+    private var calls: [Int64] = []
+    private var shouldBlock = true
+
+    func reviewRequests(
+        connection: GitHubConnection,
+        identity: GitHubAccountIdentity,
+        clientID: String?,
+        repository: GitHubRepositoryAccess
+    ) async throws -> [GitHubReviewRequest] {
+        calls.append(repository.id)
+        if shouldBlock {
+            await releaseGate.wait()
+            try Task.checkCancellation()
+        }
+        return []
+    }
+
+    func waitUntilCallCount(_ expectedCount: Int) async {
+        while calls.count < expectedCount {
+            await Task.yield()
+        }
+    }
+
+    func release() async {
+        shouldBlock = false
+        await releaseGate.open()
+    }
+
+    func repositoryIDs() -> [Int64] {
+        calls
+    }
+}
+
 private actor CancellationAwareBudgetCheckLoader: GitHubCheckRunLoading {
     private let releaseGate = BudgetCancellationGate()
     private var calls: [Int64] = []
@@ -428,6 +463,57 @@ func cancelledWorkflowRefreshStopsQueuedRepositoriesAndPrioritizesUnattemptedRep
     )
 
     let requestedRepositoryIDs = await workflows.repositoryIDs()
+    #expect(requestedRepositoryIDs.count == 6)
+    #expect(
+        Set(requestedRepositoryIDs.dropFirst(2).prefix(2))
+            == Set([3, 4])
+    )
+}
+
+@Test
+func cancelledReviewRefreshStopsQueuedRepositoriesAndPrioritizesUnattemptedRepositories() async throws {
+    let repositories = try (1 ... 4).map { id in
+        try budgetRepository(id: Int64(id))
+    }
+    let reviews = CancellationAwareBudgetReviewLoader()
+    let provider = GitHubActivityProvider(
+        workflowRunLoader: BudgetWorkflowLoader(),
+        reviewRequestLoader: reviews,
+        maximumConcurrentRepositories: 2,
+        maximumRepositoriesPerRefresh: 4,
+        maximumReviewRepositoriesPerRefresh: 4,
+        minimumColdRepositoriesPerRefresh: 4,
+        minimumColdReviewRepositoriesPerRefresh: 4,
+        now: { Date(timeIntervalSince1970: 100) }
+    )
+    let profile = try budgetProfile()
+    let inventory = try budgetInventory(repositories: repositories)
+    let capabilities = budgetCapabilities(repositories: repositories)
+
+    let cancelledRefresh = Task {
+        await provider.load(
+            profile: profile,
+            inventory: inventory,
+            capabilities: capabilities
+        )
+    }
+
+    await reviews.waitUntilCallCount(2)
+    cancelledRefresh.cancel()
+    await reviews.release()
+    _ = await cancelledRefresh.value
+
+    let cancelledRepositoryIDs = await reviews.repositoryIDs()
+    #expect(cancelledRepositoryIDs.count == 2)
+    #expect(Set(cancelledRepositoryIDs) == Set([1, 2]))
+
+    _ = await provider.load(
+        profile: profile,
+        inventory: inventory,
+        capabilities: capabilities
+    )
+
+    let requestedRepositoryIDs = await reviews.repositoryIDs()
     #expect(requestedRepositoryIDs.count == 6)
     #expect(
         Set(requestedRepositoryIDs.dropFirst(2).prefix(2))
