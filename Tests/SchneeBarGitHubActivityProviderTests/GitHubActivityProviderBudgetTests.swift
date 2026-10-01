@@ -474,7 +474,7 @@ func checkPollingRotatesSecondCandidateGrantsBetweenRefreshes() async throws {
         workflowRunLoader: BudgetWorkflowLoader(),
         reviewRequestLoader: DeepFairBudgetReviewLoader(),
         checkRunLoader: checks,
-        maximumConcurrentRepositories: 2,
+        maximumConcurrentRepositories: 1,
         maximumRepositoriesPerRefresh: 3,
         maximumReviewRepositoriesPerRefresh: 3,
         maximumCheckTargetsPerRefresh: 4,
