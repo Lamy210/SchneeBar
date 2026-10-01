@@ -35,7 +35,7 @@ public actor GitHubActivityProvider {
     private var workflowRecoveryTrackers: [RepositoryPollKey: GitHubWorkflowRecoveryTracker] = [:]
     private var cachedReviewRequests: [RepositoryPollKey: [GitHubReviewRequest]] = [:]
     private var cachedCheckActivities: [CheckPollKey: [ActivityItem]] = [:]
-    private var loadsInProgress: Set<UUID> = []
+    private var loadsInProgress: [UUID: UInt64] = [:]
     private var generationByConnectionID: [UUID: UInt64] = [:]
     private var lastResultByConnectionID: [UUID: GitHubActivityLoadResult] = [:]
 
@@ -88,7 +88,7 @@ public actor GitHubActivityProvider {
             return .empty
         }
 
-        if loadsInProgress.contains(profile.id) {
+        if loadsInProgress[profile.id] != nil {
             return lastResultByConnectionID[profile.id] ?? .empty
         }
 
@@ -169,13 +169,21 @@ public actor GitHubActivityProvider {
         }
 
         let generation = generationByConnectionID[profile.id, default: 0]
-        loadsInProgress.insert(profile.id)
-        defer { loadsInProgress.remove(profile.id) }
+        loadsInProgress[profile.id] = generation
+        defer {
+            if loadsInProgress[profile.id] == generation {
+                loadsInProgress.removeValue(forKey: profile.id)
+            }
+        }
 
         let workflowBatch = await loadWorkflowRepositories(
             workflowSelection.repositories,
             profile: profile
         )
+        guard generationByConnectionID[profile.id, default: 0] == generation else {
+            return lastResultByConnectionID[profile.id] ?? .empty
+        }
+
         let workflowOutcomes = workflowBatch.outcomes
         workflowPollState = stateRecordingPollAttempts(
             connectionID: profile.id,
@@ -193,6 +201,10 @@ public actor GitHubActivityProvider {
             reviewSelection.repositories,
             profile: profile
         )
+        guard generationByConnectionID[profile.id, default: 0] == generation else {
+            return lastResultByConnectionID[profile.id] ?? .empty
+        }
+
         let reviewOutcomes = reviewBatch.outcomes
         reviewPollState = stateRecordingPollAttempts(
             connectionID: profile.id,
@@ -332,6 +344,10 @@ public actor GitHubActivityProvider {
             visibleWorkflowSHAsByRepositoryID: visibleWorkflowSHAsByRepositoryID,
             profile: profile
         )
+        guard generationByConnectionID[profile.id, default: 0] == generation else {
+            return lastResultByConnectionID[profile.id] ?? .empty
+        }
+
         let checkOutcomes = checkBatch.outcomes
         recordCheckPollAttempts(
             connectionID: profile.id,
@@ -418,7 +434,7 @@ public actor GitHubActivityProvider {
         cachedReviewRequests = cachedReviewRequests.filter { $0.key.connectionID != connectionID }
         cachedCheckActivities = cachedCheckActivities.filter { $0.key.connectionID != connectionID }
         lastResultByConnectionID.removeValue(forKey: connectionID)
-        loadsInProgress.remove(connectionID)
+        loadsInProgress.removeValue(forKey: connectionID)
     }
 
     private func monitoredRepositories(
