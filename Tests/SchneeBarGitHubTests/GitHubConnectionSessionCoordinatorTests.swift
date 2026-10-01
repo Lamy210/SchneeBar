@@ -315,6 +315,41 @@ func establishDoesNotPersistCredentialWhenInventoryRejectsCredential() async thr
 }
 
 @Test
+func failedEstablishPreservesExistingCredentialForSameConnectionAccount() async throws {
+    let transport = SessionQueueTransport([
+        SessionStubResponse(userJSON(id: 42, login: "octocat")),
+        SessionStubResponse(userJSON(id: 42, login: "octocat")),
+        SessionStubResponse(#"{"message":"Bad credentials"}"#, statusCode: 401),
+    ])
+    let store = MemoryGitHubCredentialStore()
+    let connection = try sessionConnection()
+    let key = GitHubCredentialKey(
+        connectionID: connection.id,
+        accountID: "42"
+    )
+    let existing = GitHubCredential(
+        accessToken: "existing-token",
+        endpointIdentity: "https://github.com"
+    )
+    try await store.save(existing, for: key)
+    let baselineSaves = await store.saves()
+    let coordinator = makeCoordinator(transport: transport, store: store)
+
+    await #expect(
+        throws: GitHubConnectionSessionError.reauthenticationRequired
+    ) {
+        try await coordinator.establish(
+            connection: connection,
+            credential: GitHubCredential(accessToken: "candidate-token")
+        )
+    }
+
+    #expect(await store.credential(for: key) == existing)
+    #expect(await store.saves() == baselineSaves)
+    #expect(await store.deletes() == 0)
+}
+
+@Test
 func establishDoesNotPersistCredentialWhenInventoryRequiresSSO() async throws {
     let transport = SessionQueueTransport([
         SessionStubResponse(userJSON(id: 42, login: "octocat")),
