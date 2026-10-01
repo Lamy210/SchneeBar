@@ -58,6 +58,12 @@ Endpoint identity uses the canonical HTTPS origin: an explicit default `:443`
 is equivalent to the implicit HTTPS port, while non-default GHES ports remain
 part of the identity.
 
+New-connection onboarding persists the bound credential only after authenticated
+identity, fresh repository inventory, and capability evaluation all succeed.
+Inventory authentication/SSO/availability failures and cancellation observed
+before the final save leave no newly persisted Keychain credential. Existing-
+connection recovery follows the same validate-before-mutate boundary.
+
 ### Developer preview client ID
 
 The current developer preview does not bundle a SchneeBar-owned GitHub App client ID. A tester must provide the public client ID of a GitHub App with Device Flow enabled in the connection onboarding form.
