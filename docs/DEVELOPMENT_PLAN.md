@@ -77,7 +77,7 @@ Implemented foundation:
 - dedicated existing-connection Device Flow reauthentication
 - local-first Device Flow security decision with shared onboarding/recovery anti-phishing guidance and no embedded client secret
 - same-account binding enforcement during recovery
-- validate-before-Keychain replacement semantics
+- validate-before-Keychain persistence/replacement semantics across new onboarding and existing-connection recovery
 - stale refresh / recovery race protection
 - evidence-backed SSO-required installation/connection health from explicit GitHub failure signals only; no inference from empty or forbidden resource sets
 
