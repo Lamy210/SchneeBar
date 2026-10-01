@@ -293,15 +293,11 @@ func retainedCheckBudgetEvictsLeastPreferredTarget() async throws {
 func cacheEvictionPreservesColdRepositoryPollingFairness() async throws {
     let repositories = try retainedCacheRepositories(count: 4)
     let workflows = RetainedCacheWorkflowLoader()
-    let reviews = RetainedCacheReviewLoader()
     let provider = GitHubActivityProvider(
         workflowRunLoader: workflows,
-        reviewRequestLoader: reviews,
         maximumConcurrentRepositories: 1,
         maximumRepositoriesPerRefresh: 1,
-        maximumReviewRepositoriesPerRefresh: 1,
         minimumColdRepositoriesPerRefresh: 1,
-        minimumColdReviewRepositoriesPerRefresh: 1,
         cachePolicy: GitHubActivityCachePolicy(
             maximumWorkflowRepositories: 1,
             maximumReviewRepositories: 1,
@@ -335,11 +331,15 @@ func cacheEvictionPreservesColdRepositoryPollingFairness() async throws {
 func retainedCachePrefersLatestAttemptBatchWhenClockDoesNotAdvance() async throws {
     let repositories = try retainedCacheRepositories(count: 2)
     let workflows = RetainedCacheWorkflowLoader()
+    let reviews = RetainedCacheReviewLoader()
     let provider = GitHubActivityProvider(
         workflowRunLoader: workflows,
+        reviewRequestLoader: reviews,
         maximumConcurrentRepositories: 1,
         maximumRepositoriesPerRefresh: 1,
+        maximumReviewRepositoriesPerRefresh: 1,
         minimumColdRepositoriesPerRefresh: 1,
+        minimumColdReviewRepositoriesPerRefresh: 1,
         cachePolicy: GitHubActivityCachePolicy(
             maximumWorkflowRepositories: 1,
             maximumReviewRepositories: 1,
