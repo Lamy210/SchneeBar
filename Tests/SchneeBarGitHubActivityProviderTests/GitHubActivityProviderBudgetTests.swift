@@ -38,6 +38,10 @@ private actor BudgetWorkflowLoader: GitHubWorkflowRunLoading {
     }
 
     func count() -> Int { calls.count }
+
+    func repositoryIDs() -> [Int64] {
+        calls
+    }
 }
 
 private actor RetainedBudgetWorkflowLoader:
@@ -97,6 +101,10 @@ private actor BudgetReviewLoader: GitHubReviewRequestLoading {
     }
 
     func count() -> Int { calls.count }
+
+    func repositoryIDs() -> [Int64] {
+        calls
+    }
 }
 
 private actor FairBudgetReviewLoader: GitHubReviewRequestLoading {
@@ -343,6 +351,77 @@ func periodicRefreshNeverExceedsSixteenActivitySourceListRequests() async throws
     #expect(result.surface(.workflows).attemptedTargetCount == 8)
     #expect(result.surface(.reviewRequests).attemptedTargetCount == 4)
     #expect(result.surface(.checks).attemptedTargetCount == 4)
+}
+
+@Test
+func workflowPollingRotatesAcrossRepositoriesWhenClockDoesNotAdvance() async throws {
+    let repositories = try (1 ... 6).map { id in
+        try budgetRepository(id: Int64(id))
+    }
+    let workflows = BudgetWorkflowLoader()
+    let provider = GitHubActivityProvider(
+        workflowRunLoader: workflows,
+        maximumConcurrentRepositories: 2,
+        maximumRepositoriesPerRefresh: 4,
+        minimumColdRepositoriesPerRefresh: 4,
+        now: { Date(timeIntervalSince1970: 100) }
+    )
+    let profile = try budgetProfile()
+    let inventory = try budgetInventory(repositories: repositories)
+    let capabilities = budgetCapabilities(repositories: repositories)
+
+    for _ in 0 ..< 3 {
+        _ = await provider.load(
+            profile: profile,
+            inventory: inventory,
+            capabilities: capabilities
+        )
+    }
+
+    let requestedRepositoryIDs = await workflows.repositoryIDs()
+    #expect(Set(requestedRepositoryIDs.prefix(4)) == Set([1, 2, 3, 4]))
+    #expect(
+        Set(requestedRepositoryIDs.dropFirst(4).prefix(4))
+            == Set([1, 2, 5, 6])
+    )
+    #expect(Set(requestedRepositoryIDs.suffix(4)) == Set([3, 4, 5, 6]))
+}
+
+@Test
+func reviewPollingRotatesAcrossRepositoriesWhenClockDoesNotAdvance() async throws {
+    let repositories = try (1 ... 6).map { id in
+        try budgetRepository(id: Int64(id))
+    }
+    let reviews = BudgetReviewLoader()
+    let provider = GitHubActivityProvider(
+        workflowRunLoader: BudgetWorkflowLoader(),
+        reviewRequestLoader: reviews,
+        maximumConcurrentRepositories: 2,
+        maximumRepositoriesPerRefresh: 6,
+        maximumReviewRepositoriesPerRefresh: 4,
+        minimumColdRepositoriesPerRefresh: 6,
+        minimumColdReviewRepositoriesPerRefresh: 4,
+        now: { Date(timeIntervalSince1970: 100) }
+    )
+    let profile = try budgetProfile()
+    let inventory = try budgetInventory(repositories: repositories)
+    let capabilities = budgetCapabilities(repositories: repositories)
+
+    for _ in 0 ..< 3 {
+        _ = await provider.load(
+            profile: profile,
+            inventory: inventory,
+            capabilities: capabilities
+        )
+    }
+
+    let requestedRepositoryIDs = await reviews.repositoryIDs()
+    #expect(Set(requestedRepositoryIDs.prefix(4)) == Set([1, 2, 3, 4]))
+    #expect(
+        Set(requestedRepositoryIDs.dropFirst(4).prefix(4))
+            == Set([1, 2, 5, 6])
+    )
+    #expect(Set(requestedRepositoryIDs.suffix(4)) == Set([3, 4, 5, 6]))
 }
 
 @Test

@@ -26,6 +26,7 @@ public actor GitHubActivityProvider {
 
     private var workflowPollState: [RepositoryPollKey: RepositoryPollState] = [:]
     private var reviewPollState: [RepositoryPollKey: RepositoryPollState] = [:]
+    private var nextRepositoryPollSequence: UInt64 = 0
     private var checkPollSequenceByRepository: [RepositoryPollKey: UInt64] = [:]
     private var nextCheckPollSequence: UInt64 = 0
     private var cachedWorkflowActivities: [RepositoryPollKey: [GitHubWorkflowActivity]] = [:]
@@ -177,7 +178,9 @@ public actor GitHubActivityProvider {
         let workflowOutcomes = workflowBatch.outcomes
         workflowPollState = stateRecordingPollAttempts(
             connectionID: profile.id,
-            repositoryIDs: Array(workflowBatch.attempts),
+            repositoryIDs: workflowSelection.repositories
+                .map(\.id)
+                .filter(workflowBatch.attempts.contains),
             timestamp: timestamp,
             state: workflowPollState
         )
@@ -192,7 +195,9 @@ public actor GitHubActivityProvider {
         let reviewOutcomes = reviewBatch.outcomes
         reviewPollState = stateRecordingPollAttempts(
             connectionID: profile.id,
-            repositoryIDs: Array(reviewBatch.attempts),
+            repositoryIDs: reviewSelection.repositories
+                .map(\.id)
+                .filter(reviewBatch.attempts.contains),
             timestamp: timestamp,
             state: reviewPollState
         )
@@ -534,6 +539,9 @@ public actor GitHubActivityProvider {
                 repositoryID: repositoryID
             )
             updatedState[key, default: RepositoryPollState()].lastPolledAt = timestamp
+            updatedState[key, default: RepositoryPollState()].lastPollSequence =
+                nextRepositoryPollSequence
+            nextRepositoryPollSequence &+= 1
         }
         return updatedState
     }
@@ -595,19 +603,19 @@ public actor GitHubActivityProvider {
     ) -> Bool {
         let lhsKey = RepositoryPollKey(connectionID: connectionID, repositoryID: lhs.id)
         let rhsKey = RepositoryPollKey(connectionID: connectionID, repositoryID: rhs.id)
-        let lhsDate = state[lhsKey]?.lastPolledAt
-        let rhsDate = state[rhsKey]?.lastPolledAt
+        let lhsSequence = state[lhsKey]?.lastPollSequence
+        let rhsSequence = state[rhsKey]?.lastPollSequence
 
-        switch (lhsDate, rhsDate) {
+        switch (lhsSequence, rhsSequence) {
         case (nil, nil):
             return repositorySort(lhs: lhs, rhs: rhs)
         case (nil, _):
             return true
         case (_, nil):
             return false
-        case let (lhsDate?, rhsDate?):
-            if lhsDate != rhsDate {
-                return lhsDate < rhsDate
+        case let (lhsSequence?, rhsSequence?):
+            if lhsSequence != rhsSequence {
+                return lhsSequence < rhsSequence
             }
             return repositorySort(lhs: lhs, rhs: rhs)
         }
@@ -1223,6 +1231,7 @@ private struct CheckPollKey: Hashable, Sendable {
 
 private struct RepositoryPollState: Sendable {
     var lastPolledAt: Date?
+    var lastPollSequence: UInt64?
     var isHot = false
 }
 
