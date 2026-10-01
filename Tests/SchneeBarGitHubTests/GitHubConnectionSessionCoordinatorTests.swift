@@ -79,6 +79,47 @@ private actor SessionQueueTransport: GitHubHTTPTransport {
     }
 }
 
+private actor EstablishIdentityGateTransport: GitHubHTTPTransport {
+    private let identityStarted = SessionRefreshGate()
+    private let identityRelease = SessionRefreshGate()
+    private var requestCount = 0
+
+    func data(
+        for request: URLRequest
+    ) async throws -> (Data, HTTPURLResponse) {
+        requestCount += 1
+        if request.url?.path.hasSuffix("/user") == true {
+            await identityStarted.open()
+            await identityRelease.wait()
+        }
+
+        let response = try #require(
+            HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: "HTTP/1.1",
+                headerFields: nil
+            )
+        )
+        return (
+            Data(userJSON(id: 42, login: "octocat").utf8),
+            response
+        )
+    }
+
+    func waitUntilIdentityStarted() async {
+        await identityStarted.wait()
+    }
+
+    func releaseIdentity() async {
+        await identityRelease.open()
+    }
+
+    func requests() -> Int {
+        requestCount
+    }
+}
+
 private actor EstablishInventoryGateTransport: GitHubHTTPTransport {
     private let inventoryStarted = SessionRefreshGate()
     private let inventoryRelease = SessionRefreshGate()
@@ -322,6 +363,40 @@ func establishDoesNotPersistCredentialWhenInventoryIsUnavailable() async throws 
         )
     }
 
+    #expect(await store.saves() == 0)
+    #expect(await store.deletes() == 0)
+}
+
+@Test
+func establishCancellationAfterIdentityStartsStopsBeforeInventory() async throws {
+    let transport = EstablishIdentityGateTransport()
+    let store = MemoryGitHubCredentialStore()
+    let coordinator = GitHubConnectionSessionCoordinator(
+        credentialStore: store,
+        accessClient: GitHubAccessClient(transport: transport),
+        deviceFlowClient: GitHubDeviceFlowClient(
+            transport: transport,
+            now: { sessionNow }
+        ),
+        now: { sessionNow },
+        refreshLeeway: 300
+    )
+
+    let task = Task {
+        try await coordinator.establish(
+            connection: try sessionConnection(),
+            credential: GitHubCredential(accessToken: "ghu_access")
+        )
+    }
+
+    await transport.waitUntilIdentityStarted()
+    task.cancel()
+    await transport.releaseIdentity()
+
+    await #expect(throws: CancellationError.self) {
+        try await task.value
+    }
+    #expect(await transport.requests() == 1)
     #expect(await store.saves() == 0)
     #expect(await store.deletes() == 0)
 }

@@ -70,6 +70,8 @@ public actor GitHubConnectionSessionCoordinator {
         {
             throw GitHubConnectionSessionError.ssoRequired
         }
+
+        try Task.checkCancellation()
         let key = credentialKey(connection: connection, identity: account.identity)
 
         let inventory: GitHubAccessInventory
