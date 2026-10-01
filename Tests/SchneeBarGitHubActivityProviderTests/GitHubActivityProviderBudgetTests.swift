@@ -502,6 +502,126 @@ func checkPollingRotatesSecondCandidateGrantsBetweenRefreshes() async throws {
 }
 
 @Test
+func resetDuringWorkflowAttemptKeepsRepositoryColdForReplacementGeneration() async throws {
+    let repositories = try (1 ... 2).map { id in
+        try budgetRepository(id: Int64(id))
+    }
+    let workflows = CancellationAwareBudgetWorkflowLoader()
+    let provider = GitHubActivityProvider(
+        workflowRunLoader: workflows,
+        maximumConcurrentRepositories: 1,
+        maximumRepositoriesPerRefresh: 1,
+        minimumColdRepositoriesPerRefresh: 1,
+        now: { Date(timeIntervalSince1970: 100) }
+    )
+    let profile = try budgetProfile()
+    let inventory = try budgetInventory(repositories: repositories)
+    let capabilities = budgetCapabilities(repositories: repositories)
+
+    async let staleLoad = provider.load(
+        profile: profile,
+        inventory: inventory,
+        capabilities: capabilities
+    )
+    await workflows.waitUntilCallCount(1)
+
+    await provider.reset(connectionID: profile.id)
+    await workflows.release()
+    _ = await staleLoad
+
+    _ = await provider.load(
+        profile: profile,
+        inventory: inventory,
+        capabilities: capabilities
+    )
+
+    #expect(await workflows.repositoryIDs() == [1, 1])
+}
+
+@Test
+func resetDuringReviewAttemptKeepsRepositoryColdForReplacementGeneration() async throws {
+    let repositories = try (1 ... 2).map { id in
+        try budgetRepository(id: Int64(id))
+    }
+    let reviews = CancellationAwareBudgetReviewLoader()
+    let provider = GitHubActivityProvider(
+        workflowRunLoader: BudgetWorkflowLoader(),
+        reviewRequestLoader: reviews,
+        maximumConcurrentRepositories: 1,
+        maximumRepositoriesPerRefresh: 2,
+        maximumReviewRepositoriesPerRefresh: 1,
+        minimumColdRepositoriesPerRefresh: 2,
+        minimumColdReviewRepositoriesPerRefresh: 1,
+        now: { Date(timeIntervalSince1970: 100) }
+    )
+    let profile = try budgetProfile()
+    let inventory = try budgetInventory(repositories: repositories)
+    let capabilities = budgetCapabilities(repositories: repositories)
+
+    async let staleLoad = provider.load(
+        profile: profile,
+        inventory: inventory,
+        capabilities: capabilities
+    )
+    await reviews.waitUntilCallCount(1)
+
+    await provider.reset(connectionID: profile.id)
+    await reviews.release()
+    _ = await staleLoad
+
+    _ = await provider.load(
+        profile: profile,
+        inventory: inventory,
+        capabilities: capabilities
+    )
+
+    #expect(await reviews.repositoryIDs() == [1, 1])
+}
+
+@Test
+func resetDuringCheckAttemptKeepsRepositoryColdForReplacementGeneration() async throws {
+    let repositories = try (1 ... 2).map { id in
+        try budgetRepository(id: Int64(id))
+    }
+    let checks = CancellationAwareBudgetCheckLoader()
+    let provider = GitHubActivityProvider(
+        workflowRunLoader: BudgetWorkflowLoader(),
+        reviewRequestLoader: FairBudgetReviewLoader(),
+        checkRunLoader: checks,
+        maximumConcurrentRepositories: 1,
+        maximumRepositoriesPerRefresh: 2,
+        maximumReviewRepositoriesPerRefresh: 2,
+        maximumCheckTargetsPerRefresh: 1,
+        maximumCheckTargetsPerRepository: 1,
+        minimumColdRepositoriesPerRefresh: 2,
+        minimumColdReviewRepositoriesPerRefresh: 2,
+        now: { Date(timeIntervalSince1970: 100) }
+    )
+    let profile = try budgetProfile()
+    let inventory = try budgetInventory(repositories: repositories)
+    let capabilities = budgetCapabilities(repositories: repositories)
+
+    async let staleLoad = provider.load(
+        profile: profile,
+        inventory: inventory,
+        capabilities: capabilities
+    )
+    await checks.waitUntilCallCount(1)
+
+    await provider.reset(connectionID: profile.id)
+    await checks.release()
+    _ = await staleLoad
+
+    _ = await provider.load(
+        profile: profile,
+        inventory: inventory,
+        capabilities: capabilities
+    )
+
+    #expect(await checks.repositoryIDs() == [1, 1])
+}
+
+@Test
 func cancelledWorkflowRefreshStopsQueuedRepositoriesAndPrioritizesUnattemptedRepositories() async throws {
     let repositories = try (1 ... 4).map { id in
         try budgetRepository(id: Int64(id))
