@@ -194,6 +194,10 @@ public actor GitHubConnectionSessionCoordinator {
         ) else {
             throw GitHubConnectionSessionError.connectionEndpointMismatch
         }
+        try validateInventoryIdentity(
+            session.inventory,
+            expectedID: session.account.identity.id
+        )
 
         let sourceKey = credentialKey(
             connection: sourceConnection,
