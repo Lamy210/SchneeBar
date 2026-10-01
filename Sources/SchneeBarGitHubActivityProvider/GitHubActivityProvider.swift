@@ -170,13 +170,14 @@ public actor GitHubActivityProvider {
         loadsInProgress.insert(profile.id)
         defer { loadsInProgress.remove(profile.id) }
 
-        let workflowOutcomes = await loadWorkflowRepositories(
+        let workflowBatch = await loadWorkflowRepositories(
             workflowSelection.repositories,
             profile: profile
         )
+        let workflowOutcomes = workflowBatch.outcomes
         workflowPollState = stateRecordingPollAttempts(
             connectionID: profile.id,
-            repositoryIDs: workflowOutcomes.map(\.repositoryID),
+            repositoryIDs: Array(workflowBatch.attempts),
             timestamp: timestamp,
             state: workflowPollState
         )
@@ -184,13 +185,14 @@ public actor GitHubActivityProvider {
             return lastResultByConnectionID[profile.id] ?? .empty
         }
 
-        let reviewOutcomes = await loadReviewRepositories(
+        let reviewBatch = await loadReviewRepositories(
             reviewSelection.repositories,
             profile: profile
         )
+        let reviewOutcomes = reviewBatch.outcomes
         reviewPollState = stateRecordingPollAttempts(
             connectionID: profile.id,
-            repositoryIDs: reviewOutcomes.map(\.repositoryID),
+            repositoryIDs: Array(reviewBatch.attempts),
             timestamp: timestamp,
             state: reviewPollState
         )
@@ -318,16 +320,17 @@ public actor GitHubActivityProvider {
             }
         )
 
-        let checkOutcomes = await loadCheckCandidates(
+        let checkBatch = await loadCheckCandidates(
             checkCandidates,
             repositoryByID: repositoryByID,
             visibleWorkflowSHAsByRepositoryID: visibleWorkflowSHAsByRepositoryID,
             profile: profile
         )
+        let checkOutcomes = checkBatch.outcomes
         recordCheckPollAttempts(
             connectionID: profile.id,
             candidates: checkCandidates,
-            outcomes: checkOutcomes
+            attemptedKeys: checkBatch.attempts
         )
         guard !Task.isCancelled else {
             return lastResultByConnectionID[profile.id] ?? .empty
@@ -538,9 +541,8 @@ public actor GitHubActivityProvider {
     private func recordCheckPollAttempts(
         connectionID: UUID,
         candidates: [GitHubCheckCandidate],
-        outcomes: [CheckLoadOutcome]
+        attemptedKeys: Set<CheckPollKey>
     ) {
-        let attemptedKeys = Set(outcomes.map(\.key))
         for candidate in candidates {
             let candidateKey = CheckPollKey(
                 connectionID: connectionID,
@@ -893,8 +895,9 @@ public actor GitHubActivityProvider {
     private func loadWorkflowRepositories(
         _ repositories: [GitHubRepositoryAccess],
         profile: GitHubConnectionProfile
-    ) async -> [WorkflowLoadOutcome] {
+    ) async -> PollLoadBatch<WorkflowLoadOutcome, Int64> {
         let loader = workflowRunLoader
+        let attempts = PollAttemptRecorder<Int64>()
         let mapper = activityMapper
         let supersessionResolver = workflowRunSupersessionResolver
         let runLimit = perRepositoryRunLimit
@@ -902,6 +905,8 @@ public actor GitHubActivityProvider {
 
         let loadOne: @Sendable (GitHubRepositoryAccess) async -> WorkflowLoadOutcome = { repository in
             do {
+                try Task.checkCancellation()
+                await attempts.record(repository.id)
                 let runs = try await loader.workflowRuns(
                     connection: profile.connection,
                     identity: profile.account,
@@ -943,23 +948,32 @@ public actor GitHubActivityProvider {
             }
         }
 
-        return await boundedLoad(
+        let outcomes = await boundedLoad(
             repositories,
             maximumConcurrent: maximumConcurrentRepositories,
             loadOne: loadOne
+        )
+        return PollLoadBatch(
+            outcomes: outcomes,
+            attempts: await attempts.snapshot()
         )
     }
 
     private func loadReviewRepositories(
         _ repositories: [GitHubRepositoryAccess],
         profile: GitHubConnectionProfile
-    ) async -> [ReviewLoadOutcome] {
-        guard let loader = reviewRequestLoader else { return [] }
+    ) async -> PollLoadBatch<ReviewLoadOutcome, Int64> {
+        guard let loader = reviewRequestLoader else {
+            return PollLoadBatch(outcomes: [], attempts: [])
+        }
         let mapper = reviewRequestMapper
+        let attempts = PollAttemptRecorder<Int64>()
         let maximumConcurrentRepositories = maximumConcurrentRepositories
 
         let loadOne: @Sendable (GitHubRepositoryAccess) async -> ReviewLoadOutcome = { repository in
             do {
+                try Task.checkCancellation()
+                await attempts.record(repository.id)
                 let requests = try await loader.reviewRequests(
                     connection: profile.connection,
                     identity: profile.account,
@@ -983,10 +997,14 @@ public actor GitHubActivityProvider {
             }
         }
 
-        return await boundedLoad(
+        let outcomes = await boundedLoad(
             repositories,
             maximumConcurrent: maximumConcurrentRepositories,
             loadOne: loadOne
+        )
+        return PollLoadBatch(
+            outcomes: outcomes,
+            attempts: await attempts.snapshot()
         )
     }
 
@@ -995,9 +1013,12 @@ public actor GitHubActivityProvider {
         repositoryByID: [Int64: GitHubRepositoryAccess],
         visibleWorkflowSHAsByRepositoryID: [Int64: Set<String>],
         profile: GitHubConnectionProfile
-    ) async -> [CheckLoadOutcome] {
-        guard let loader = checkRunLoader else { return [] }
+    ) async -> PollLoadBatch<CheckLoadOutcome, CheckPollKey> {
+        guard let loader = checkRunLoader else {
+            return PollLoadBatch(outcomes: [], attempts: [])
+        }
         let mapper = checkRunMapper
+        let attempts = PollAttemptRecorder<CheckPollKey>()
         let maximumConcurrentRepositories = maximumConcurrentRepositories
 
         let targets = candidates.compactMap { candidate -> CheckLoadTarget? in
@@ -1011,6 +1032,8 @@ public actor GitHubActivityProvider {
                 headSHA: target.candidate.headSHA
             )
             do {
+                try Task.checkCancellation()
+                await attempts.record(key)
                 let checks = try await loader.checkRuns(
                     connection: profile.connection,
                     identity: profile.account,
@@ -1037,10 +1060,14 @@ public actor GitHubActivityProvider {
             }
         }
 
-        return await boundedLoad(
+        let outcomes = await boundedLoad(
             targets,
             maximumConcurrent: maximumConcurrentRepositories,
             loadOne: loadOne
+        )
+        return PollLoadBatch(
+            outcomes: outcomes,
+            attempts: await attempts.snapshot()
         )
     }
 
@@ -1229,34 +1256,20 @@ private enum CheckLoadOutcome: Sendable {
     case failure(key: CheckPollKey, failure: GitHubActivityTargetFailure)
 }
 
-private extension WorkflowLoadOutcome {
-    var repositoryID: Int64 {
-        switch self {
-        case let .success(repository, _, _, _):
-            repository.id
-        case let .failure(failure):
-            failure.repositoryID
-        }
-    }
+
+private struct PollLoadBatch<Outcome: Sendable, Attempt: Hashable & Sendable>: Sendable {
+    let outcomes: [Outcome]
+    let attempts: Set<Attempt>
 }
 
-private extension ReviewLoadOutcome {
-    var repositoryID: Int64 {
-        switch self {
-        case let .success(repositoryID, _):
-            repositoryID
-        case let .failure(failure):
-            failure.repositoryID
-        }
-    }
-}
+private actor PollAttemptRecorder<Value: Hashable & Sendable> {
+    private var values = Set<Value>()
 
-private extension CheckLoadOutcome {
-    var key: CheckPollKey {
-        switch self {
-        case let .success(key, _),
-             let .failure(key, _):
-            key
-        }
+    func record(_ value: Value) {
+        values.insert(value)
+    }
+
+    func snapshot() -> Set<Value> {
+        values
     }
 }
