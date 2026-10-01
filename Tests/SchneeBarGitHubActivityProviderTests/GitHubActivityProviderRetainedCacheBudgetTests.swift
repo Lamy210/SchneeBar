@@ -293,11 +293,15 @@ func retainedCheckBudgetEvictsLeastPreferredTarget() async throws {
 func cacheEvictionPreservesColdRepositoryPollingFairness() async throws {
     let repositories = try retainedCacheRepositories(count: 4)
     let workflows = RetainedCacheWorkflowLoader()
+    let reviews = RetainedCacheReviewLoader()
     let provider = GitHubActivityProvider(
         workflowRunLoader: workflows,
+        reviewRequestLoader: reviews,
         maximumConcurrentRepositories: 1,
         maximumRepositoriesPerRefresh: 1,
+        maximumReviewRepositoriesPerRefresh: 1,
         minimumColdRepositoriesPerRefresh: 1,
+        minimumColdReviewRepositoriesPerRefresh: 1,
         cachePolicy: GitHubActivityCachePolicy(
             maximumWorkflowRepositories: 1,
             maximumReviewRepositories: 1,
@@ -362,6 +366,7 @@ func retainedCachePrefersLatestAttemptBatchWhenClockDoesNotAdvance() async throw
     )
 
     await workflows.setMode(.failure)
+    await reviews.setMode(.failure)
     let failedRefresh = await provider.load(
         profile: profile,
         inventory: inventory,
@@ -370,6 +375,10 @@ func retainedCachePrefersLatestAttemptBatchWhenClockDoesNotAdvance() async throw
 
     #expect(
         failedRefresh.surface(.workflows).items.map(\.repository)
+            == ["snow/repo-02"]
+    )
+    #expect(
+        failedRefresh.surface(.reviewRequests).items.map(\.repository)
             == ["snow/repo-02"]
     )
 }

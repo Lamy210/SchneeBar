@@ -533,6 +533,10 @@ public actor GitHubActivityProvider {
         timestamp: Date,
         state: [RepositoryPollKey: RepositoryPollState]
     ) -> [RepositoryPollKey: RepositoryPollState] {
+        guard !repositoryIDs.isEmpty else {
+            return state
+        }
+
         var updatedState = state
         let batchSequence = nextRepositoryPollBatchSequence
         nextRepositoryPollBatchSequence &+= 1
@@ -1287,7 +1291,6 @@ private enum CheckLoadOutcome: Sendable {
     case success(key: CheckPollKey, activities: [ActivityItem])
     case failure(key: CheckPollKey, failure: GitHubActivityTargetFailure)
 }
-
 
 private struct PollLoadBatch<Outcome: Sendable, Attempt: Hashable & Sendable>: Sendable {
     let outcomes: [Outcome]
