@@ -100,7 +100,7 @@ Implemented:
 - bounded Check Run activity for review/workflow-derived SHAs
 - hidden successful Workflow evidence for Check candidate discovery
 - provider-neutral priority Inbox semantics across Reviews, Checks, and Workflows
-- fixed source-list request budgets across Workflow / Review / Check polling, with cancellation-aware bounded fan-out that stops enqueueing queued targets and records repository poll recency only for targets that actually started; Workflow/Review fairness uses monotonic attempt sequence rather than wall-clock timestamps so equal/backward clocks cannot reintroduce stable-order starvation
+- fixed source-list request budgets across Workflow / Review / Check polling, with cancellation-aware bounded fan-out that stops enqueueing queued targets and records repository poll recency only for targets that actually started; Workflow/Review fairness uses monotonic attempt sequence rather than wall-clock timestamps so equal/backward clocks cannot reintroduce stable-order starvation, while retained-cache recency uses a monotonic per-refresh batch sequence
 - bounded Check discovery distributes the global target budget round-robin across repositories before taking second candidates and tracks per-repository candidate-grant recency across refreshes, rotating both first and deeper candidate slots without increasing request ceilings and advancing fairness only for Check targets that actually started
 - Actions / Reviews / Checks capability presentation
 - source-level activity failure/accounting with capability-only connection-health separation

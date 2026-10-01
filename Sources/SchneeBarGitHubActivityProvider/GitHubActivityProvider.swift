@@ -27,6 +27,7 @@ public actor GitHubActivityProvider {
     private var workflowPollState: [RepositoryPollKey: RepositoryPollState] = [:]
     private var reviewPollState: [RepositoryPollKey: RepositoryPollState] = [:]
     private var nextRepositoryPollSequence: UInt64 = 0
+    private var nextRepositoryPollBatchSequence: UInt64 = 0
     private var checkPollSequenceByRepository: [RepositoryPollKey: UInt64] = [:]
     private var nextCheckPollSequence: UInt64 = 0
     private var cachedWorkflowActivities: [RepositoryPollKey: [GitHubWorkflowActivity]] = [:]
@@ -533,6 +534,9 @@ public actor GitHubActivityProvider {
         state: [RepositoryPollKey: RepositoryPollState]
     ) -> [RepositoryPollKey: RepositoryPollState] {
         var updatedState = state
+        let batchSequence = nextRepositoryPollBatchSequence
+        nextRepositoryPollBatchSequence &+= 1
+
         for repositoryID in repositoryIDs {
             let key = RepositoryPollKey(
                 connectionID: connectionID,
@@ -541,6 +545,8 @@ public actor GitHubActivityProvider {
             updatedState[key, default: RepositoryPollState()].lastPolledAt = timestamp
             updatedState[key, default: RepositoryPollState()].lastPollSequence =
                 nextRepositoryPollSequence
+            updatedState[key, default: RepositoryPollState()].lastPollBatchSequence =
+                batchSequence
             nextRepositoryPollSequence &+= 1
         }
         return updatedState
@@ -879,6 +885,22 @@ public actor GitHubActivityProvider {
 
         if lhsHot != rhsHot {
             return lhsHot
+        }
+
+        switch (
+            lhsState?.lastPollBatchSequence,
+            rhsState?.lastPollBatchSequence
+        ) {
+        case let (lhsSequence?, rhsSequence?):
+            if lhsSequence != rhsSequence {
+                return lhsSequence > rhsSequence
+            }
+        case (_?, nil):
+            return true
+        case (nil, _?):
+            return false
+        case (nil, nil):
+            break
         }
 
         switch (
@@ -1232,6 +1254,7 @@ private struct CheckPollKey: Hashable, Sendable {
 private struct RepositoryPollState: Sendable {
     var lastPolledAt: Date?
     var lastPollSequence: UInt64?
+    var lastPollBatchSequence: UInt64?
     var isHot = false
 }
 
