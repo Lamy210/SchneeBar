@@ -328,6 +328,62 @@ func cacheEvictionPreservesColdRepositoryPollingFairness() async throws {
 }
 
 @Test
+func retainedCachePrefersLatestAttemptBatchWhenClockDoesNotAdvance() async throws {
+    let repositories = try retainedCacheRepositories(count: 2)
+    let workflows = RetainedCacheWorkflowLoader()
+    let reviews = RetainedCacheReviewLoader()
+    let provider = GitHubActivityProvider(
+        workflowRunLoader: workflows,
+        reviewRequestLoader: reviews,
+        maximumConcurrentRepositories: 1,
+        maximumRepositoriesPerRefresh: 1,
+        maximumReviewRepositoriesPerRefresh: 1,
+        minimumColdRepositoriesPerRefresh: 1,
+        minimumColdReviewRepositoriesPerRefresh: 1,
+        cachePolicy: GitHubActivityCachePolicy(
+            maximumWorkflowRepositories: 1,
+            maximumReviewRepositories: 1,
+            maximumCheckTargets: 1,
+            maximumRecoveryLanesPerRepository: 1,
+            maximumRetainedItemsPerSurface: 10,
+            maximumRetainedFailuresPerSurface: 10
+        ),
+        now: { Date(timeIntervalSince1970: 100) }
+    )
+    let profile = try retainedCacheProfile()
+    let inventory = try retainedCacheInventory(repositories: repositories)
+    let capabilities = retainedCacheCapabilities(repositories: repositories)
+
+    _ = await provider.load(
+        profile: profile,
+        inventory: inventory,
+        capabilities: capabilities
+    )
+    _ = await provider.load(
+        profile: profile,
+        inventory: inventory,
+        capabilities: capabilities
+    )
+
+    await workflows.setMode(.failure)
+    await reviews.setMode(.failure)
+    let failedRefresh = await provider.load(
+        profile: profile,
+        inventory: inventory,
+        capabilities: capabilities
+    )
+
+    #expect(
+        failedRefresh.surface(.workflows).items.map(\.repository)
+            == ["snow/repo-02"]
+    )
+    #expect(
+        failedRefresh.surface(.reviewRequests).items.map(\.repository)
+            == ["snow/repo-02"]
+    )
+}
+
+@Test
 func concurrentLoadReturnsBoundedRetainedLastResult() async throws {
     let repository = try #require(
         retainedCacheRepositories(count: 1).first

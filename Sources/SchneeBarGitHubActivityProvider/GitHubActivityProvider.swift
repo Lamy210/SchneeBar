@@ -26,12 +26,16 @@ public actor GitHubActivityProvider {
 
     private var workflowPollState: [RepositoryPollKey: RepositoryPollState] = [:]
     private var reviewPollState: [RepositoryPollKey: RepositoryPollState] = [:]
+    private var nextRepositoryPollSequence: UInt64 = 0
+    private var nextRepositoryPollBatchSequence: UInt64 = 0
+    private var checkPollSequenceByRepository: [RepositoryPollKey: UInt64] = [:]
+    private var nextCheckPollSequence: UInt64 = 0
     private var cachedWorkflowActivities: [RepositoryPollKey: [GitHubWorkflowActivity]] = [:]
     private var workflowEvidence: [RepositoryPollKey: [GitHubWorkflowEvidence]] = [:]
     private var workflowRecoveryTrackers: [RepositoryPollKey: GitHubWorkflowRecoveryTracker] = [:]
     private var cachedReviewRequests: [RepositoryPollKey: [GitHubReviewRequest]] = [:]
     private var cachedCheckActivities: [CheckPollKey: [ActivityItem]] = [:]
-    private var loadsInProgress: Set<UUID> = []
+    private var loadsInProgress: [UUID: UInt64] = [:]
     private var generationByConnectionID: [UUID: UInt64] = [:]
     private var lastResultByConnectionID: [UUID: GitHubActivityLoadResult] = [:]
 
@@ -84,7 +88,7 @@ public actor GitHubActivityProvider {
             return .empty
         }
 
-        if loadsInProgress.contains(profile.id) {
+        if loadsInProgress[profile.id] != nil {
             return lastResultByConnectionID[profile.id] ?? .empty
         }
 
@@ -146,8 +150,7 @@ public actor GitHubActivityProvider {
             repositories: workflowEligible,
             state: workflowPollState,
             maximumPerRefresh: maximumRepositoriesPerRefresh,
-            minimumColdPerRefresh: minimumColdRepositoriesPerRefresh,
-            timestamp: timestamp
+            minimumColdPerRefresh: minimumColdRepositoriesPerRefresh
         )
         workflowPollState = workflowSelection.state
 
@@ -158,8 +161,7 @@ public actor GitHubActivityProvider {
                 repositories: reviewEligible,
                 state: reviewPollState,
                 maximumPerRefresh: maximumReviewRepositoriesPerRefresh,
-                minimumColdPerRefresh: minimumColdReviewRepositoriesPerRefresh,
-                timestamp: timestamp
+                minimumColdPerRefresh: minimumColdReviewRepositoriesPerRefresh
             )
             reviewPollState = reviewSelection.state
         } else {
@@ -167,17 +169,54 @@ public actor GitHubActivityProvider {
         }
 
         let generation = generationByConnectionID[profile.id, default: 0]
-        loadsInProgress.insert(profile.id)
-        defer { loadsInProgress.remove(profile.id) }
+        loadsInProgress[profile.id] = generation
+        defer {
+            if loadsInProgress[profile.id] == generation {
+                loadsInProgress.removeValue(forKey: profile.id)
+            }
+        }
 
-        let workflowOutcomes = await loadWorkflowRepositories(
+        let workflowBatch = await loadWorkflowRepositories(
             workflowSelection.repositories,
             profile: profile
         )
-        let reviewOutcomes = await loadReviewRepositories(
+        guard generationByConnectionID[profile.id, default: 0] == generation else {
+            return lastResultByConnectionID[profile.id] ?? .empty
+        }
+
+        let workflowOutcomes = workflowBatch.outcomes
+        workflowPollState = stateRecordingPollAttempts(
+            connectionID: profile.id,
+            repositoryIDs: workflowSelection.repositories
+                .map(\.id)
+                .filter(workflowBatch.attempts.contains),
+            timestamp: timestamp,
+            state: workflowPollState
+        )
+        guard !Task.isCancelled else {
+            return lastResultByConnectionID[profile.id] ?? .empty
+        }
+
+        let reviewBatch = await loadReviewRepositories(
             reviewSelection.repositories,
             profile: profile
         )
+        guard generationByConnectionID[profile.id, default: 0] == generation else {
+            return lastResultByConnectionID[profile.id] ?? .empty
+        }
+
+        let reviewOutcomes = reviewBatch.outcomes
+        reviewPollState = stateRecordingPollAttempts(
+            connectionID: profile.id,
+            repositoryIDs: reviewSelection.repositories
+                .map(\.id)
+                .filter(reviewBatch.attempts.contains),
+            timestamp: timestamp,
+            state: reviewPollState
+        )
+        guard !Task.isCancelled else {
+            return lastResultByConnectionID[profile.id] ?? .empty
+        }
 
         guard generationByConnectionID[profile.id, default: 0] == generation else {
             return lastResultByConnectionID[profile.id] ?? .empty
@@ -259,8 +298,15 @@ public actor GitHubActivityProvider {
 
         let checkCandidates: [GitHubCheckCandidate]
         if checkRunLoader != nil {
+            let orderedCheckRepositories = checkEligible.sorted {
+                checkCandidateSort(
+                    lhs: $0,
+                    rhs: $1,
+                    connectionID: profile.id
+                )
+            }
             checkCandidates = checkCandidatePlanner.candidates(
-                repositories: checkEligible,
+                repositories: orderedCheckRepositories,
                 reviewRequestsByRepositoryID: reviewRequestsByRepositoryID,
                 workflowEvidenceByRepositoryID: workflowEvidenceByRepositoryID,
                 maximumTotal: maximumCheckTargetsPerRefresh,
@@ -292,12 +338,25 @@ public actor GitHubActivityProvider {
             }
         )
 
-        let checkOutcomes = await loadCheckCandidates(
+        let checkBatch = await loadCheckCandidates(
             checkCandidates,
             repositoryByID: repositoryByID,
             visibleWorkflowSHAsByRepositoryID: visibleWorkflowSHAsByRepositoryID,
             profile: profile
         )
+        guard generationByConnectionID[profile.id, default: 0] == generation else {
+            return lastResultByConnectionID[profile.id] ?? .empty
+        }
+
+        let checkOutcomes = checkBatch.outcomes
+        recordCheckPollAttempts(
+            connectionID: profile.id,
+            candidates: checkCandidates,
+            attemptedKeys: checkBatch.attempts
+        )
+        guard !Task.isCancelled else {
+            return lastResultByConnectionID[profile.id] ?? .empty
+        }
 
         guard generationByConnectionID[profile.id, default: 0] == generation else {
             return lastResultByConnectionID[profile.id] ?? .empty
@@ -364,6 +423,9 @@ public actor GitHubActivityProvider {
         generationByConnectionID[connectionID, default: 0] &+= 1
         workflowPollState = workflowPollState.filter { $0.key.connectionID != connectionID }
         reviewPollState = reviewPollState.filter { $0.key.connectionID != connectionID }
+        checkPollSequenceByRepository = checkPollSequenceByRepository.filter {
+            $0.key.connectionID != connectionID
+        }
         cachedWorkflowActivities = cachedWorkflowActivities.filter { $0.key.connectionID != connectionID }
         workflowEvidence = workflowEvidence.filter { $0.key.connectionID != connectionID }
         workflowRecoveryTrackers = workflowRecoveryTrackers.filter {
@@ -372,7 +434,7 @@ public actor GitHubActivityProvider {
         cachedReviewRequests = cachedReviewRequests.filter { $0.key.connectionID != connectionID }
         cachedCheckActivities = cachedCheckActivities.filter { $0.key.connectionID != connectionID }
         lastResultByConnectionID.removeValue(forKey: connectionID)
-        loadsInProgress.remove(connectionID)
+        loadsInProgress.removeValue(forKey: connectionID)
     }
 
     private func monitoredRepositories(
@@ -426,15 +488,14 @@ public actor GitHubActivityProvider {
         repositories: [GitHubRepositoryAccess],
         state: [RepositoryPollKey: RepositoryPollState],
         maximumPerRefresh: Int,
-        minimumColdPerRefresh: Int,
-        timestamp: Date
+        minimumColdPerRefresh: Int
     ) -> RepositoryRefreshSelection {
         let budget = min(maximumPerRefresh, repositories.count)
         guard budget > 0 else {
             return RepositoryRefreshSelection(repositories: [], state: state)
         }
 
-        var updatedState = state
+        let updatedState = state
         let hot = repositories
             .filter {
                 updatedState[
@@ -479,11 +540,85 @@ public actor GitHubActivityProvider {
             )
         }
 
-        for repository in selected {
-            let key = RepositoryPollKey(connectionID: connectionID, repositoryID: repository.id)
-            updatedState[key, default: RepositoryPollState()].lastPolledAt = timestamp
-        }
         return RepositoryRefreshSelection(repositories: selected, state: updatedState)
+    }
+
+    private func stateRecordingPollAttempts(
+        connectionID: UUID,
+        repositoryIDs: [Int64],
+        timestamp: Date,
+        state: [RepositoryPollKey: RepositoryPollState]
+    ) -> [RepositoryPollKey: RepositoryPollState] {
+        guard !repositoryIDs.isEmpty else {
+            return state
+        }
+
+        var updatedState = state
+        let batchSequence = nextRepositoryPollBatchSequence
+        nextRepositoryPollBatchSequence &+= 1
+
+        for repositoryID in repositoryIDs {
+            let key = RepositoryPollKey(
+                connectionID: connectionID,
+                repositoryID: repositoryID
+            )
+            updatedState[key, default: RepositoryPollState()].lastPolledAt = timestamp
+            updatedState[key, default: RepositoryPollState()].lastPollSequence =
+                nextRepositoryPollSequence
+            updatedState[key, default: RepositoryPollState()].lastPollBatchSequence =
+                batchSequence
+            nextRepositoryPollSequence &+= 1
+        }
+        return updatedState
+    }
+
+    private func recordCheckPollAttempts(
+        connectionID: UUID,
+        candidates: [GitHubCheckCandidate],
+        attemptedKeys: Set<CheckPollKey>
+    ) {
+        for candidate in candidates {
+            let candidateKey = CheckPollKey(
+                connectionID: connectionID,
+                repositoryID: candidate.repositoryID,
+                headSHA: candidate.headSHA
+            )
+            guard attemptedKeys.contains(candidateKey) else {
+                continue
+            }
+
+            let repositoryKey = RepositoryPollKey(
+                connectionID: connectionID,
+                repositoryID: candidate.repositoryID
+            )
+            checkPollSequenceByRepository[repositoryKey] = nextCheckPollSequence
+            nextCheckPollSequence &+= 1
+        }
+    }
+
+    private func checkCandidateSort(
+        lhs: GitHubRepositoryAccess,
+        rhs: GitHubRepositoryAccess,
+        connectionID: UUID
+    ) -> Bool {
+        let lhsKey = RepositoryPollKey(connectionID: connectionID, repositoryID: lhs.id)
+        let rhsKey = RepositoryPollKey(connectionID: connectionID, repositoryID: rhs.id)
+        let lhsSequence = checkPollSequenceByRepository[lhsKey]
+        let rhsSequence = checkPollSequenceByRepository[rhsKey]
+
+        switch (lhsSequence, rhsSequence) {
+        case (nil, nil):
+            return repositorySort(lhs: lhs, rhs: rhs)
+        case (nil, _):
+            return true
+        case (_, nil):
+            return false
+        case let (lhsSequence?, rhsSequence?):
+            if lhsSequence != rhsSequence {
+                return lhsSequence < rhsSequence
+            }
+            return repositorySort(lhs: lhs, rhs: rhs)
+        }
     }
 
     private func pollCandidateSort(
@@ -494,19 +629,19 @@ public actor GitHubActivityProvider {
     ) -> Bool {
         let lhsKey = RepositoryPollKey(connectionID: connectionID, repositoryID: lhs.id)
         let rhsKey = RepositoryPollKey(connectionID: connectionID, repositoryID: rhs.id)
-        let lhsDate = state[lhsKey]?.lastPolledAt
-        let rhsDate = state[rhsKey]?.lastPolledAt
+        let lhsSequence = state[lhsKey]?.lastPollSequence
+        let rhsSequence = state[rhsKey]?.lastPollSequence
 
-        switch (lhsDate, rhsDate) {
+        switch (lhsSequence, rhsSequence) {
         case (nil, nil):
             return repositorySort(lhs: lhs, rhs: rhs)
         case (nil, _):
             return true
         case (_, nil):
             return false
-        case let (lhsDate?, rhsDate?):
-            if lhsDate != rhsDate {
-                return lhsDate < rhsDate
+        case let (lhsSequence?, rhsSequence?):
+            if lhsSequence != rhsSequence {
+                return lhsSequence < rhsSequence
             }
             return repositorySort(lhs: lhs, rhs: rhs)
         }
@@ -521,6 +656,9 @@ public actor GitHubActivityProvider {
             key.connectionID != connectionID || validRepositoryIDs.contains(key.repositoryID)
         }
         reviewPollState = reviewPollState.filter { key, _ in
+            key.connectionID != connectionID || validRepositoryIDs.contains(key.repositoryID)
+        }
+        checkPollSequenceByRepository = checkPollSequenceByRepository.filter { key, _ in
             key.connectionID != connectionID || validRepositoryIDs.contains(key.repositoryID)
         }
         cachedWorkflowActivities = cachedWorkflowActivities.filter { key, _ in
@@ -579,6 +717,9 @@ public actor GitHubActivityProvider {
         repositoryIDs: Set<Int64>
     ) {
         guard !repositoryIDs.isEmpty else { return }
+        checkPollSequenceByRepository = checkPollSequenceByRepository.filter { key, _ in
+            key.connectionID != connectionID || !repositoryIDs.contains(key.repositoryID)
+        }
         cachedCheckActivities = cachedCheckActivities.filter { key, _ in
             key.connectionID != connectionID || !repositoryIDs.contains(key.repositoryID)
         }
@@ -767,6 +908,22 @@ public actor GitHubActivityProvider {
         }
 
         switch (
+            lhsState?.lastPollBatchSequence,
+            rhsState?.lastPollBatchSequence
+        ) {
+        case let (lhsSequence?, rhsSequence?):
+            if lhsSequence != rhsSequence {
+                return lhsSequence > rhsSequence
+            }
+        case (_?, nil):
+            return true
+        case (nil, _?):
+            return false
+        case (nil, nil):
+            break
+        }
+
+        switch (
             lhsState?.lastPolledAt,
             rhsState?.lastPolledAt
         ) {
@@ -788,8 +945,9 @@ public actor GitHubActivityProvider {
     private func loadWorkflowRepositories(
         _ repositories: [GitHubRepositoryAccess],
         profile: GitHubConnectionProfile
-    ) async -> [WorkflowLoadOutcome] {
+    ) async -> PollLoadBatch<WorkflowLoadOutcome, Int64> {
         let loader = workflowRunLoader
+        let attempts = PollAttemptRecorder<Int64>()
         let mapper = activityMapper
         let supersessionResolver = workflowRunSupersessionResolver
         let runLimit = perRepositoryRunLimit
@@ -797,6 +955,8 @@ public actor GitHubActivityProvider {
 
         let loadOne: @Sendable (GitHubRepositoryAccess) async -> WorkflowLoadOutcome = { repository in
             do {
+                try Task.checkCancellation()
+                await attempts.record(repository.id)
                 let runs = try await loader.workflowRuns(
                     connection: profile.connection,
                     identity: profile.account,
@@ -838,23 +998,32 @@ public actor GitHubActivityProvider {
             }
         }
 
-        return await boundedLoad(
+        let outcomes = await boundedLoad(
             repositories,
             maximumConcurrent: maximumConcurrentRepositories,
             loadOne: loadOne
+        )
+        return PollLoadBatch(
+            outcomes: outcomes,
+            attempts: await attempts.snapshot()
         )
     }
 
     private func loadReviewRepositories(
         _ repositories: [GitHubRepositoryAccess],
         profile: GitHubConnectionProfile
-    ) async -> [ReviewLoadOutcome] {
-        guard let loader = reviewRequestLoader else { return [] }
+    ) async -> PollLoadBatch<ReviewLoadOutcome, Int64> {
+        guard let loader = reviewRequestLoader else {
+            return PollLoadBatch(outcomes: [], attempts: [])
+        }
         let mapper = reviewRequestMapper
+        let attempts = PollAttemptRecorder<Int64>()
         let maximumConcurrentRepositories = maximumConcurrentRepositories
 
         let loadOne: @Sendable (GitHubRepositoryAccess) async -> ReviewLoadOutcome = { repository in
             do {
+                try Task.checkCancellation()
+                await attempts.record(repository.id)
                 let requests = try await loader.reviewRequests(
                     connection: profile.connection,
                     identity: profile.account,
@@ -878,10 +1047,14 @@ public actor GitHubActivityProvider {
             }
         }
 
-        return await boundedLoad(
+        let outcomes = await boundedLoad(
             repositories,
             maximumConcurrent: maximumConcurrentRepositories,
             loadOne: loadOne
+        )
+        return PollLoadBatch(
+            outcomes: outcomes,
+            attempts: await attempts.snapshot()
         )
     }
 
@@ -890,9 +1063,12 @@ public actor GitHubActivityProvider {
         repositoryByID: [Int64: GitHubRepositoryAccess],
         visibleWorkflowSHAsByRepositoryID: [Int64: Set<String>],
         profile: GitHubConnectionProfile
-    ) async -> [CheckLoadOutcome] {
-        guard let loader = checkRunLoader else { return [] }
+    ) async -> PollLoadBatch<CheckLoadOutcome, CheckPollKey> {
+        guard let loader = checkRunLoader else {
+            return PollLoadBatch(outcomes: [], attempts: [])
+        }
         let mapper = checkRunMapper
+        let attempts = PollAttemptRecorder<CheckPollKey>()
         let maximumConcurrentRepositories = maximumConcurrentRepositories
 
         let targets = candidates.compactMap { candidate -> CheckLoadTarget? in
@@ -906,6 +1082,8 @@ public actor GitHubActivityProvider {
                 headSHA: target.candidate.headSHA
             )
             do {
+                try Task.checkCancellation()
+                await attempts.record(key)
                 let checks = try await loader.checkRuns(
                     connection: profile.connection,
                     identity: profile.account,
@@ -932,10 +1110,14 @@ public actor GitHubActivityProvider {
             }
         }
 
-        return await boundedLoad(
+        let outcomes = await boundedLoad(
             targets,
             maximumConcurrent: maximumConcurrentRepositories,
             loadOne: loadOne
+        )
+        return PollLoadBatch(
+            outcomes: outcomes,
+            attempts: await attempts.snapshot()
         )
     }
 
@@ -948,11 +1130,16 @@ public actor GitHubActivityProvider {
             var iterator = elements.makeIterator()
             var activeTasks = 0
 
-            while activeTasks < maximumConcurrent,
+            while !Task.isCancelled,
+                  activeTasks < maximumConcurrent,
                   let element = iterator.next()
             {
                 group.addTask { await loadOne(element) }
                 activeTasks += 1
+            }
+
+            if Task.isCancelled {
+                group.cancelAll()
             }
 
             var outcomes: [Outcome] = []
@@ -960,6 +1147,12 @@ public actor GitHubActivityProvider {
             while let outcome = await group.next() {
                 outcomes.append(outcome)
                 activeTasks -= 1
+
+                if Task.isCancelled {
+                    group.cancelAll()
+                    continue
+                }
+
                 if let element = iterator.next() {
                     group.addTask { await loadOne(element) }
                     activeTasks += 1
@@ -1080,6 +1273,8 @@ private struct CheckPollKey: Hashable, Sendable {
 
 private struct RepositoryPollState: Sendable {
     var lastPolledAt: Date?
+    var lastPollSequence: UInt64?
+    var lastPollBatchSequence: UInt64?
     var isHot = false
 }
 
@@ -1111,4 +1306,21 @@ private enum ReviewLoadOutcome: Sendable {
 private enum CheckLoadOutcome: Sendable {
     case success(key: CheckPollKey, activities: [ActivityItem])
     case failure(key: CheckPollKey, failure: GitHubActivityTargetFailure)
+}
+
+private struct PollLoadBatch<Outcome: Sendable, Attempt: Hashable & Sendable>: Sendable {
+    let outcomes: [Outcome]
+    let attempts: Set<Attempt>
+}
+
+private actor PollAttemptRecorder<Value: Hashable & Sendable> {
+    private var values = Set<Value>()
+
+    func record(_ value: Value) {
+        values.insert(value)
+    }
+
+    func snapshot() -> Set<Value> {
+        values
+    }
 }
