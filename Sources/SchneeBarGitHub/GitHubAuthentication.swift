@@ -15,6 +15,29 @@ public struct GitHubAccountIdentity: Codable, Equatable, Sendable {
     }
 }
 
+public enum GitHubAccountIdentityPolicy {
+    // Defensive presentation budget only; this is intentionally not a
+    // GitHub username syntax rule so GHES/managed-account naming can evolve.
+    public static let maximumLoginCharacters = 256
+    public static let maximumLoginUTF8Bytes = 1_024
+
+    public static func isValidLogin(_ login: String) -> Bool {
+        guard !login.isEmpty,
+              login == login.trimmingCharacters(
+                  in: .whitespacesAndNewlines
+              ),
+              login.count <= maximumLoginCharacters,
+              login.utf8.count <= maximumLoginUTF8Bytes,
+              !login.unicodeScalars.contains(where: {
+                  CharacterSet.controlCharacters.contains($0)
+              })
+        else {
+            return false
+        }
+        return true
+    }
+}
+
 public struct GitHubCredential: Codable, Equatable, Sendable {
     public let accessToken: String
     public let refreshToken: String?
