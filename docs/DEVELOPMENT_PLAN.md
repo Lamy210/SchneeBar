@@ -76,6 +76,7 @@ Implemented foundation:
 - session inventory revalidation bound to the stable numeric account ID established earlier in the same session transaction
 - successful session refresh reconciles fresh account login metadata into the durable profile without changing the stable account ID or connection identity
 - mutable profile persistence (enable/disable and repository selection) is operation-generation/profile-snapshot scoped and repairs stale writes so delayed saves cannot overwrite newer profile state or resurrect a disconnected connection
+- onboarding profile persistence has a post-save cancellation boundary with profile rollback and temporary-credential cleanup, so cancellation during an async profile save cannot commit a connection the user cancelled
 - deterministic connection ordering for stable multi-account UI and polling behavior
 - dedicated existing-connection Device Flow reauthentication
 - local-first Device Flow security decision with shared onboarding/recovery anti-phishing guidance and no embedded client secret
