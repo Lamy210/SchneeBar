@@ -326,10 +326,8 @@ func disconnectingDuplicateReleasesAndRefreshesRemainingProfile() async throws {
             == .connected(repositoryCount: 0)
     )
     #expect(await transport.requestCount() > 0)
-    #expect(
-        try await profileStore.loadAll().map(\.id)
-            == [second.id]
-    )
+    let persistedProfiles = try await profileStore.loadAll()
+    #expect(persistedProfiles.map(\.id) == [second.id])
 }
 
 @MainActor
