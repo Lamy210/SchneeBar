@@ -284,7 +284,21 @@ final class GitHubConnectionsRuntimeModel {
             return
         }
 
+        let ambiguousProfileIDs =
+            GitHubConnectionProfileIdentityPolicy.ambiguousProfileIDs(
+                in: profiles
+            )
+
         for profile in profiles {
+            if ambiguousProfileIDs.contains(profile.id) {
+                _ = advanceOperationGeneration(for: profile.id)
+                inventoryByConnectionID[profile.id] = nil
+                capabilitiesByConnectionID[profile.id] = nil
+                await activityProvider.reset(connectionID: profile.id)
+                statusByConnectionID[profile.id] = .unavailable
+                continue
+            }
+
             if profile.isEnabled {
                 statusByConnectionID[profile.id] = .syncing
                 Task { @MainActor [weak self] in
