@@ -428,7 +428,11 @@ func rebindMovesLatestSourceCredentialAfterRefreshDrain() async throws {
     await transport.releaseRefresh()
 
     _ = try await rebind.value
-    _ = try await staleRestore.value
+    await #expect(
+        throws: GitHubConnectionSessionError.credentialNotFound
+    ) {
+        try await staleRestore.value
+    }
 
     let persisted = try #require(
         await store.value(for: targetKey)
