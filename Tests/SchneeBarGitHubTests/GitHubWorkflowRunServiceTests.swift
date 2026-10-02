@@ -176,6 +176,46 @@ private actor RefreshFailureCohortTransport: GitHubHTTPTransport {
     }
 }
 
+private actor CancellationLoadCredentialStore: GitHubCredentialStore {
+    private var value: GitHubCredential?
+    private let loadStarted = RefreshFailureCohortGate()
+    private let loadRelease = RefreshFailureCohortGate()
+
+    init(_ credential: GitHubCredential) {
+        value = credential
+    }
+
+    func load(
+        for key: GitHubCredentialKey
+    ) async throws -> GitHubCredential? {
+        let snapshot = value
+        await loadStarted.open()
+        await loadRelease.wait()
+        return snapshot
+    }
+
+    func save(
+        _ credential: GitHubCredential,
+        for key: GitHubCredentialKey
+    ) async throws {
+        value = credential
+    }
+
+    func delete(
+        for key: GitHubCredentialKey
+    ) async throws {
+        value = nil
+    }
+
+    func waitUntilLoadStarts() async {
+        await loadStarted.wait()
+    }
+
+    func releaseLoad() async {
+        await loadRelease.open()
+    }
+}
+
 private actor CancellationRefreshTransport: GitHubHTTPTransport {
     private let started = RefreshFailureCohortGate()
     private let release = RefreshFailureCohortGate()
@@ -433,6 +473,51 @@ func actionsPollingRefreshesExpiringCredentialWithoutInventoryDiscovery() async 
     #expect(persisted.accessToken == "new_access")
     #expect(persisted.refreshToken == "new_refresh")
     #expect(persisted.endpointIdentity == "https://github.com")
+}
+
+@Test
+func cancelledCallerStopsAfterCredentialLoadBeforeActionsRequest() async throws {
+    let connection = try serviceConnection()
+    let identity = GitHubAccountIdentity(id: "100", login: "octocat")
+    let credentialStore = CancellationLoadCredentialStore(
+        GitHubCredential(
+            accessToken: "loaded_access",
+            endpointIdentity: "https://github.com"
+        )
+    )
+    let refreshTransport = ServiceQueueTransport([])
+    let actionsTransport = ServiceQueueTransport([])
+    let coordinator = GitHubConnectionSessionCoordinator(
+        credentialStore: credentialStore,
+        deviceFlowClient: GitHubDeviceFlowClient(
+            transport: refreshTransport
+        )
+    )
+    let service = GitHubWorkflowRunService(
+        sessionCoordinator: coordinator,
+        actionsClient: GitHubActionsClient(
+            transport: actionsTransport
+        )
+    )
+
+    let task = Task {
+        try await service.workflowRuns(
+            connection: connection,
+            identity: identity,
+            clientID: "Iv1.public-client-id",
+            repository: try serviceRepository()
+        )
+    }
+
+    await credentialStore.waitUntilLoadStarts()
+    task.cancel()
+    await credentialStore.releaseLoad()
+
+    await #expect(throws: CancellationError.self) {
+        try await task.value
+    }
+    #expect(await refreshTransport.recordedRequests().isEmpty)
+    #expect(await actionsTransport.recordedRequests().isEmpty)
 }
 
 @Test
