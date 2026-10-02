@@ -88,6 +88,7 @@ Implemented foundation:
 - disconnect is cleanup-grade once invoked: it drains in-flight credential refresh writers and completes Keychain deletion even if the caller task is cancelled, preventing both stale refresh resurrection and cancelled-onboarding temporary credential leaks
 - per-credential mutation generations serialize recovery/rebind/disconnect against new refresh writers and reject stale credential-store reads across actor reentrancy
 - failed refresh flights are marked observed and remain shared by every caller that joined while the flight was active; only a new invocation that starts after the failure was observed may replace the failed flight with one retry, preventing concurrent cohorts from retransmitting the old refresh token while preserving later retryability
+- caller cancellation is rechecked after async credential-store reads and shared refresh waits, so a cancelled polling operation cannot continue into provider API requests even when the coordinator-owned refresh itself completes successfully
 - evidence-backed SSO-required installation/connection health from explicit GitHub failure signals only; no inference from empty or forbidden resource sets
 
 Remaining:

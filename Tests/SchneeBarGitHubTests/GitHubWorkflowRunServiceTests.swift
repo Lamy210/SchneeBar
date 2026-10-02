@@ -176,6 +176,44 @@ private actor RefreshFailureCohortTransport: GitHubHTTPTransport {
     }
 }
 
+private actor CancellationRefreshTransport: GitHubHTTPTransport {
+    private let started = RefreshFailureCohortGate()
+    private let release = RefreshFailureCohortGate()
+    private var requestCount = 0
+
+    func data(
+        for request: URLRequest
+    ) async throws -> (Data, HTTPURLResponse) {
+        requestCount += 1
+        await started.open()
+        await release.wait()
+
+        let response = try #require(
+            HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: "HTTP/1.1",
+                headerFields: nil
+            )
+        )
+        let json =
+            #"{"access_token":"cancel_refresh_access","refresh_token":"cancel_refresh_token","expires_in":28800,"refresh_token_expires_in":15811200,"token_type":"bearer","scope":""}"#
+        return (Data(json.utf8), response)
+    }
+
+    func waitUntilStarted() async {
+        await started.wait()
+    }
+
+    func releaseRefresh() async {
+        await release.open()
+    }
+
+    func requests() -> Int {
+        requestCount
+    }
+}
+
 private struct ServiceStubResponse: Sendable {
     let json: String
     let statusCode: Int
@@ -394,6 +432,71 @@ func actionsPollingRefreshesExpiringCredentialWithoutInventoryDiscovery() async 
     let persisted = try #require(try await credentialStore.load(for: key))
     #expect(persisted.accessToken == "new_access")
     #expect(persisted.refreshToken == "new_refresh")
+    #expect(persisted.endpointIdentity == "https://github.com")
+}
+
+@Test
+func cancelledCallerStopsAfterSharedRefreshBeforeActionsRequest() async throws {
+    let now = Date(timeIntervalSince1970: 1_789_200_000)
+    let connection = try serviceConnection()
+    let identity = GitHubAccountIdentity(id: "100", login: "octocat")
+    let key = GitHubCredentialKey(
+        connectionID: connection.id,
+        accountID: identity.id
+    )
+    let credentialStore = ServiceCredentialStore()
+    try await credentialStore.save(
+        GitHubCredential(
+            accessToken: "old_access",
+            refreshToken: "old_refresh",
+            accessTokenExpiresAt: now.addingTimeInterval(30),
+            refreshTokenExpiresAt: now.addingTimeInterval(3_600)
+        ),
+        for: key
+    )
+
+    let refreshTransport = CancellationRefreshTransport()
+    let actionsTransport = ServiceQueueTransport([])
+    let coordinator = GitHubConnectionSessionCoordinator(
+        credentialStore: credentialStore,
+        deviceFlowClient: GitHubDeviceFlowClient(
+            transport: refreshTransport,
+            now: { now }
+        ),
+        now: { now }
+    )
+    let service = GitHubWorkflowRunService(
+        sessionCoordinator: coordinator,
+        actionsClient: GitHubActionsClient(
+            transport: actionsTransport
+        )
+    )
+
+    let task = Task {
+        try await service.workflowRuns(
+            connection: connection,
+            identity: identity,
+            clientID: "Iv1.public-client-id",
+            repository: try serviceRepository()
+        )
+    }
+
+    await refreshTransport.waitUntilStarted()
+    task.cancel()
+    await refreshTransport.releaseRefresh()
+
+    await #expect(throws: CancellationError.self) {
+        try await task.value
+    }
+
+    #expect(await refreshTransport.requests() == 1)
+    #expect(await actionsTransport.recordedRequests().isEmpty)
+
+    let persisted = try #require(
+        try await credentialStore.load(for: key)
+    )
+    #expect(persisted.accessToken == "cancel_refresh_access")
+    #expect(persisted.refreshToken == "cancel_refresh_token")
     #expect(persisted.endpointIdentity == "https://github.com")
 }
 

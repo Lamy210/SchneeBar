@@ -420,6 +420,7 @@ public actor GitHubConnectionSessionCoordinator {
                             for: key,
                             id: refreshFlight.id
                         )
+                        try Task.checkCancellation()
                         guard credentialMutationGeneration(
                             for: key
                         ) == mutationGeneration,
@@ -437,6 +438,7 @@ public actor GitHubConnectionSessionCoordinator {
                             for: key,
                             id: refreshFlight.id
                         )
+                        try Task.checkCancellation()
                         if credentialMutationGeneration(
                             for: key
                         ) != mutationGeneration
@@ -453,9 +455,11 @@ public actor GitHubConnectionSessionCoordinator {
             let observedRefreshGeneration = refreshGeneration(
                 for: key
             )
-            guard let credential = try await credentialStore.load(
+            let loadedCredential = try await credentialStore.load(
                 for: key
-            ) else {
+            )
+            try Task.checkCancellation()
+            guard let credential = loadedCredential else {
                 guard credentialMutationGeneration(
                     for: key
                 ) == mutationGeneration,
