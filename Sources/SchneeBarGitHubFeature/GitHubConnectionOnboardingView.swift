@@ -29,7 +29,7 @@ public enum GitHubConnectionDraftEndpointError: Error, Equatable, Sendable {
 public extension GitHubConnectionDraft {
     var isReadyToConnect: Bool {
         GitHubConnectionDisplayNamePolicy.isValid(displayName)
-            && !clientID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && GitHubClientIDPolicy.isValid(clientID)
             && endpointValidationError == nil
     }
 
