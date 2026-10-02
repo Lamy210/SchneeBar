@@ -75,12 +75,6 @@ private actor OnboardingSaveRaceProfileStore: GitHubConnectionProfileStore {
     func count() -> Int {
         values.count
     }
-
-    func value(
-        for key: GitHubCredentialKey
-    ) -> GitHubCredential? {
-        values[key]
-    }
 }
 
 private actor OnboardingSaveRaceCredentialStore: GitHubCredentialStore {
@@ -109,6 +103,12 @@ private actor OnboardingSaveRaceCredentialStore: GitHubCredentialStore {
 
     func count() -> Int {
         values.count
+    }
+
+    func value(
+        for key: GitHubCredentialKey
+    ) -> GitHubCredential? {
+        values[key]
     }
 }
 
