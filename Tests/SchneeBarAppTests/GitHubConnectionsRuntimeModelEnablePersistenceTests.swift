@@ -4,6 +4,30 @@ import SchneeBarGitHub
 import SchneeBarGitHubActivityProvider
 import Testing
 
+private actor EnablePersistenceGate {
+    private var isOpen = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    func wait() async {
+        if isOpen {
+            return
+        }
+        await withCheckedContinuation { continuation in
+            waiters.append(continuation)
+        }
+    }
+
+    func open() {
+        guard !isOpen else { return }
+        isOpen = true
+        let continuations = waiters
+        waiters.removeAll()
+        for continuation in continuations {
+            continuation.resume()
+        }
+    }
+}
+
 private actor EnablePersistenceEvents {
     private var events: [String] = []
 
@@ -20,6 +44,8 @@ private actor EnablePersistenceProfileStore: GitHubConnectionProfileStore {
     private var values: [UUID: GitHubConnectionProfile]
     private var isFirstSave = true
     private let events: EnablePersistenceEvents
+    private let firstSaveStarted = EnablePersistenceGate()
+    private let firstSaveRelease = EnablePersistenceGate()
 
     init(
         _ profile: GitHubConnectionProfile,
@@ -42,9 +68,8 @@ private actor EnablePersistenceProfileStore: GitHubConnectionProfileStore {
         isFirstSave = false
         await events.record("profile-save-start")
         if shouldYield {
-            for _ in 0 ..< 500 {
-                await Task.yield()
-            }
+            await firstSaveStarted.open()
+            await firstSaveRelease.wait()
         }
         values[profile.id] = profile
         await events.record("profile-save-end")
@@ -52,6 +77,14 @@ private actor EnablePersistenceProfileStore: GitHubConnectionProfileStore {
 
     func delete(id: UUID) async throws {
         values.removeValue(forKey: id)
+    }
+
+    func waitUntilFirstSaveStarts() async {
+        await firstSaveStarted.wait()
+    }
+
+    func releaseFirstSave() async {
+        await firstSaveRelease.open()
     }
 
     func value(for id: UUID) -> GitHubConnectionProfile? {
@@ -190,6 +223,12 @@ func enablingPersistsBeforeStartingSessionRefresh() async throws {
 
     model.setEnabled(true, profileID: profile.id)
 
+    await profileStore.waitUntilFirstSaveStarts()
+    #expect(
+        !(await events.snapshot()).contains("credential-load")
+    )
+
+    await profileStore.releaseFirstSave()
     try await waitForEnableRefresh(model, profileID: profile.id)
 
     let recorded = await events.snapshot()
