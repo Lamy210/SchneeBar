@@ -204,12 +204,14 @@ public actor GitHubConnectionSessionCoordinator {
             identity: session.account.identity
         )
         guard sourceKey == session.credentialKey,
-              let credential = try await credentialStore.load(for: sourceKey)
+              let initialCredential = try await credentialStore.load(
+                  for: sourceKey
+              )
         else {
             throw GitHubConnectionSessionError.credentialNotFound
         }
         try validateCredentialEndpointBinding(
-            credential,
+            initialCredential,
             connection: sourceConnection
         )
 
