@@ -76,6 +76,9 @@ final class GitHubConnectionsRuntimeModel {
     @ObservationIgnored
     private var operationGenerationByConnectionID: [UUID: UInt64] = [:]
 
+    @ObservationIgnored
+    private var quarantinedProfileIDs: Set<UUID> = []
+
     init(
         profileStore: any GitHubConnectionProfileStore,
         sessionCoordinator: GitHubConnectionSessionCoordinator,
@@ -229,7 +232,10 @@ final class GitHubConnectionsRuntimeModel {
         mode: GitHubRepositorySelectionPresentationMode,
         selectedRepositoryIDs: Set<Int64>
     ) async -> Bool {
-        guard var profile = profiles.first(where: { $0.id == profileID }) else {
+        guard !quarantinedProfileIDs.contains(profileID),
+              var profile = profiles.first(where: { $0.id == profileID })
+        else {
+            statusByConnectionID[profileID] = .unavailable
             return false
         }
         let previousProfile = profile
@@ -284,13 +290,13 @@ final class GitHubConnectionsRuntimeModel {
             return
         }
 
-        let ambiguousProfileIDs =
+        quarantinedProfileIDs =
             GitHubConnectionProfileIdentityPolicy.ambiguousProfileIDs(
                 in: profiles
             )
 
         for profile in profiles {
-            if ambiguousProfileIDs.contains(profile.id) {
+            if quarantinedProfileIDs.contains(profile.id) {
                 _ = advanceOperationGeneration(for: profile.id)
                 inventoryByConnectionID[profile.id] = nil
                 capabilitiesByConnectionID[profile.id] = nil
@@ -617,6 +623,16 @@ final class GitHubConnectionsRuntimeModel {
         guard profiles.contains(where: { $0.id == profileID }) else { return }
         cancelOnboarding()
         recoveringConnectionID = profileID
+
+        guard !quarantinedProfileIDs.contains(profileID) else {
+            recoveryTask = nil
+            recoveryPhase = .failed(
+                message: profileIdentityCollisionMessage
+            )
+            statusByConnectionID[profileID] = .unavailable
+            return
+        }
+
         startRecovery(profileID: profileID)
     }
 
@@ -637,6 +653,10 @@ final class GitHubConnectionsRuntimeModel {
 
     func refresh(profileID: UUID) async {
         guard !(recoveringConnectionID == profileID && recoveryIsActive) else { return }
+        guard !quarantinedProfileIDs.contains(profileID) else {
+            statusByConnectionID[profileID] = .unavailable
+            return
+        }
         guard var profile = profiles.first(where: { $0.id == profileID }) else { return }
         let generation = advanceOperationGeneration(for: profileID)
 
@@ -732,6 +752,10 @@ final class GitHubConnectionsRuntimeModel {
     }
 
     func setEnabled(_ isEnabled: Bool, profileID: UUID) {
+        guard !quarantinedProfileIDs.contains(profileID) else {
+            statusByConnectionID[profileID] = .unavailable
+            return
+        }
         guard var profile = profiles.first(where: { $0.id == profileID }) else { return }
         let generation = advanceOperationGeneration(for: profileID)
         profile.isEnabled = isEnabled
@@ -800,6 +824,7 @@ final class GitHubConnectionsRuntimeModel {
             capabilitiesByConnectionID.removeValue(forKey: profileID)
             await activityProvider.reset(connectionID: profileID)
             statusByConnectionID.removeValue(forKey: profileID)
+            await reconcileProfileIdentityQuarantine()
             onActivitySourceChanged?()
         } catch {
             statusByConnectionID[profileID] = .unavailable
@@ -808,6 +833,16 @@ final class GitHubConnectionsRuntimeModel {
 
     private func startRecovery(profileID: UUID) {
         recoveryTask?.cancel()
+
+        guard !quarantinedProfileIDs.contains(profileID) else {
+            recoveryTask = nil
+            recoveryPhase = .failed(
+                message: profileIdentityCollisionMessage
+            )
+            statusByConnectionID[profileID] = .unavailable
+            return
+        }
+
         guard let profile = profiles.first(where: { $0.id == profileID }) else {
             recoveringConnectionID = nil
             recoveryPhase = .requestingCode
@@ -930,6 +965,52 @@ final class GitHubConnectionsRuntimeModel {
                 recoveryPhase = .failed(
                     message: recoveryErrorMessage(for: error, profile: profile)
                 )
+            }
+        }
+    }
+
+    private var profileIdentityCollisionMessage: String {
+        "Resolve duplicate saved GitHub connections for this account before reconnecting."
+    }
+
+    private func reconcileProfileIdentityQuarantine() async {
+        let nextQuarantined =
+            GitHubConnectionProfileIdentityPolicy.ambiguousProfileIDs(
+                in: profiles
+            )
+        let releasedProfileIDs =
+            quarantinedProfileIDs.subtracting(nextQuarantined)
+        let newlyQuarantinedProfileIDs =
+            nextQuarantined.subtracting(quarantinedProfileIDs)
+
+        quarantinedProfileIDs = nextQuarantined
+
+        for profileID in newlyQuarantinedProfileIDs {
+            _ = advanceOperationGeneration(for: profileID)
+            inventoryByConnectionID.removeValue(forKey: profileID)
+            capabilitiesByConnectionID.removeValue(forKey: profileID)
+            await activityProvider.reset(connectionID: profileID)
+            statusByConnectionID[profileID] = .unavailable
+        }
+
+        for profileID in releasedProfileIDs {
+            guard let profile = profiles.first(where: { $0.id == profileID }) else {
+                statusByConnectionID.removeValue(forKey: profileID)
+                continue
+            }
+
+            _ = advanceOperationGeneration(for: profileID)
+            inventoryByConnectionID.removeValue(forKey: profileID)
+            capabilitiesByConnectionID.removeValue(forKey: profileID)
+            await activityProvider.reset(connectionID: profileID)
+
+            if profile.isEnabled {
+                statusByConnectionID[profileID] = .syncing
+                Task { @MainActor [weak self] in
+                    await self?.refresh(profileID: profileID)
+                }
+            } else {
+                statusByConnectionID[profileID] = .disabled
             }
         }
     }
