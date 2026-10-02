@@ -322,7 +322,10 @@ final class GitHubConnectionsRuntimeModel {
         var attemptedTargetCount = 0
         var successfulTargetCount = 0
 
-        let enabledProfiles = profiles.filter(\.isEnabled)
+        let enabledProfiles = profiles.filter {
+            $0.isEnabled
+                && !quarantinedProfileIDs.contains($0.id)
+        }
         for profile in enabledProfiles {
             guard let inventory = inventoryByConnectionID[profile.id] else {
                 continue
