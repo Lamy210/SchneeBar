@@ -533,7 +533,7 @@ func concurrentActionsPollingSharesOneRefreshFailure() async throws {
 }
 
 @Test
-func lateCallerRetriesFailedFlightWithoutReleasingStaleCohort() async throws {
+func callersJoiningActiveRefreshShareFailureBeforeLaterRetry() async throws {
     let now = Date(timeIntervalSince1970: 1_789_200_000)
     let connection = try serviceConnection()
     let identity = GitHubAccountIdentity(id: "100", login: "octocat")
@@ -597,24 +597,29 @@ func lateCallerRetriesFailedFlightWithoutReleasingStaleCohort() async throws {
 
     await refreshTransport.waitUntilFirstStarts()
 
-    let lateCaller = Task {
-        try await service.workflowRuns(
-            connection: connection,
-            identity: identity,
-            clientID: "Iv1.public-client-id",
-            repository: repository
-        )
-    }
-
+    async let joinedWhileActive = pollError()
     await refreshTransport.releaseFirst()
 
-    let staleErrors = await (first, second)
-    _ = try await lateCaller.value
+    let cohortErrors = await (
+        first,
+        second,
+        joinedWhileActive
+    )
 
-    #expect(staleErrors.0 == .httpStatus(500))
-    #expect(staleErrors.1 == .httpStatus(500))
+    #expect(cohortErrors.0 == .httpStatus(500))
+    #expect(cohortErrors.1 == .httpStatus(500))
+    #expect(cohortErrors.2 == .httpStatus(500))
+    #expect(await refreshTransport.requests() == 1)
+    #expect(await actionsTransport.recordedRequests().isEmpty)
+
+    _ = try await service.workflowRuns(
+        connection: connection,
+        identity: identity,
+        clientID: "Iv1.public-client-id",
+        repository: repository
+    )
+
     #expect(await refreshTransport.requests() == 2)
-
     let actionRequests = await actionsTransport.recordedRequests()
     #expect(actionRequests.count == 1)
     #expect(

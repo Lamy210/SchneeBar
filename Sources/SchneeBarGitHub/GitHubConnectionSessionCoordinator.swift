@@ -42,6 +42,7 @@ public actor GitHubConnectionSessionCoordinator {
         let id: UInt64
         let generation: UInt64
         let task: Task<GitHubCredential, Error>
+        var failureObserved: Bool
     }
 
     private var refreshTasks: [GitHubCredentialKey: RefreshFlight] = [:]
@@ -395,7 +396,9 @@ public actor GitHubConnectionSessionCoordinator {
             connection: connection,
             identity: identity
         )
-        let entryRefreshGeneration = refreshGeneration(for: key)
+        let retryableFailedFlightID = refreshTasks[key].flatMap {
+            $0.failureObserved ? $0.id : nil
+        }
 
         while true {
             await waitForCredentialMutation(for: key)
@@ -406,40 +409,44 @@ public actor GitHubConnectionSessionCoordinator {
 
             var retryingFailedFlightID: UInt64?
             if let refreshFlight = refreshTasks[key] {
-                do {
-                    let refreshed = try await refreshFlight.task.value
-                    clearRefreshFlightIfOwned(
-                        for: key,
-                        id: refreshFlight.id
-                    )
-                    guard credentialMutationGeneration(
-                        for: key
-                    ) == mutationGeneration,
-                    !credentialMutationKeys.contains(key)
-                    else {
-                        continue
-                    }
-                    try validateCredentialEndpointBinding(
-                        refreshed,
-                        connection: connection
-                    )
-                    return refreshed
-                } catch {
-                    if credentialMutationGeneration(
-                        for: key
-                    ) != mutationGeneration
-                        || credentialMutationKeys.contains(key)
-                    {
-                        try Task.checkCancellation()
-                        continue
-                    }
-
-                    guard entryRefreshGeneration
-                        >= refreshFlight.generation
-                    else {
+                if refreshFlight.id == retryableFailedFlightID,
+                   refreshFlight.failureObserved
+                {
+                    retryingFailedFlightID = refreshFlight.id
+                } else {
+                    do {
+                        let refreshed = try await refreshFlight.task.value
+                        clearRefreshFlightIfOwned(
+                            for: key,
+                            id: refreshFlight.id
+                        )
+                        guard credentialMutationGeneration(
+                            for: key
+                        ) == mutationGeneration,
+                        !credentialMutationKeys.contains(key)
+                        else {
+                            continue
+                        }
+                        try validateCredentialEndpointBinding(
+                            refreshed,
+                            connection: connection
+                        )
+                        return refreshed
+                    } catch {
+                        markRefreshFlightFailureIfOwned(
+                            for: key,
+                            id: refreshFlight.id
+                        )
+                        if credentialMutationGeneration(
+                            for: key
+                        ) != mutationGeneration
+                            || credentialMutationKeys.contains(key)
+                        {
+                            try Task.checkCancellation()
+                            continue
+                        }
                         throw error
                     }
-                    retryingFailedFlightID = refreshFlight.id
                 }
             }
 
@@ -547,7 +554,8 @@ public actor GitHubConnectionSessionCoordinator {
             refreshTasks[key] = RefreshFlight(
                 id: refreshID,
                 generation: refreshGeneration,
-                task: refreshTask
+                task: refreshTask,
+                failureObserved: false
             )
         }
     }
@@ -682,6 +690,19 @@ public actor GitHubConnectionSessionCoordinator {
         for key: GitHubCredentialKey
     ) -> UInt64 {
         refreshGenerationByKey[key] ?? 0
+    }
+
+    private func markRefreshFlightFailureIfOwned(
+        for key: GitHubCredentialKey,
+        id: UInt64
+    ) {
+        guard var refreshFlight = refreshTasks[key],
+              refreshFlight.id == id
+        else {
+            return
+        }
+        refreshFlight.failureObserved = true
+        refreshTasks[key] = refreshFlight
     }
 
     private func clearRefreshFlightIfOwned(
