@@ -33,6 +33,7 @@ private actor TogglePersistenceProfileStore: GitHubConnectionProfileStore {
     private var shouldBlockNextSave = true
     private let saveStarted = TogglePersistenceGate()
     private let saveRelease = TogglePersistenceGate()
+    private let blockedSaveCompleted = TogglePersistenceGate()
 
     init(_ profile: GitHubConnectionProfile) {
         values = [profile.id: profile]
@@ -53,6 +54,7 @@ private actor TogglePersistenceProfileStore: GitHubConnectionProfileStore {
             await saveRelease.wait()
         }
         values[profile.id] = profile
+        await blockedSaveCompleted.open()
     }
 
     func delete(id: UUID) async throws {
@@ -65,6 +67,10 @@ private actor TogglePersistenceProfileStore: GitHubConnectionProfileStore {
 
     func releaseSave() async {
         await saveRelease.open()
+    }
+
+    func waitUntilBlockedSaveCompletes() async {
+        await blockedSaveCompleted.wait()
     }
 }
 
@@ -141,6 +147,7 @@ func delayedToggleSaveCannotResurrectDisconnectedProfile() async throws {
     #expect(try await profileStore.load(id: profile.id) == nil)
 
     await profileStore.releaseSave()
+    await profileStore.waitUntilBlockedSaveCompletes()
     await waitForTogglePersistenceRepair(
         profileStore,
         profileID: profile.id
