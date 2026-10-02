@@ -254,6 +254,54 @@ func enablingPersistsBeforeStartingSessionRefresh() async throws {
 }
 
 @Test @MainActor
+func failedEnablePersistenceDoesNotStartSessionRefresh() async throws {
+    let events = EnablePersistenceEvents()
+    let profile = try enablePersistenceProfile(isEnabled: false)
+    let profileStore = FailingEnableProfileStore(profile)
+    let credentialStore = EnablePersistenceCredentialStore(
+        key: profile.credentialKey,
+        credential: GitHubCredential(
+            accessToken: "enable-access",
+            endpointIdentity: "https://github.com"
+        ),
+        events: events
+    )
+    let model = GitHubConnectionsRuntimeModel(
+        profileStore: profileStore,
+        sessionCoordinator: GitHubConnectionSessionCoordinator(
+            credentialStore: credentialStore
+        ),
+        activityProvider: GitHubActivityProvider(
+            workflowRunLoader: EnablePersistenceWorkflowLoader()
+        )
+    )
+    let previousStatus = GitHubConnectionPresentationStatus.unavailable
+    model.profiles = [profile]
+    model.statusByConnectionID[profile.id] = previousStatus
+
+    model.setEnabled(true, profileID: profile.id)
+
+    for _ in 0 ..< 1_000 {
+        if model.statusByConnectionID[profile.id] == previousStatus,
+           model.profiles.first(where: { $0.id == profile.id })
+                == profile
+        {
+            break
+        }
+        await Task.yield()
+    }
+
+    #expect(
+        model.profiles.first(where: { $0.id == profile.id })
+            == profile
+    )
+    #expect(model.statusByConnectionID[profile.id] == previousStatus)
+    #expect(
+        !(await events.snapshot()).contains("credential-load")
+    )
+}
+
+@Test @MainActor
 func failedDisablePersistenceRollsBackOptimisticProfileAndStatus() async throws {
     let profile = try enablePersistenceProfile(isEnabled: true)
     let profileStore = FailingEnableProfileStore(profile)
