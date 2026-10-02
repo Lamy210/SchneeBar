@@ -527,7 +527,13 @@ final class GitHubConnectionsRuntimeModel {
         do {
             try Task.checkCancellation()
             try await profileStore.save(profile)
+            try Task.checkCancellation()
         } catch {
+            if let previousProfile {
+                try? await profileStore.save(previousProfile)
+            } else {
+                try? await profileStore.delete(id: profile.id)
+            }
             try? await sessionCoordinator.disconnect(
                 connection: connection,
                 identity: session.account.identity
