@@ -691,12 +691,29 @@ final class GitHubConnectionsRuntimeModel {
 
     func setEnabled(_ isEnabled: Bool, profileID: UUID) {
         guard var profile = profiles.first(where: { $0.id == profileID }) else { return }
-        _ = advanceOperationGeneration(for: profileID)
+        let generation = advanceOperationGeneration(for: profileID)
         profile.isEnabled = isEnabled
         upsert(profile)
 
-        Task { [profileStore] in
-            try? await profileStore.save(profile)
+        Task { @MainActor [weak self] in
+            guard let self,
+                  isCurrentOperationGeneration(generation, for: profileID)
+            else {
+                return
+            }
+
+            do {
+                try await profileStore.save(profile)
+                guard isCurrentOperationGeneration(generation, for: profileID) else {
+                    await repairProfileStoreAfterStaleWrite(profileID: profileID)
+                    return
+                }
+            } catch {
+                guard isCurrentOperationGeneration(generation, for: profileID) else {
+                    return
+                }
+                statusByConnectionID[profileID] = .unavailable
+            }
         }
 
         if isEnabled {
