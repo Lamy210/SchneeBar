@@ -18,6 +18,75 @@ private actor ServiceCredentialStore: GitHubCredentialStore {
     }
 }
 
+private actor ServiceLoadBarrier {
+    private let requiredCount: Int
+    private var arrivalCount = 0
+    private var isOpen = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    init(requiredCount: Int) {
+        self.requiredCount = requiredCount
+    }
+
+    func arriveAndWait() async {
+        arrivalCount += 1
+        if arrivalCount >= requiredCount, !isOpen {
+            isOpen = true
+            let continuations = waiters
+            waiters.removeAll()
+            for continuation in continuations {
+                continuation.resume()
+            }
+            return
+        }
+
+        if isOpen {
+            return
+        }
+
+        await withCheckedContinuation { continuation in
+            waiters.append(continuation)
+        }
+    }
+}
+
+private actor ConcurrentLoadCredentialStore: GitHubCredentialStore {
+    private var values: [GitHubCredentialKey: GitHubCredential] = [:]
+    private let loadBarrier = ServiceLoadBarrier(requiredCount: 2)
+    private var gatedLoadCount = 0
+
+    func load(
+        for key: GitHubCredentialKey
+    ) async throws -> GitHubCredential? {
+        let snapshot = values[key]
+        if gatedLoadCount < 2 {
+            gatedLoadCount += 1
+            await loadBarrier.arriveAndWait()
+        }
+        return snapshot
+    }
+
+    func save(
+        _ credential: GitHubCredential,
+        for key: GitHubCredentialKey
+    ) async throws {
+        values[key] = credential
+    }
+
+    func delete(
+        for key: GitHubCredentialKey
+    ) async throws {
+        values.removeValue(forKey: key)
+    }
+
+    func seed(
+        _ credential: GitHubCredential,
+        for key: GitHubCredentialKey
+    ) {
+        values[key] = credential
+    }
+}
+
 private struct ServiceStubResponse: Sendable {
     let json: String
     let statusCode: Int
@@ -245,8 +314,8 @@ func concurrentActionsPollingSharesOneRefreshRotation() async throws {
     let connection = try serviceConnection()
     let identity = GitHubAccountIdentity(id: "100", login: "octocat")
     let key = GitHubCredentialKey(connectionID: connection.id, accountID: identity.id)
-    let credentialStore = ServiceCredentialStore()
-    try await credentialStore.save(
+    let credentialStore = ConcurrentLoadCredentialStore()
+    await credentialStore.seed(
         GitHubCredential(
             accessToken: "old_access",
             refreshToken: "old_refresh",
@@ -258,8 +327,7 @@ func concurrentActionsPollingSharesOneRefreshRotation() async throws {
 
     let refreshTransport = ServiceQueueTransport([
         ServiceStubResponse(
-            #"{"access_token":"new_access","refresh_token":"new_refresh","expires_in":28800,"refresh_token_expires_in":15811200,"token_type":"bearer","scope":""}"#,
-            delayNanoseconds: 100_000_000
+            #"{"access_token":"new_access","refresh_token":"new_refresh","expires_in":28800,"refresh_token_expires_in":15811200,"token_type":"bearer","scope":""}"#
         )
     ])
     let actionsTransport = ServiceQueueTransport([

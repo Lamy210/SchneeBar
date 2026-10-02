@@ -37,7 +37,15 @@ public actor GitHubConnectionSessionCoordinator {
     private let capabilityEvaluator: GitHubCapabilityEvaluator
     private let now: @Sendable () -> Date
     private let refreshLeeway: TimeInterval
-    private var refreshTasks: [GitHubCredentialKey: Task<GitHubCredential, Error>] = [:]
+
+    private struct RefreshFlight {
+        let id: UInt64
+        let task: Task<GitHubCredential, Error>
+    }
+
+    private var refreshTasks: [GitHubCredentialKey: RefreshFlight] = [:]
+    private var refreshGenerationByKey: [GitHubCredentialKey: UInt64] = [:]
+    private var nextRefreshSequence: UInt64 = 0
 
     public init(
         credentialStore: any GitHubCredentialStore,
@@ -343,7 +351,7 @@ public actor GitHubConnectionSessionCoordinator {
         identity: GitHubAccountIdentity
     ) async throws {
         let key = credentialKey(connection: connection, identity: identity)
-        refreshTasks[key]?.cancel()
+        refreshTasks[key]?.task.cancel()
         refreshTasks[key] = nil
         try await credentialStore.delete(for: key)
     }
@@ -360,67 +368,95 @@ public actor GitHubConnectionSessionCoordinator {
         identity: GitHubAccountIdentity,
         clientID: String? = nil
     ) async throws -> GitHubCredential {
-        let key = credentialKey(connection: connection, identity: identity)
+        let key = credentialKey(
+            connection: connection,
+            identity: identity
+        )
 
-        if let refreshTask = refreshTasks[key] {
-            let refreshed = try await refreshTask.value
+        while true {
+            if let refreshFlight = refreshTasks[key] {
+                do {
+                    let refreshed = try await refreshFlight.task.value
+                    clearRefreshFlightIfOwned(
+                        for: key,
+                        id: refreshFlight.id
+                    )
+                    try validateCredentialEndpointBinding(
+                        refreshed,
+                        connection: connection
+                    )
+                    return refreshed
+                } catch {
+                    clearRefreshFlightIfOwned(
+                        for: key,
+                        id: refreshFlight.id
+                    )
+                    throw error
+                }
+            }
+
+            let observedGeneration = refreshGeneration(for: key)
+            guard let credential = try await credentialStore.load(
+                for: key
+            ) else {
+                guard refreshGeneration(for: key) == observedGeneration else {
+                    continue
+                }
+                throw GitHubConnectionSessionError.credentialNotFound
+            }
+
+            guard refreshGeneration(for: key) == observedGeneration else {
+                continue
+            }
+
             try validateCredentialEndpointBinding(
-                refreshed,
+                credential,
                 connection: connection
             )
-            return refreshed
-        }
 
-        guard let credential = try await credentialStore.load(for: key) else {
-            throw GitHubConnectionSessionError.credentialNotFound
-        }
-        try validateCredentialEndpointBinding(
-            credential,
-            connection: connection
-        )
+            guard shouldRefresh(credential) else {
+                return credential
+            }
 
-        guard shouldRefresh(credential) else {
-            return credential
-        }
+            guard let clientID,
+                  let refreshToken = credential.refreshToken,
+                  !refreshToken.isEmpty,
+                  refreshTokenIsUsable(credential)
+            else {
+                throw GitHubConnectionSessionError
+                    .reauthenticationRequired
+            }
 
-        guard let clientID,
-              let refreshToken = credential.refreshToken,
-              !refreshToken.isEmpty,
-              refreshTokenIsUsable(credential)
-        else {
-            throw GitHubConnectionSessionError.reauthenticationRequired
-        }
-
-        let deviceFlowClient = self.deviceFlowClient
-        let credentialStore = self.credentialStore
-        let endpointIdentity = try canonicalEndpointIdentity(
-            for: connection
-        )
-        let refreshTask = Task<GitHubCredential, Error> {
-            let refreshed = try await deviceFlowClient.refresh(
-                connection: connection,
-                clientID: clientID,
-                credential: credential
+            let deviceFlowClient = self.deviceFlowClient
+            let credentialStore = self.credentialStore
+            let endpointIdentity = try canonicalEndpointIdentity(
+                for: connection
             )
-            let persistedCredential = Self.boundCredential(
-                refreshed,
-                endpointIdentity: endpointIdentity
-            )
-            try await credentialStore.save(
-                persistedCredential,
-                for: key
-            )
-            return persistedCredential
-        }
-        refreshTasks[key] = refreshTask
+            let refreshID = nextRefreshSequence
+            nextRefreshSequence &+= 1
+            refreshGenerationByKey[key] =
+                observedGeneration &+ 1
 
-        do {
-            let refreshed = try await refreshTask.value
-            refreshTasks[key] = nil
-            return refreshed
-        } catch {
-            refreshTasks[key] = nil
-            throw error
+            let refreshTask = Task<GitHubCredential, Error> {
+                let refreshed = try await deviceFlowClient.refresh(
+                    connection: connection,
+                    clientID: clientID,
+                    credential: credential
+                )
+                let persistedCredential = Self.boundCredential(
+                    refreshed,
+                    endpointIdentity: endpointIdentity
+                )
+                try await credentialStore.save(
+                    persistedCredential,
+                    for: key
+                )
+                return persistedCredential
+            }
+            refreshTasks[key] = RefreshFlight(
+                id: refreshID,
+                task: refreshTask
+            )
         }
     }
 
@@ -507,12 +543,32 @@ public actor GitHubConnectionSessionCoordinator {
             && evidence.ssoSignal == .required
     }
 
-    private func cancelAndDrainRefreshTask(for key: GitHubCredentialKey) async {
-        guard let task = refreshTasks.removeValue(forKey: key) else {
+    private func refreshGeneration(
+        for key: GitHubCredentialKey
+    ) -> UInt64 {
+        refreshGenerationByKey[key] ?? 0
+    }
+
+    private func clearRefreshFlightIfOwned(
+        for key: GitHubCredentialKey,
+        id: UInt64
+    ) {
+        guard refreshTasks[key]?.id == id else {
             return
         }
-        task.cancel()
-        _ = try? await task.value
+        refreshTasks.removeValue(forKey: key)
+    }
+
+    private func cancelAndDrainRefreshTask(
+        for key: GitHubCredentialKey
+    ) async {
+        guard let refreshFlight = refreshTasks.removeValue(
+            forKey: key
+        ) else {
+            return
+        }
+        refreshFlight.task.cancel()
+        _ = try? await refreshFlight.task.value
     }
 
     private func credentialKey(
