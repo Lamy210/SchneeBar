@@ -35,6 +35,9 @@ public enum GitHubConnectionProfileIdentityPolicy {
             == profile.account.id,
               GitHubAccountIdentityPolicy.isValidLogin(
                   profile.account.login
+              ),
+              GitHubConnectionDisplayNamePolicy.isValid(
+                  profile.connection.displayName
               )
         else {
             return false

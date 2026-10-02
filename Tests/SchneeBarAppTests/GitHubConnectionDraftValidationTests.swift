@@ -128,6 +128,30 @@ func draftStillRequiresDisplayNameAndClientID() {
 
 
 @Test
+func draftRejectsUnsafeOrOversizedDisplayName() {
+    let unsafeDisplayNames = [
+        " Internal GitHub",
+        "Internal\u{202E}GitHub",
+        "Internal\u{2028}GitHub",
+        String(
+            repeating: "a",
+            count:
+                GitHubConnectionDisplayNamePolicy.maximumCharacters + 1
+        ),
+    ]
+
+    for displayName in unsafeDisplayNames {
+        let draft = GitHubConnectionDraft(
+            deploymentKind: .enterpriseServer,
+            displayName: displayName,
+            serverURL: "https://github.internal.example",
+            clientID: "Iv1.enterprise-client"
+        )
+        #expect(!draft.isReadyToConnect)
+    }
+}
+
+@Test
 func generatedDeploymentDefaultsFollowSelectedDeployment() {
     var draft = GitHubConnectionDraft()
 
