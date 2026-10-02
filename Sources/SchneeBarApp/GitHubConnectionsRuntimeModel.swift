@@ -733,12 +733,18 @@ final class GitHubConnectionsRuntimeModel {
 
     func setEnabled(_ isEnabled: Bool, profileID: UUID) {
         guard var profile = profiles.first(where: { $0.id == profileID }) else { return }
+        let previousProfile = profile
+        let previousStatus = statusByConnectionID[profileID]
         let generation = advanceOperationGeneration(for: profileID)
         profile.isEnabled = isEnabled
         upsert(profile)
+        statusByConnectionID[profileID] = isEnabled
+            ? .syncing
+            : .disabled
 
         Task { @MainActor [weak self] in
             guard let self,
+                  isCurrentOperationGeneration(generation, for: profileID),
                   profiles.first(where: { $0.id == profileID }) == profile
             else {
                 return
@@ -753,24 +759,32 @@ final class GitHubConnectionsRuntimeModel {
                     return
                 }
             } catch {
-                guard isCurrentOperationGeneration(generation, for: profileID) else {
+                guard isCurrentOperationGeneration(generation, for: profileID),
+                      profiles.first(where: { $0.id == profileID }) == profile
+                else {
                     return
                 }
-                statusByConnectionID[profileID] = .unavailable
-            }
-        }
 
-        if isEnabled {
-            statusByConnectionID[profileID] = .syncing
-            Task { @MainActor [weak self] in
-                await self?.refresh(profileID: profileID)
+                upsert(previousProfile)
+                statusByConnectionID[profileID] = previousStatus
+                    ?? (previousProfile.isEnabled ? .syncing : .disabled)
+                return
             }
-        } else {
-            let hadInventory = inventoryByConnectionID.removeValue(forKey: profileID) != nil
+
+            if isEnabled {
+                await refresh(profileID: profileID)
+                return
+            }
+
+            let hadInventory =
+                inventoryByConnectionID.removeValue(forKey: profileID)
+                    != nil
             capabilitiesByConnectionID.removeValue(forKey: profileID)
-            let activityProvider = activityProvider
-            Task {
-                await activityProvider.reset(connectionID: profileID)
+            await activityProvider.reset(connectionID: profileID)
+            guard isCurrentOperationGeneration(generation, for: profileID),
+                  profiles.first(where: { $0.id == profileID }) == profile
+            else {
+                return
             }
             statusByConnectionID[profileID] = .disabled
             if hadInventory {

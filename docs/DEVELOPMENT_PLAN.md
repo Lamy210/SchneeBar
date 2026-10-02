@@ -78,6 +78,7 @@ Implemented foundation:
 - canonical endpoint + stable-account profile identity collisions are rejected on new persistence and existing ambiguous profiles are quarantined from refresh/activity without destructive auto-merge
 - mutable profile persistence (enable/disable and repository selection) is operation-generation/profile-snapshot scoped and repairs stale writes so delayed saves cannot overwrite newer profile state or resurrect a disconnected connection
 - onboarding profile persistence has a post-save cancellation boundary with profile rollback and temporary-credential cleanup, so cancellation during an async profile save cannot commit a connection the user cancelled
+- enable/disable persistence commits before refresh/cache side effects; enabling no longer self-invalidates its save generation, and current-generation save failures roll back the optimistic profile/status state
 - deterministic connection ordering for stable multi-account UI and polling behavior
 - dedicated existing-connection Device Flow reauthentication
 - local-first Device Flow security decision with shared onboarding/recovery anti-phishing guidance and no embedded client secret
