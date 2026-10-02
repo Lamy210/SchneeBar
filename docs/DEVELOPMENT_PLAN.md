@@ -86,6 +86,7 @@ Implemented foundation:
 - post-drain credential reload before rebinding so source refresh-token rotation cannot be discarded by moving a pre-refresh credential snapshot
 - per-key refresh generations and refresh-flight ownership keep refresh-token rotation single-flight even when concurrent credential reads suspend before a flight is installed
 - disconnect is cleanup-grade once invoked: it drains in-flight credential refresh writers and completes Keychain deletion even if the caller task is cancelled, preventing both stale refresh resurrection and cancelled-onboarding temporary credential leaks
+- per-credential mutation generations serialize recovery/rebind/disconnect against new refresh writers and reject stale credential-store reads across actor reentrancy
 - evidence-backed SSO-required installation/connection health from explicit GitHub failure signals only; no inference from empty or forbidden resource sets
 
 Remaining:
