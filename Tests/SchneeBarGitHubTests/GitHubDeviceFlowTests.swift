@@ -121,6 +121,86 @@ func invalidClientIDStopsBeforeDeviceFlowRequest() async throws {
 }
 
 @Test
+func rejectsUnsafeDeviceFlowCodesFromProvider() async throws {
+    let unsafePayloads = [
+        #"{"device_code":"device","user_code":"ABCD\u202eEFGH","verification_uri":"https://github.com/login/device","expires_in":900,"interval":5}"#,
+        #"{"device_code":"device","user_code":" ABCD-EFGH","verification_uri":"https://github.com/login/device","expires_in":900,"interval":5}"#,
+        "{\"device_code\":\"device\","
+            + "\"user_code\":\""
+            + String(
+                repeating: "A",
+                count:
+                    GitHubDeviceFlowCodePolicy.maximumUserCodeCharacters
+                    + 1
+            )
+            + "\",\"verification_uri\":"
+            + "\"https://github.com/login/device\","
+            + "\"expires_in\":900,\"interval\":5}",
+        "{\"device_code\":\""
+            + String(
+                repeating: "d",
+                count:
+                    GitHubDeviceFlowCodePolicy
+                        .maximumDeviceCodeCharacters + 1
+            )
+            + "\",\"user_code\":\"ABCD-EFGH\","
+            + "\"verification_uri\":"
+            + "\"https://github.com/login/device\","
+            + "\"expires_in\":900,\"interval\":5}",
+    ]
+
+    for payload in unsafePayloads {
+        let transport = QueueGitHubTransport([
+            DeviceFlowStubResponse(payload),
+        ])
+        let client = GitHubDeviceFlowClient(
+            transport: transport,
+            now: { fixedNow }
+        )
+
+        await #expect(throws: GitHubDeviceFlowError.invalidResponse) {
+            try await client.begin(
+                connection: try githubDotComConnection(),
+                clientID: "Iv1.client"
+            )
+        }
+        #expect(await transport.recordedRequests().count == 1)
+    }
+}
+
+@Test
+func invalidSessionDeviceCodeStopsBeforeNetworkPoll() async throws {
+    let transport = QueueGitHubTransport([])
+    let client = GitHubDeviceFlowClient(
+        transport: transport,
+        now: { fixedNow }
+    )
+    let session = GitHubDeviceAuthorizationSession(
+        deviceCode: String(
+            repeating: "d",
+            count:
+                GitHubDeviceFlowCodePolicy.maximumDeviceCodeCharacters
+                + 1
+        ),
+        userCode: "ABCD-EFGH",
+        verificationURI: try #require(
+            URL(string: "https://github.com/login/device")
+        ),
+        expiresAt: fixedNow.addingTimeInterval(900),
+        pollInterval: 5
+    )
+
+    await #expect(throws: GitHubDeviceFlowError.invalidResponse) {
+        try await client.pollOnce(
+            connection: try githubDotComConnection(),
+            clientID: "Iv1.client",
+            session: session
+        )
+    }
+    #expect(await transport.recordedRequests().isEmpty)
+}
+
+@Test
 func mapsDeviceFlowDisabledErrorDuringBegin() async throws {
     let transport = QueueGitHubTransport([
         DeviceFlowStubResponse(#"{"error":"device_flow_disabled","error_description":"Enable Device Flow"}"#)
