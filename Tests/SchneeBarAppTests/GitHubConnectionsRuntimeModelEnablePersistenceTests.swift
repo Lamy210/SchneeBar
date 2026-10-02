@@ -2,6 +2,7 @@
 import Foundation
 import SchneeBarGitHub
 import SchneeBarGitHubActivityProvider
+import SchneeBarGitHubFeature
 import Testing
 
 private actor EnablePersistenceGate {
