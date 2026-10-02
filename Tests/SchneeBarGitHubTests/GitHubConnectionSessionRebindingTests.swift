@@ -143,6 +143,73 @@ func rebindEstablishedGHESSessionPreservesEndpointBinding() async throws {
 }
 
 @Test
+func rebindEstablishedSessionRejectsMismatchedInventoryIdentityWithoutMovingCredential() async throws {
+    let store = RebindingCredentialStore()
+    let coordinator = GitHubConnectionSessionCoordinator(
+        credentialStore: store
+    )
+    let sourceConnection = try rebindingConnection(
+        id: UUID(uuidString: "00000000-0000-0000-0000-000000000111")!
+    )
+    let targetConnection = try rebindingConnection(
+        id: UUID(uuidString: "00000000-0000-0000-0000-000000000222")!
+    )
+    let account = GitHubAuthenticatedAccount(
+        identity: GitHubAccountIdentity(
+            id: "42",
+            login: "octocat"
+        )
+    )
+    let inventoryAccount = GitHubAuthenticatedAccount(
+        identity: GitHubAccountIdentity(
+            id: "99",
+            login: "other-user"
+        )
+    )
+    let sourceKey = GitHubCredentialKey(
+        connectionID: sourceConnection.id,
+        accountID: account.identity.id
+    )
+    let targetKey = GitHubCredentialKey(
+        connectionID: targetConnection.id,
+        accountID: account.identity.id
+    )
+    let credential = GitHubCredential(accessToken: "ghu_access")
+    try await store.save(credential, for: sourceKey)
+
+    let inventory = GitHubAccessInventory(
+        account: inventoryAccount,
+        installations: []
+    )
+    let session = GitHubConnectionSession(
+        connectionID: sourceConnection.id,
+        account: account,
+        credentialKey: sourceKey,
+        inventory: inventory,
+        capabilities: GitHubCapabilityEvaluator().evaluate(
+            connection: sourceConnection,
+            inventory: inventory
+        )
+    )
+
+    await #expect(
+        throws: GitHubConnectionSessionError.accountMismatch(
+            expectedID: "42",
+            actualID: "99"
+        )
+    ) {
+        _ = try await coordinator.rebindEstablishedSession(
+            session,
+            from: sourceConnection,
+            to: targetConnection
+        )
+    }
+
+    #expect(await store.value(for: sourceKey) == credential)
+    #expect(await store.value(for: targetKey) == nil)
+}
+
+@Test
 func rebindEstablishedSessionRejectsDifferentEndpointsWithoutMovingCredential() async throws {
     let store = RebindingCredentialStore()
     let coordinator = GitHubConnectionSessionCoordinator(credentialStore: store)
