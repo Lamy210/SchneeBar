@@ -697,7 +697,7 @@ final class GitHubConnectionsRuntimeModel {
 
         Task { @MainActor [weak self] in
             guard let self,
-                  isCurrentOperationGeneration(generation, for: profileID)
+                  profiles.contains(where: { $0.id == profileID })
             else {
                 return
             }
