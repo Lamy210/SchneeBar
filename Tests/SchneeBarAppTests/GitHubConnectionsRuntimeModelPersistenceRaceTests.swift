@@ -188,7 +188,8 @@ private func waitForTogglePersistenceRepair(
     profileID: UUID
 ) async {
     for _ in 0 ..< 1_000 {
-        if try? await store.load(id: profileID) == nil {
+        let stored = try? await store.load(id: profileID)
+        if stored == nil {
             return
         }
         await Task.yield()
