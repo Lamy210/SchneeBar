@@ -6,6 +6,7 @@ public enum GitHubConnectionProfileStoreError: Error, Equatable, Sendable {
     case unsupportedSchemaVersion(Int)
     case invalidBackingFile
     case payloadTooLarge
+    case invalidConnectionIdentity(UUID)
     case duplicateConnectionID(UUID)
     case connectionIdentityChanged(UUID)
     case duplicateConnectionIdentity(
@@ -40,6 +41,13 @@ public actor ApplicationSupportGitHubConnectionProfileStore: GitHubConnectionPro
     }
 
     public func save(_ profile: GitHubConnectionProfile) async throws {
+        guard GitHubConnectionProfileIdentityPolicy
+            .hasCanonicalIdentity(profile)
+        else {
+            throw GitHubConnectionProfileStoreError
+                .invalidConnectionIdentity(profile.id)
+        }
+
         var profiles = try readProfiles()
         let matchingConnectionIDs = profiles.indices.filter {
             profiles[$0].id == profile.id

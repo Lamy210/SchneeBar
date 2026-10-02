@@ -207,6 +207,76 @@ func profileIdentityPolicyDetectsCanonicalSameAccountCollisions() throws {
 }
 
 @Test
+func profileIdentityCanonicalizesEquivalentNumericAccountIDs() throws {
+    let profile = makeLifecycleProfile(
+        id: UUID(
+            uuidString: "00000000-0000-0000-0000-000000000451"
+        )!,
+        accountID: "42",
+        login: "octocat"
+    )
+
+    let canonical = try #require(
+        GitHubConnectionProfileIdentityPolicy.identity(
+            connection: profile.connection,
+            accountID: "42"
+        )
+    )
+    let padded = try #require(
+        GitHubConnectionProfileIdentityPolicy.identity(
+            connection: profile.connection,
+            accountID: "0042"
+        )
+    )
+
+    #expect(canonical == padded)
+    #expect(canonical.accountID == "42")
+}
+
+@Test
+func profileIdentityCanonicalityRejectsInvalidOrNonCanonicalAccountIDs() {
+    let canonical = makeLifecycleProfile(
+        id: UUID(
+            uuidString: "00000000-0000-0000-0000-000000000452"
+        )!,
+        accountID: "42",
+        login: "octocat"
+    )
+    let padded = makeLifecycleProfile(
+        id: UUID(
+            uuidString: "00000000-0000-0000-0000-000000000453"
+        )!,
+        accountID: "0042",
+        login: "octocat"
+    )
+    let zero = makeLifecycleProfile(
+        id: UUID(
+            uuidString: "00000000-0000-0000-0000-000000000454"
+        )!,
+        accountID: "0",
+        login: "octocat"
+    )
+
+    #expect(
+        GitHubConnectionProfileIdentityPolicy
+            .hasCanonicalIdentity(canonical)
+    )
+    #expect(
+        !GitHubConnectionProfileIdentityPolicy
+            .hasCanonicalIdentity(padded)
+    )
+    #expect(
+        !GitHubConnectionProfileIdentityPolicy
+            .hasCanonicalIdentity(zero)
+    )
+    #expect(
+        GitHubConnectionProfileIdentityPolicy.ambiguousProfileIDs(
+            in: [canonical, padded]
+        ) == Set([canonical.id, padded.id])
+    )
+}
+
+@Test
 func profileOrderingIsDeterministicAcrossInputOrder() throws {
     let alphaA = makeLifecycleProfile(
         id: UUID(uuidString: "00000000-0000-0000-0000-000000000001")!,

@@ -203,6 +203,37 @@ func loadQuarantinesAmbiguousProfileIdentityWithoutRefreshing() async throws {
 }
 
 @Test @MainActor
+func loadQuarantinesSingleNonCanonicalAccountIdentityWithoutRefreshing() async throws {
+    let profile = try profileCollisionProfile(
+        id: UUID(
+            uuidString: "77000000-0000-0000-0000-000000000031"
+        )!,
+        webURL: "https://github.com",
+        login: "octocat",
+        accountID: "0042"
+    )
+    let profileStore = ProfileCollisionStore([profile])
+    let credentialStore = ProfileCollisionCredentialStore()
+    let transport = ProfileCollisionTransport()
+    let model = GitHubConnectionsRuntimeModel(
+        profileStore: profileStore,
+        sessionCoordinator: GitHubConnectionSessionCoordinator(
+            credentialStore: credentialStore,
+            accessClient: GitHubAccessClient(transport: transport)
+        ),
+        activityProvider: GitHubActivityProvider(
+            workflowRunLoader: ProfileCollisionWorkflowLoader()
+        )
+    )
+
+    await model.load()
+
+    #expect(model.profiles.map(\.id) == [profile.id])
+    #expect(model.statusByConnectionID[profile.id] == .unavailable)
+    #expect(await transport.requestCount() == 0)
+}
+
+@Test @MainActor
 func quarantinedProfileBlocksManualNetworkAndMutableActions() async throws {
     let first = try profileCollisionProfile(
         id: UUID(
@@ -349,7 +380,8 @@ private func waitForReleasedProfileRefresh(
 private func profileCollisionProfile(
     id: UUID,
     webURL: String,
-    login: String
+    login: String,
+    accountID: String = "42"
 ) throws -> GitHubConnectionProfile {
     GitHubConnectionProfile(
         connection: GitHubConnection(
@@ -359,7 +391,7 @@ private func profileCollisionProfile(
             webBaseURL: try #require(URL(string: webURL))
         ),
         account: GitHubAccountIdentity(
-            id: "42",
+            id: accountID,
             login: login
         ),
         authenticationMethod: .deviceFlow,

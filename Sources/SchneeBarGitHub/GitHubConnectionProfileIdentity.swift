@@ -17,6 +17,29 @@ public struct GitHubConnectionProfileIdentity: Equatable, Hashable, Sendable {
 }
 
 public enum GitHubConnectionProfileIdentityPolicy {
+    public static func canonicalAccountID(
+        _ accountID: String
+    ) -> String? {
+        guard let numericID = Int64(accountID),
+              numericID > 0
+        else {
+            return nil
+        }
+        return String(numericID)
+    }
+
+    public static func hasCanonicalIdentity(
+        _ profile: GitHubConnectionProfile
+    ) -> Bool {
+        guard canonicalAccountID(profile.account.id)
+            == profile.account.id
+        else {
+            return false
+        }
+
+        return identity(for: profile) != nil
+    }
+
     public static func identity(
         for profile: GitHubConnectionProfile
     ) -> GitHubConnectionProfileIdentity? {
@@ -30,17 +53,19 @@ public enum GitHubConnectionProfileIdentityPolicy {
         connection: GitHubConnection,
         accountID: String
     ) -> GitHubConnectionProfileIdentity? {
-        guard let endpoints = try? GitHubEndpointResolver.resolve(
-            deploymentKind: connection.deploymentKind,
-            webBaseURL: connection.webBaseURL
-        ) else {
+        guard let canonicalAccountID = canonicalAccountID(accountID),
+              let endpoints = try? GitHubEndpointResolver.resolve(
+                  deploymentKind: connection.deploymentKind,
+                  webBaseURL: connection.webBaseURL
+              )
+        else {
             return nil
         }
 
         return GitHubConnectionProfileIdentity(
             deploymentKind: connection.deploymentKind.rawValue,
             canonicalWebBaseURL: endpoints.webBaseURL.absoluteString,
-            accountID: accountID
+            accountID: canonicalAccountID
         )
     }
 
@@ -60,6 +85,16 @@ public enum GitHubConnectionProfileIdentityPolicy {
             .map(\.id)
             .sorted { $0.uuidString < $1.uuidString }
             .first
+    }
+
+    public static func quarantinedProfileIDs(
+        in profiles: [GitHubConnectionProfile]
+    ) -> Set<UUID> {
+        var quarantined = ambiguousProfileIDs(in: profiles)
+        for profile in profiles where !hasCanonicalIdentity(profile) {
+            quarantined.insert(profile.id)
+        }
+        return quarantined
     }
 
     public static func ambiguousProfileIDs(
