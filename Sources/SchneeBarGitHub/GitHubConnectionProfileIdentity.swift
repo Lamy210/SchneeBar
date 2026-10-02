@@ -32,7 +32,10 @@ public enum GitHubConnectionProfileIdentityPolicy {
         _ profile: GitHubConnectionProfile
     ) -> Bool {
         guard canonicalAccountID(profile.account.id)
-            == profile.account.id
+            == profile.account.id,
+              GitHubAccountIdentityPolicy.isValidLogin(
+                  profile.account.login
+              )
         else {
             return false
         }

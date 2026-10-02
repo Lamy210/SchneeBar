@@ -195,7 +195,9 @@ public struct GitHubAccessClient: Sendable {
             credential: credential
         )
 
-        guard payload.id > 0, !payload.login.isEmpty else {
+        guard payload.id > 0,
+              GitHubAccountIdentityPolicy.isValidLogin(payload.login)
+        else {
             throw GitHubAccessClientError.invalidResponse
         }
 
