@@ -30,6 +30,25 @@ public enum GitHubDeviceFlowPollResult: Equatable, Sendable {
     case expired
 }
 
+public enum GitHubClientIDPolicy {
+    public static let maximumCharacters = 256
+    public static let maximumUTF8Bytes = 1_024
+
+    public static func isValid(_ clientID: String) -> Bool {
+        guard !clientID.isEmpty,
+              clientID == clientID.trimmingCharacters(
+                  in: .whitespacesAndNewlines
+              ),
+              clientID.count <= maximumCharacters,
+              clientID.utf8.count <= maximumUTF8Bytes,
+              GitHubPresentationTextPolicy.hasSafeScalars(clientID)
+        else {
+            return false
+        }
+        return true
+    }
+}
+
 public enum GitHubDeviceFlowError: Error, Equatable, Sendable {
     case invalidClientID
     case missingRefreshToken
@@ -235,11 +254,10 @@ public struct GitHubDeviceFlowClient: Sendable {
     }
 
     private func validatedClientID(_ clientID: String) throws -> String {
-        let trimmed = clientID.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else {
+        guard GitHubClientIDPolicy.isValid(clientID) else {
             throw GitHubDeviceFlowError.invalidClientID
         }
-        return trimmed
+        return clientID
     }
 
     private func validatedVerificationURI(
