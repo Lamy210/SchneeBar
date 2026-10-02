@@ -30,10 +30,16 @@ private actor OnboardingSaveGate {
 }
 
 private actor OnboardingSaveRaceProfileStore: GitHubConnectionProfileStore {
-    private var values: [UUID: GitHubConnectionProfile] = [:]
+    private var values: [UUID: GitHubConnectionProfile]
     private let saveStarted = OnboardingSaveGate()
     private let saveRelease = OnboardingSaveGate()
     private let blockedSaveCompleted = OnboardingSaveGate()
+
+    init(_ profiles: [GitHubConnectionProfile] = []) {
+        values = Dictionary(
+            uniqueKeysWithValues: profiles.map { ($0.id, $0) }
+        )
+    }
 
     func loadAll() async throws -> [GitHubConnectionProfile] {
         Array(values.values)
@@ -69,10 +75,22 @@ private actor OnboardingSaveRaceProfileStore: GitHubConnectionProfileStore {
     func count() -> Int {
         values.count
     }
+
+    func value(
+        for key: GitHubCredentialKey
+    ) -> GitHubCredential? {
+        values[key]
+    }
 }
 
 private actor OnboardingSaveRaceCredentialStore: GitHubCredentialStore {
-    private var values: [GitHubCredentialKey: GitHubCredential] = [:]
+    private var values: [GitHubCredentialKey: GitHubCredential]
+
+    init(
+        values: [GitHubCredentialKey: GitHubCredential] = [:]
+    ) {
+        self.values = values
+    }
 
     func load(for key: GitHubCredentialKey) async throws -> GitHubCredential? {
         values[key]
@@ -214,6 +232,130 @@ func cancellingOnboardingDuringProfileSaveRollsBackNewConnection() async throws 
     #expect(await credentialStore.count() == 0)
     #expect(model.onboardingPhase == .configuration)
     #expect(!model.isPresentingOnboarding)
+}
+
+@Test @MainActor
+func cancellingReconnectDuringProfileSaveRestoresPreviousProfileAndCredential() async throws {
+    let existing = try onboardingSaveRaceExistingProfile()
+    let existingCredential = GitHubCredential(
+        accessToken: "existing-access",
+        endpointIdentity: "https://github.com"
+    )
+    let profileStore = OnboardingSaveRaceProfileStore([existing])
+    let credentialStore = OnboardingSaveRaceCredentialStore(
+        values: [
+            existing.credentialKey: existingCredential,
+        ]
+    )
+    let transport = OnboardingSaveRaceTransport()
+    let deviceFlowClient = GitHubDeviceFlowClient(
+        transport: transport,
+        now: { onboardingSaveRaceNow }
+    )
+    let model = GitHubConnectionsRuntimeModel(
+        profileStore: profileStore,
+        sessionCoordinator: GitHubConnectionSessionCoordinator(
+            credentialStore: credentialStore,
+            accessClient: GitHubAccessClient(transport: transport),
+            deviceFlowClient: deviceFlowClient,
+            now: { onboardingSaveRaceNow }
+        ),
+        activityProvider: GitHubActivityProvider(
+            workflowRunLoader: OnboardingSaveRaceWorkflowLoader(),
+            now: { onboardingSaveRaceNow }
+        ),
+        deviceFlowClient: deviceFlowClient,
+        authorizationWaiter: GitHubDeviceAuthorizationWaiter(
+            client: deviceFlowClient,
+            sleeper: { _ in }
+        ),
+        now: { onboardingSaveRaceNow }
+    )
+    model.profiles = [existing]
+    model.statusByConnectionID[existing.id] = .disabled
+
+    model.beginOnboarding(defaultClientID: "test-client-id")
+    model.onboardingDraft = GitHubConnectionDraft(
+        deploymentKind: .githubDotCom,
+        displayName: "GitHub.com",
+        serverURL: "https://github.com",
+        clientID: "test-client-id"
+    )
+    model.connectDraft()
+
+    await profileStore.waitUntilSaveStarts()
+    #expect(await credentialStore.count() == 2)
+
+    model.cancelOnboarding()
+    await profileStore.releaseSave()
+    await profileStore.waitUntilBlockedSaveCompletes()
+
+    await waitForReconnectSaveRollback(
+        profileStore: profileStore,
+        credentialStore: credentialStore,
+        expectedProfile: existing
+    )
+
+    #expect(model.profiles == [existing])
+    #expect(
+        try await profileStore.load(id: existing.id)
+            == existing
+    )
+    #expect(await credentialStore.count() == 1)
+    #expect(
+        await credentialStore.value(
+            for: existing.credentialKey
+        ) == existingCredential
+    )
+    #expect(model.onboardingPhase == .configuration)
+    #expect(!model.isPresentingOnboarding)
+}
+
+private func onboardingSaveRaceExistingProfile() throws -> GitHubConnectionProfile {
+    GitHubConnectionProfile(
+        connection: GitHubConnection(
+            id: UUID(
+                uuidString:
+                    "35000000-0000-0000-0000-000000000001"
+            )!,
+            displayName: "Existing GitHub",
+            deploymentKind: .githubDotCom,
+            webBaseURL: try #require(
+                URL(string: "https://github.com")
+            )
+        ),
+        account: GitHubAccountIdentity(
+            id: "42",
+            login: "octocat-old"
+        ),
+        authenticationMethod: .deviceFlow,
+        clientID: "old-client-id",
+        repositorySelection: .selected([11, 22]),
+        isEnabled: false,
+        createdAt: Date(timeIntervalSince1970: 1_000),
+        lastConnectedAt: Date(timeIntervalSince1970: 2_000)
+    )
+}
+
+private func waitForReconnectSaveRollback(
+    profileStore: OnboardingSaveRaceProfileStore,
+    credentialStore: OnboardingSaveRaceCredentialStore,
+    expectedProfile: GitHubConnectionProfile
+) async {
+    for _ in 0 ..< 1_000 {
+        let stored = try? await profileStore.load(
+            id: expectedProfile.id
+        )
+        if stored == expectedProfile,
+           await credentialStore.count() == 1
+        {
+            return
+        }
+        await Task.yield()
+    }
+    Issue.record(
+        "Timed out waiting for cancelled reconnect save rollback"
+    )
 }
 
 private func waitForOnboardingSaveRollback(
