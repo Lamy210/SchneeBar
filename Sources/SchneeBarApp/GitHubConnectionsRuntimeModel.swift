@@ -232,6 +232,8 @@ final class GitHubConnectionsRuntimeModel {
         guard var profile = profiles.first(where: { $0.id == profileID }) else {
             return false
         }
+        let previousProfile = profile
+        let generation = advanceOperationGeneration(for: profileID)
 
         switch mode {
         case .allAccessible:
@@ -239,14 +241,34 @@ final class GitHubConnectionsRuntimeModel {
         case .selected:
             profile.repositorySelection = .selected(selectedRepositoryIDs)
         }
+        upsert(profile)
 
         do {
             try await profileStore.save(profile)
-            upsert(profile)
+            guard isCurrentOperationGeneration(generation, for: profileID),
+                  profiles.first(where: { $0.id == profileID }) == profile
+            else {
+                await repairProfileStoreAfterStaleWrite(profileID: profileID)
+                return false
+            }
+
             await activityProvider.reset(connectionID: profileID)
+            guard isCurrentOperationGeneration(generation, for: profileID),
+                  profiles.first(where: { $0.id == profileID }) == profile
+            else {
+                await repairProfileStoreAfterStaleWrite(profileID: profileID)
+                return false
+            }
+
             onActivitySourceChanged?()
             return true
         } catch {
+            guard isCurrentOperationGeneration(generation, for: profileID),
+                  profiles.first(where: { $0.id == profileID }) == profile
+            else {
+                return false
+            }
+            upsert(previousProfile)
             statusByConnectionID[profileID] = .unavailable
             return false
         }
@@ -691,12 +713,31 @@ final class GitHubConnectionsRuntimeModel {
 
     func setEnabled(_ isEnabled: Bool, profileID: UUID) {
         guard var profile = profiles.first(where: { $0.id == profileID }) else { return }
-        _ = advanceOperationGeneration(for: profileID)
+        let generation = advanceOperationGeneration(for: profileID)
         profile.isEnabled = isEnabled
         upsert(profile)
 
-        Task { [profileStore] in
-            try? await profileStore.save(profile)
+        Task { @MainActor [weak self] in
+            guard let self,
+                  profiles.first(where: { $0.id == profileID }) == profile
+            else {
+                return
+            }
+
+            do {
+                try await profileStore.save(profile)
+                guard isCurrentOperationGeneration(generation, for: profileID),
+                      profiles.first(where: { $0.id == profileID }) == profile
+                else {
+                    await repairProfileStoreAfterStaleWrite(profileID: profileID)
+                    return
+                }
+            } catch {
+                guard isCurrentOperationGeneration(generation, for: profileID) else {
+                    return
+                }
+                statusByConnectionID[profileID] = .unavailable
+            }
         }
 
         if isEnabled {
