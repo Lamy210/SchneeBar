@@ -77,6 +77,10 @@ func loadsAuthenticatedAccountWithHostedAPIHeaders() async throws {
 func authenticatedAccountRejectsUnsafeLoginPresentationContent() async throws {
     let unsafeLogins = [
         "octo\\ncat",
+        "octo\u{202E}cat",
+        "octo\u{200B}cat",
+        "octo\u{2028}cat",
+        "octo\u{2029}cat",
         " octocat",
         String(
             repeating: "a",
@@ -111,6 +115,30 @@ func authenticatedAccountRejectsUnsafeLoginPresentationContent() async throws {
             )
         }
     }
+}
+
+@Test
+func accountLoginPolicyRejectsInvisibleAndDirectionalFormatting() {
+    #expect(
+        !GitHubAccountIdentityPolicy.isValidLogin(
+            "octo\u{202E}cat"
+        )
+    )
+    #expect(
+        !GitHubAccountIdentityPolicy.isValidLogin(
+            "octo\u{200B}cat"
+        )
+    )
+    #expect(
+        !GitHubAccountIdentityPolicy.isValidLogin(
+            "octo\u{2028}cat"
+        )
+    )
+    #expect(
+        !GitHubAccountIdentityPolicy.isValidLogin(
+            "octo\u{2029}cat"
+        )
+    )
 }
 
 @Test
