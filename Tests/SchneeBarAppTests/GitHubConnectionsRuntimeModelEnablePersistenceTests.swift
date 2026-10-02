@@ -380,7 +380,7 @@ private func waitForEnableRefresh(
     profileID: UUID
 ) async throws {
     for _ in 0 ..< 2_000 {
-        if case .connected = model.statusByConnectionID[profileID] {
+        if case .connected? = model.statusByConnectionID[profileID] {
             return
         }
         await Task.yield()
