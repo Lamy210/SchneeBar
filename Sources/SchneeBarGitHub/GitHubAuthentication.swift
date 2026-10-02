@@ -29,7 +29,13 @@ public enum GitHubAccountIdentityPolicy {
               login.count <= maximumLoginCharacters,
               login.utf8.count <= maximumLoginUTF8Bytes,
               !login.unicodeScalars.contains(where: {
-                  CharacterSet.controlCharacters.contains($0)
+                  switch $0.properties.generalCategory {
+                  case .control, .format, .lineSeparator,
+                       .paragraphSeparator:
+                      true
+                  default:
+                      false
+                  }
               })
         else {
             return false
