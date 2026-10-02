@@ -178,6 +178,67 @@ func savingSameCanonicalEndpointAndAccountWithDifferentIDIsRejected() async thro
 }
 
 @Test
+func savingNonCanonicalAccountIDIsRejectedWithoutWritingFile() async throws {
+    let context = try temporaryProfileStore()
+    defer { try? FileManager.default.removeItem(at: context.directory) }
+
+    var profile = try makeProfile()
+    profile.account = GitHubAccountIdentity(
+        id: "0042",
+        login: profile.account.login
+    )
+
+    await #expect(
+        throws:
+            GitHubConnectionProfileStoreError
+                .invalidConnectionIdentity(profile.id)
+    ) {
+        try await context.store.save(profile)
+    }
+
+    #expect(
+        !FileManager.default.fileExists(
+            atPath: context.fileURL.path
+        )
+    )
+}
+
+@Test
+func savingResolverInvalidEndpointIsRejectedWithoutWritingFile() async throws {
+    let context = try temporaryProfileStore()
+    defer { try? FileManager.default.removeItem(at: context.directory) }
+
+    let original = try makeProfile()
+    let profile = GitHubConnectionProfile(
+        connection: GitHubConnection(
+            id: original.id,
+            displayName: original.connection.displayName,
+            deploymentKind: .githubDotCom,
+            webBaseURL: try #require(
+                URL(string: "https://example.com")
+            )
+        ),
+        account: original.account,
+        authenticationMethod: original.authenticationMethod,
+        clientID: original.clientID
+    )
+
+    await #expect(
+        throws:
+            GitHubConnectionProfileStoreError
+                .invalidConnectionIdentity(profile.id)
+    ) {
+        try await context.store.save(profile)
+    }
+
+    #expect(
+        !FileManager.default.fileExists(
+            atPath: context.fileURL.path
+        )
+    )
+}
+
+@Test
 func deletingProfileIsIdempotent() async throws {
     let context = try temporaryProfileStore()
     defer { try? FileManager.default.removeItem(at: context.directory) }

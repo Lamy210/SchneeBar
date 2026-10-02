@@ -291,7 +291,7 @@ final class GitHubConnectionsRuntimeModel {
         }
 
         quarantinedProfileIDs =
-            GitHubConnectionProfileIdentityPolicy.ambiguousProfileIDs(
+            GitHubConnectionProfileIdentityPolicy.quarantinedProfileIDs(
                 in: profiles
             )
 
@@ -630,7 +630,7 @@ final class GitHubConnectionsRuntimeModel {
         guard !quarantinedProfileIDs.contains(profileID) else {
             recoveryTask = nil
             recoveryPhase = .failed(
-                message: profileIdentityCollisionMessage
+                message: profileIdentityQuarantineMessage
             )
             statusByConnectionID[profileID] = .unavailable
             return
@@ -840,7 +840,7 @@ final class GitHubConnectionsRuntimeModel {
         guard !quarantinedProfileIDs.contains(profileID) else {
             recoveryTask = nil
             recoveryPhase = .failed(
-                message: profileIdentityCollisionMessage
+                message: profileIdentityQuarantineMessage
             )
             statusByConnectionID[profileID] = .unavailable
             return
@@ -972,13 +972,13 @@ final class GitHubConnectionsRuntimeModel {
         }
     }
 
-    private var profileIdentityCollisionMessage: String {
-        "Resolve duplicate saved GitHub connections for this account before reconnecting."
+    private var profileIdentityQuarantineMessage: String {
+        "Remove the invalid or duplicate saved GitHub connection before reconnecting."
     }
 
     private func reconcileProfileIdentityQuarantine() async {
         let nextQuarantined =
-            GitHubConnectionProfileIdentityPolicy.ambiguousProfileIDs(
+            GitHubConnectionProfileIdentityPolicy.quarantinedProfileIDs(
                 in: profiles
             )
         let releasedProfileIDs =
