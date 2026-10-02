@@ -69,14 +69,19 @@ public struct GitHubConnectionProfileReconciler: Sendable {
         connection: GitHubConnection,
         account: GitHubAccountIdentity
     ) -> GitHubConnectionProfile? {
-        guard let endpoint = endpointIdentity(for: connection) else {
+        guard let identity =
+            GitHubConnectionProfileIdentityPolicy.identity(
+                connection: connection,
+                accountID: account.id
+            )
+        else {
             return nil
         }
 
         return profiles
-            .filter { profile in
-                profile.account.id == account.id
-                    && endpointIdentity(for: profile.connection) == endpoint
+            .filter {
+                GitHubConnectionProfileIdentityPolicy.identity(for: $0)
+                    == identity
             }
             .sorted { lhs, rhs in
                 if lhs.createdAt != rhs.createdAt {
@@ -85,27 +90,6 @@ public struct GitHubConnectionProfileReconciler: Sendable {
                 return lhs.id.uuidString < rhs.id.uuidString
             }
             .first
-    }
-
-    private func endpointIdentity(
-        for connection: GitHubConnection
-    ) -> EndpointIdentity? {
-        guard let endpoints = try? GitHubEndpointResolver.resolve(
-            deploymentKind: connection.deploymentKind,
-            webBaseURL: connection.webBaseURL
-        ) else {
-            return nil
-        }
-
-        return EndpointIdentity(
-            deploymentKind: connection.deploymentKind,
-            canonicalWebBaseURL: endpoints.webBaseURL.absoluteString
-        )
-    }
-
-    private struct EndpointIdentity: Equatable {
-        let deploymentKind: GitHubDeploymentKind
-        let canonicalWebBaseURL: String
     }
 }
 
