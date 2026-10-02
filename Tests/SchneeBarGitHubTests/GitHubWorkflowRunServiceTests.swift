@@ -136,7 +136,8 @@ private actor RefreshFailureCohortTransport: GitHubHTTPTransport {
             return try response(
                 for: request,
                 json:
-                    #"{"access_token":"retry_access","refresh_token":"retry_refresh","expires_in":28800,"refresh_token_expires_in":15811200,"token_type":"bearer","scope":""}"#
+                    #"{"access_token":"retry_access","refresh_token":"retry_refresh","expires_in":28800,"refresh_token_expires_in":15811200,"token_type":"bearer","scope":""}"#,
+                statusCode: 200
             )
         }
 
