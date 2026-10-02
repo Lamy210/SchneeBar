@@ -89,6 +89,110 @@ private actor CancellationRebindingCredentialStore: GitHubCredentialStore {
     }
 }
 
+private actor RebindingRefreshRaceGate {
+    private var isOpen = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    func wait() async {
+        if isOpen {
+            return
+        }
+        await withCheckedContinuation { continuation in
+            waiters.append(continuation)
+        }
+    }
+
+    func open() {
+        guard !isOpen else { return }
+        isOpen = true
+        let continuations = waiters
+        waiters.removeAll()
+        for continuation in continuations {
+            continuation.resume()
+        }
+    }
+}
+
+private actor RebindingRefreshRaceTransport: GitHubHTTPTransport {
+    private let refreshStarted = RebindingRefreshRaceGate()
+    private let refreshCancelled = RebindingRefreshRaceGate()
+    private let refreshRelease = RebindingRefreshRaceGate()
+
+    func data(
+        for request: URLRequest
+    ) async throws -> (Data, HTTPURLResponse) {
+        let method = request.httpMethod ?? "GET"
+        let path = request.url?.path ?? ""
+
+        if method == "POST",
+           path == "/login/oauth/access_token"
+        {
+            await refreshStarted.open()
+            await withTaskCancellationHandler {
+                await refreshRelease.wait()
+            } onCancel: {
+                Task {
+                    await self.refreshCancelled.open()
+                }
+            }
+            return try response(
+                for: request,
+                json:
+                    #"{"access_token":"stale-refreshed-token","expires_in":28800,"refresh_token":"stale-refreshed-refresh","refresh_token_expires_in":15897600,"token_type":"bearer"}"#
+            )
+        }
+
+        if method == "GET", path == "/user" {
+            return try response(
+                for: request,
+                json:
+                    #"{"id":42,"login":"octocat","name":null,"avatar_url":null}"#
+            )
+        }
+
+        if method == "GET", path == "/user/installations" {
+            return try response(
+                for: request,
+                json: #"{"total_count":0,"installations":[]}"#
+            )
+        }
+
+        return try response(
+            for: request,
+            json: #"{"message":"unexpected request"}"#,
+            statusCode: 500
+        )
+    }
+
+    func waitUntilRefreshStarted() async {
+        await refreshStarted.wait()
+    }
+
+    func waitUntilRefreshCancelled() async {
+        await refreshCancelled.wait()
+    }
+
+    func releaseRefresh() async {
+        await refreshRelease.open()
+    }
+
+    private func response(
+        for request: URLRequest,
+        json: String,
+        statusCode: Int = 200
+    ) throws -> (Data, HTTPURLResponse) {
+        let response = try #require(
+            HTTPURLResponse(
+                url: request.url!,
+                statusCode: statusCode,
+                httpVersion: "HTTP/1.1",
+                headerFields: nil
+            )
+        )
+        return (Data(json.utf8), response)
+    }
+}
+
 private actor RebindingCredentialStore: GitHubCredentialStore {
     private var values: [GitHubCredentialKey: GitHubCredential] = [:]
 
@@ -227,6 +331,222 @@ func rebindEstablishedGHESSessionPreservesEndpointBinding() async throws {
     #expect(rebound.credentialKey == targetKey)
     #expect(await store.value(for: sourceKey) == nil)
     #expect(await store.value(for: targetKey) == credential)
+}
+
+@Test
+func rebindDrainsTargetRefreshBeforeSavingReboundCredential() async throws {
+    let raceNow = Date(timeIntervalSince1970: 70_000)
+    let sourceConnection = try rebindingConnection(
+        id: UUID(
+            uuidString: "00000000-0000-0000-0000-000000000611"
+        )!
+    )
+    let targetConnection = try rebindingConnection(
+        id: UUID(
+            uuidString: "00000000-0000-0000-0000-000000000622"
+        )!
+    )
+    let identity = GitHubAccountIdentity(
+        id: "42",
+        login: "octocat"
+    )
+    let sourceKey = GitHubCredentialKey(
+        connectionID: sourceConnection.id,
+        accountID: identity.id
+    )
+    let targetKey = GitHubCredentialKey(
+        connectionID: targetConnection.id,
+        accountID: identity.id
+    )
+    let reboundCredential = GitHubCredential(
+        accessToken: "fresh-rebound-token",
+        endpointIdentity: "https://github.com"
+    )
+    let staleTargetCredential = GitHubCredential(
+        accessToken: "stale-target-token",
+        refreshToken: "stale-target-refresh",
+        accessTokenExpiresAt: raceNow.addingTimeInterval(120),
+        refreshTokenExpiresAt: raceNow.addingTimeInterval(10_000),
+        endpointIdentity: "https://github.com"
+    )
+    let store = RebindingCredentialStore()
+    try await store.save(
+        reboundCredential,
+        for: sourceKey
+    )
+    try await store.save(
+        staleTargetCredential,
+        for: targetKey
+    )
+
+    let transport = RebindingRefreshRaceTransport()
+    let deviceFlowClient = GitHubDeviceFlowClient(
+        transport: transport,
+        now: { raceNow }
+    )
+    let coordinator = GitHubConnectionSessionCoordinator(
+        credentialStore: store,
+        accessClient: GitHubAccessClient(transport: transport),
+        deviceFlowClient: deviceFlowClient,
+        now: { raceNow },
+        refreshLeeway: 300
+    )
+    let account = GitHubAuthenticatedAccount(identity: identity)
+    let inventory = GitHubAccessInventory(
+        account: account,
+        installations: []
+    )
+    let session = GitHubConnectionSession(
+        connectionID: sourceConnection.id,
+        account: account,
+        credentialKey: sourceKey,
+        inventory: inventory,
+        capabilities: GitHubCapabilityEvaluator().evaluate(
+            connection: sourceConnection,
+            inventory: inventory
+        )
+    )
+
+    let staleRestore = Task {
+        try await coordinator.restore(
+            connection: targetConnection,
+            identity: identity,
+            clientID: "test-client-id"
+        )
+    }
+    await transport.waitUntilRefreshStarted()
+
+    let rebind = Task {
+        try await coordinator.rebindEstablishedSession(
+            session,
+            from: sourceConnection,
+            to: targetConnection
+        )
+    }
+
+    await transport.waitUntilRefreshCancelled()
+    await transport.releaseRefresh()
+
+    _ = try await rebind.value
+    _ = try await staleRestore.value
+
+    let persisted = try #require(
+        await store.value(for: targetKey)
+    )
+    #expect(persisted.accessToken == reboundCredential.accessToken)
+    #expect(persisted.endpointIdentity == "https://github.com")
+    #expect(await store.value(for: sourceKey) == nil)
+}
+
+@Test
+func cancellingRebindDuringRefreshDrainStopsBeforeCredentialMove() async throws {
+    let raceNow = Date(timeIntervalSince1970: 71_000)
+    let sourceConnection = try rebindingConnection(
+        id: UUID(
+            uuidString: "00000000-0000-0000-0000-000000000711"
+        )!
+    )
+    let targetConnection = try rebindingConnection(
+        id: UUID(
+            uuidString: "00000000-0000-0000-0000-000000000722"
+        )!
+    )
+    let identity = GitHubAccountIdentity(
+        id: "42",
+        login: "octocat"
+    )
+    let sourceKey = GitHubCredentialKey(
+        connectionID: sourceConnection.id,
+        accountID: identity.id
+    )
+    let targetKey = GitHubCredentialKey(
+        connectionID: targetConnection.id,
+        accountID: identity.id
+    )
+    let reboundCredential = GitHubCredential(
+        accessToken: "fresh-rebound-token",
+        endpointIdentity: "https://github.com"
+    )
+    let staleTargetCredential = GitHubCredential(
+        accessToken: "stale-target-token",
+        refreshToken: "stale-target-refresh",
+        accessTokenExpiresAt: raceNow.addingTimeInterval(120),
+        refreshTokenExpiresAt: raceNow.addingTimeInterval(10_000),
+        endpointIdentity: "https://github.com"
+    )
+    let store = RebindingCredentialStore()
+    try await store.save(
+        reboundCredential,
+        for: sourceKey
+    )
+    try await store.save(
+        staleTargetCredential,
+        for: targetKey
+    )
+
+    let transport = RebindingRefreshRaceTransport()
+    let deviceFlowClient = GitHubDeviceFlowClient(
+        transport: transport,
+        now: { raceNow }
+    )
+    let coordinator = GitHubConnectionSessionCoordinator(
+        credentialStore: store,
+        accessClient: GitHubAccessClient(transport: transport),
+        deviceFlowClient: deviceFlowClient,
+        now: { raceNow },
+        refreshLeeway: 300
+    )
+    let account = GitHubAuthenticatedAccount(identity: identity)
+    let inventory = GitHubAccessInventory(
+        account: account,
+        installations: []
+    )
+    let session = GitHubConnectionSession(
+        connectionID: sourceConnection.id,
+        account: account,
+        credentialKey: sourceKey,
+        inventory: inventory,
+        capabilities: GitHubCapabilityEvaluator().evaluate(
+            connection: sourceConnection,
+            inventory: inventory
+        )
+    )
+
+    let staleRestore = Task {
+        try await coordinator.restore(
+            connection: targetConnection,
+            identity: identity,
+            clientID: "test-client-id"
+        )
+    }
+    await transport.waitUntilRefreshStarted()
+
+    let rebind = Task {
+        try await coordinator.rebindEstablishedSession(
+            session,
+            from: sourceConnection,
+            to: targetConnection
+        )
+    }
+
+    await transport.waitUntilRefreshCancelled()
+    rebind.cancel()
+    await transport.releaseRefresh()
+
+    await #expect(throws: CancellationError.self) {
+        try await rebind.value
+    }
+    _ = try await staleRestore.value
+
+    #expect(
+        await store.value(for: sourceKey)
+            == reboundCredential
+    )
+    let target = try #require(
+        await store.value(for: targetKey)
+    )
+    #expect(target.accessToken == "stale-refreshed-token")
+    #expect(target.endpointIdentity == "https://github.com")
 }
 
 @Test
