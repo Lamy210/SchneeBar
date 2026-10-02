@@ -214,6 +214,55 @@ func delayedToggleSaveCannotOverwriteNewerRepositorySelection() async throws {
     #expect(stored == current)
 }
 
+@Test @MainActor
+func delayedSelectionSaveCannotResurrectDisconnectedProfile() async throws {
+    let profile = try togglePersistenceProfile()
+    let profileStore = TogglePersistenceProfileStore(profile)
+    let credentialStore = TogglePersistenceCredentialStore(
+        key: profile.credentialKey,
+        credential: GitHubCredential(
+            accessToken: "selection-access",
+            endpointIdentity: "https://github.com"
+        )
+    )
+    let model = GitHubConnectionsRuntimeModel(
+        profileStore: profileStore,
+        sessionCoordinator: GitHubConnectionSessionCoordinator(
+            credentialStore: credentialStore
+        ),
+        activityProvider: GitHubActivityProvider(
+            workflowRunLoader: TogglePersistenceWorkflowLoader()
+        )
+    )
+    model.profiles = [profile]
+
+    let selectionTask = Task { @MainActor in
+        await model.saveRepositorySelection(
+            profileID: profile.id,
+            mode: .selected,
+            selectedRepositoryIDs: [404, 505]
+        )
+    }
+    await profileStore.waitUntilSaveStarts()
+
+    await model.disconnect(profileID: profile.id)
+
+    #expect(model.profiles.isEmpty)
+    #expect(try await profileStore.load(id: profile.id) == nil)
+
+    await profileStore.releaseSave()
+    await profileStore.waitUntilBlockedSaveCompletes()
+
+    #expect(await selectionTask.value == false)
+    await waitForTogglePersistenceRepair(
+        profileStore,
+        profileID: profile.id
+    )
+
+    #expect(model.profiles.isEmpty)
+    #expect(try await profileStore.load(id: profile.id) == nil)
+}
+
 private func togglePersistenceProfile() throws -> GitHubConnectionProfile {
     GitHubConnectionProfile(
         connection: GitHubConnection(
