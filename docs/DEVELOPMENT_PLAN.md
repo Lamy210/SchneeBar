@@ -75,6 +75,7 @@ Implemented foundation:
 - same-endpoint/different-account coexistence with connection-scoped credential isolation
 - session inventory revalidation bound to the stable numeric account ID established earlier in the same session transaction
 - deterministic connection ordering for stable multi-account UI and polling behavior
+- deterministic injected runtime clock for onboarding, refresh, and recovery connection lifecycle timestamps
 - dedicated existing-connection Device Flow reauthentication
 - local-first Device Flow security decision with shared onboarding/recovery anti-phishing guidance and no embedded client secret
 - same-account binding enforcement during recovery

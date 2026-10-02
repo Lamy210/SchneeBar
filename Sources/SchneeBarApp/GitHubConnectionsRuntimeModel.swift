@@ -491,14 +491,14 @@ final class GitHubConnectionsRuntimeModel {
             credential: credential
         )
 
-        let now = Date.now
+        let timestamp = now()
         let profile = GitHubConnectionProfileReconciler().reconcile(
             existingProfiles: profiles,
             authenticatedConnection: connection,
             account: session.account.identity,
             authenticationMethod: .deviceFlow,
             clientID: clientID,
-            now: now
+            now: timestamp
         )
         let previousProfile = profiles.first(where: { $0.id == profile.id })
 
@@ -640,7 +640,7 @@ final class GitHubConnectionsRuntimeModel {
             guard isCurrentOperationGeneration(generation, for: profileID) else { return }
 
             var updated = profile
-            updated.lastConnectedAt = .now
+            updated.lastConnectedAt = now()
             try await profileStore.save(updated)
             guard isCurrentOperationGeneration(generation, for: profileID) else {
                 await repairProfileStoreAfterStaleWrite(profileID: profileID)
@@ -816,7 +816,7 @@ final class GitHubConnectionsRuntimeModel {
                     repositorySelection: current.repositorySelection,
                     isEnabled: current.isEnabled,
                     createdAt: current.createdAt,
-                    lastConnectedAt: .now,
+                    lastConnectedAt: now(),
                     lastEnterpriseMetadataCheckAt: current.lastEnterpriseMetadataCheckAt
                 )
 
