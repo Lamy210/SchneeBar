@@ -157,6 +157,60 @@ func delayedToggleSaveCannotResurrectDisconnectedProfile() async throws {
     #expect(try await profileStore.load(id: profile.id) == nil)
 }
 
+@Test @MainActor
+func delayedToggleSaveCannotOverwriteNewerRepositorySelection() async throws {
+    let profile = try togglePersistenceProfile()
+    let profileStore = TogglePersistenceProfileStore(profile)
+    let credentialStore = TogglePersistenceCredentialStore(
+        key: profile.credentialKey,
+        credential: GitHubCredential(
+            accessToken: "toggle-access",
+            endpointIdentity: "https://github.com"
+        )
+    )
+    let model = GitHubConnectionsRuntimeModel(
+        profileStore: profileStore,
+        sessionCoordinator: GitHubConnectionSessionCoordinator(
+            credentialStore: credentialStore
+        ),
+        activityProvider: GitHubActivityProvider(
+            workflowRunLoader: TogglePersistenceWorkflowLoader()
+        )
+    )
+    model.profiles = [profile]
+
+    model.setEnabled(false, profileID: profile.id)
+    await profileStore.waitUntilSaveStarts()
+
+    let selectionSaved = await model.saveRepositorySelection(
+        profileID: profile.id,
+        mode: .selected,
+        selectedRepositoryIDs: [202, 303]
+    )
+    #expect(selectionSaved)
+
+    await profileStore.releaseSave()
+    await profileStore.waitUntilBlockedSaveCompletes()
+    await waitForToggleSelectionRepair(
+        profileStore,
+        profileID: profile.id
+    )
+
+    let current = try #require(
+        model.profiles.first(where: { $0.id == profile.id })
+    )
+    #expect(current.isEnabled == false)
+    #expect(
+        current.repositorySelection
+            == .selected([202, 303])
+    )
+
+    let stored = try #require(
+        try await profileStore.load(id: profile.id)
+    )
+    #expect(stored == current)
+}
+
 private func togglePersistenceProfile() throws -> GitHubConnectionProfile {
     GitHubConnectionProfile(
         connection: GitHubConnection(
@@ -196,5 +250,30 @@ private func waitForTogglePersistenceRepair(
     }
     Issue.record(
         "Timed out waiting for stale toggle persistence repair"
+    )
+}
+
+
+private func waitForToggleSelectionRepair(
+    _ store: TogglePersistenceProfileStore,
+    profileID: UUID
+) async {
+    for _ in 0 ..< 1_000 {
+        guard let stored = try? await store.load(id: profileID),
+              let profile = stored
+        else {
+            await Task.yield()
+            continue
+        }
+
+        if profile.repositorySelection == .selected([202, 303]),
+           profile.isEnabled == false
+        {
+            return
+        }
+        await Task.yield()
+    }
+    Issue.record(
+        "Timed out waiting for stale toggle selection repair"
     )
 }
