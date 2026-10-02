@@ -232,11 +232,22 @@ public actor GitHubConnectionSessionCoordinator {
             )
         }
 
-        let previousTargetCredential = try await credentialStore.load(for: targetKey)
         try Task.checkCancellation()
 
         await cancelAndDrainRefreshTask(for: sourceKey)
         await cancelAndDrainRefreshTask(for: targetKey)
+        try Task.checkCancellation()
+
+        guard let credential = try await credentialStore.load(for: sourceKey) else {
+            throw GitHubConnectionSessionError.credentialNotFound
+        }
+        try validateCredentialEndpointBinding(
+            credential,
+            connection: sourceConnection
+        )
+        let previousTargetCredential = try await credentialStore.load(
+            for: targetKey
+        )
         try Task.checkCancellation()
 
         try await credentialStore.save(credential, for: targetKey)
