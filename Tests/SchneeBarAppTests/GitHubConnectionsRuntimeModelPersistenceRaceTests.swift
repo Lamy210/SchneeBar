@@ -48,13 +48,16 @@ private actor TogglePersistenceProfileStore: GitHubConnectionProfileStore {
     }
 
     func save(_ profile: GitHubConnectionProfile) async throws {
-        if shouldBlockNextSave {
+        let isBlockedSave = shouldBlockNextSave
+        if isBlockedSave {
             shouldBlockNextSave = false
             await saveStarted.open()
             await saveRelease.wait()
         }
         values[profile.id] = profile
-        await blockedSaveCompleted.open()
+        if isBlockedSave {
+            await blockedSaveCompleted.open()
+        }
     }
 
     func delete(id: UUID) async throws {
@@ -259,14 +262,8 @@ private func waitForToggleSelectionRepair(
     profileID: UUID
 ) async {
     for _ in 0 ..< 1_000 {
-        guard let stored = try? await store.load(id: profileID),
-              let profile = stored
-        else {
-            await Task.yield()
-            continue
-        }
-
-        if profile.repositorySelection == .selected([202, 303]),
+        if let profile = try? await store.load(id: profileID),
+           profile.repositorySelection == .selected([202, 303]),
            profile.isEnabled == false
         {
             return
