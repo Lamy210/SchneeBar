@@ -121,7 +121,7 @@ func successfulRecoveryPreservesProfileConfiguration() async throws {
     #expect(updated.createdAt == original.createdAt)
     #expect(updated.authenticationMethod == original.authenticationMethod)
     #expect(updated.clientID == original.clientID)
-    #expect(updated.lastConnectedAt != original.lastConnectedAt)
+    #expect(updated.lastConnectedAt == runtimeNow)
     #expect(
         updated.lastEnterpriseMetadataCheckAt
             == original.lastEnterpriseMetadataCheckAt
@@ -264,7 +264,8 @@ private func runtimeFixture(
         sessionCoordinator: sessionCoordinator,
         activityProvider: activityProvider,
         deviceFlowClient: deviceFlowClient,
-        authorizationWaiter: waiter
+        authorizationWaiter: waiter,
+        now: { runtimeNow }
     )
     return RuntimeFixture(
         model: model,
