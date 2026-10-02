@@ -351,8 +351,7 @@ public actor GitHubConnectionSessionCoordinator {
         identity: GitHubAccountIdentity
     ) async throws {
         let key = credentialKey(connection: connection, identity: identity)
-        refreshTasks[key]?.task.cancel()
-        refreshTasks[key] = nil
+        await cancelAndDrainRefreshTask(for: key)
         try await credentialStore.delete(for: key)
     }
 

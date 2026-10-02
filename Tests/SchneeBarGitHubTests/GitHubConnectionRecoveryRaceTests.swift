@@ -133,6 +133,89 @@ private actor RecoveryRaceTransport: GitHubHTTPTransport {
 private let recoveryRaceNow = Date(timeIntervalSince1970: 30_000)
 
 @Test
+func disconnectDrainsOlderRefreshBeforeDeletingCredential() async throws {
+    let transport = RecoveryRaceTransport()
+    let store = RecoveryRaceCredentialStore()
+    let connection = try recoveryRaceConnection()
+    let identity = GitHubAccountIdentity(id: "42", login: "octocat")
+    let key = GitHubCredentialKey(
+        connectionID: connection.id,
+        accountID: identity.id
+    )
+    try await store.save(recoveryRaceExpiringCredential(), for: key)
+    let coordinator = recoveryRaceCoordinator(
+        transport: transport,
+        store: store
+    )
+
+    let restoreTask = Task {
+        try await coordinator.restore(
+            connection: connection,
+            identity: identity,
+            clientID: "test-client-id"
+        )
+    }
+    await transport.waitUntilRefreshStarted()
+
+    let disconnectTask = Task {
+        try await coordinator.disconnect(
+            connection: connection,
+            identity: identity
+        )
+    }
+
+    await transport.waitUntilRefreshCancelled()
+    await transport.releaseRefresh()
+
+    try await disconnectTask.value
+    _ = try await restoreTask.value
+
+    #expect(await store.credential(for: key) == nil)
+}
+
+@Test
+func cancellingCallerDoesNotAbortDisconnectCleanupAfterItStarts() async throws {
+    let transport = RecoveryRaceTransport()
+    let store = RecoveryRaceCredentialStore()
+    let connection = try recoveryRaceConnection()
+    let identity = GitHubAccountIdentity(id: "42", login: "octocat")
+    let key = GitHubCredentialKey(
+        connectionID: connection.id,
+        accountID: identity.id
+    )
+    try await store.save(recoveryRaceExpiringCredential(), for: key)
+    let coordinator = recoveryRaceCoordinator(
+        transport: transport,
+        store: store
+    )
+
+    let restoreTask = Task {
+        try await coordinator.restore(
+            connection: connection,
+            identity: identity,
+            clientID: "test-client-id"
+        )
+    }
+    await transport.waitUntilRefreshStarted()
+
+    let disconnectTask = Task {
+        try await coordinator.disconnect(
+            connection: connection,
+            identity: identity
+        )
+    }
+
+    await transport.waitUntilRefreshCancelled()
+    disconnectTask.cancel()
+    await transport.releaseRefresh()
+
+    try await disconnectTask.value
+    _ = try await restoreTask.value
+
+    #expect(await store.credential(for: key) == nil)
+}
+
+@Test
 func recoveryDrainsOlderRefreshBeforeSavingRecoveryCredential() async throws {
     let transport = RecoveryRaceTransport()
     let store = RecoveryRaceCredentialStore()
