@@ -334,6 +334,112 @@ func rebindEstablishedGHESSessionPreservesEndpointBinding() async throws {
 }
 
 @Test
+func rebindMovesLatestSourceCredentialAfterRefreshDrain() async throws {
+    let raceNow = Date(timeIntervalSince1970: 72_000)
+    let sourceConnection = try rebindingConnection(
+        id: UUID(
+            uuidString: "00000000-0000-0000-0000-000000000811"
+        )!
+    )
+    let targetConnection = try rebindingConnection(
+        id: UUID(
+            uuidString: "00000000-0000-0000-0000-000000000822"
+        )!
+    )
+    let identity = GitHubAccountIdentity(
+        id: "42",
+        login: "octocat"
+    )
+    let sourceKey = GitHubCredentialKey(
+        connectionID: sourceConnection.id,
+        accountID: identity.id
+    )
+    let targetKey = GitHubCredentialKey(
+        connectionID: targetConnection.id,
+        accountID: identity.id
+    )
+    let expiringSourceCredential = GitHubCredential(
+        accessToken: "stale-source-token",
+        refreshToken: "stale-source-refresh",
+        accessTokenExpiresAt: raceNow.addingTimeInterval(120),
+        refreshTokenExpiresAt: raceNow.addingTimeInterval(10_000),
+        endpointIdentity: "https://github.com"
+    )
+    let existingTargetCredential = GitHubCredential(
+        accessToken: "existing-target-token",
+        endpointIdentity: "https://github.com"
+    )
+    let store = RebindingCredentialStore()
+    try await store.save(
+        expiringSourceCredential,
+        for: sourceKey
+    )
+    try await store.save(
+        existingTargetCredential,
+        for: targetKey
+    )
+
+    let transport = RebindingRefreshRaceTransport()
+    let deviceFlowClient = GitHubDeviceFlowClient(
+        transport: transport,
+        now: { raceNow }
+    )
+    let coordinator = GitHubConnectionSessionCoordinator(
+        credentialStore: store,
+        accessClient: GitHubAccessClient(transport: transport),
+        deviceFlowClient: deviceFlowClient,
+        now: { raceNow },
+        refreshLeeway: 300
+    )
+    let account = GitHubAuthenticatedAccount(identity: identity)
+    let inventory = GitHubAccessInventory(
+        account: account,
+        installations: []
+    )
+    let session = GitHubConnectionSession(
+        connectionID: sourceConnection.id,
+        account: account,
+        credentialKey: sourceKey,
+        inventory: inventory,
+        capabilities: GitHubCapabilityEvaluator().evaluate(
+            connection: sourceConnection,
+            inventory: inventory
+        )
+    )
+
+    let staleRestore = Task {
+        try await coordinator.restore(
+            connection: sourceConnection,
+            identity: identity,
+            clientID: "test-client-id"
+        )
+    }
+    await transport.waitUntilRefreshStarted()
+
+    let rebind = Task {
+        try await coordinator.rebindEstablishedSession(
+            session,
+            from: sourceConnection,
+            to: targetConnection
+        )
+    }
+
+    await transport.waitUntilRefreshCancelled()
+    await transport.releaseRefresh()
+
+    _ = try await rebind.value
+    _ = try await staleRestore.value
+
+    let persisted = try #require(
+        await store.value(for: targetKey)
+    )
+    #expect(persisted.accessToken == "stale-refreshed-token")
+    #expect(persisted.refreshToken == "stale-refreshed-refresh")
+    #expect(persisted.endpointIdentity == "https://github.com")
+    #expect(await store.value(for: sourceKey) == nil)
+}
+
+@Test
 func rebindDrainsTargetRefreshBeforeSavingReboundCredential() async throws {
     let raceNow = Date(timeIntervalSince1970: 70_000)
     let sourceConnection = try rebindingConnection(
