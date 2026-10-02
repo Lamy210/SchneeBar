@@ -74,6 +74,7 @@ Implemented foundation:
 - same-endpoint/same-account reconnect reconciliation that preserves connection identity, repository selection, monitoring state, and original creation time
 - same-endpoint/different-account coexistence with connection-scoped credential isolation
 - session inventory revalidation bound to the stable numeric account ID established earlier in the same session transaction
+- successful session refresh reconciles fresh account login metadata into the durable profile without changing the stable account ID or connection identity
 - deterministic connection ordering for stable multi-account UI and polling behavior
 - dedicated existing-connection Device Flow reauthentication
 - local-first Device Flow security decision with shared onboarding/recovery anti-phishing guidance and no embedded client secret

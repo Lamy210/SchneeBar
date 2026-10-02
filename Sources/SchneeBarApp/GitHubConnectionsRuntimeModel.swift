@@ -640,6 +640,7 @@ final class GitHubConnectionsRuntimeModel {
             guard isCurrentOperationGeneration(generation, for: profileID) else { return }
 
             var updated = profile
+            updated.account = session.account.identity
             updated.lastConnectedAt = .now
             try await profileStore.save(updated)
             guard isCurrentOperationGeneration(generation, for: profileID) else {

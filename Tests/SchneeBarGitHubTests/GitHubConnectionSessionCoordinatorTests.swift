@@ -513,6 +513,27 @@ func establishCancellationAfterInventoryStartsDoesNotPersistCredential() async t
 }
 
 @Test
+func establishUsesFreshInventoryAccountMetadataWhenStableIDMatches() async throws {
+    let transport = SessionQueueTransport([
+        SessionStubResponse(userJSON(id: 42, login: "old-login")),
+        SessionStubResponse(userJSON(id: 42, login: "renamed-login")),
+        SessionStubResponse(#"{"total_count":0,"installations":[]}"#),
+    ])
+    let store = MemoryGitHubCredentialStore()
+    let coordinator = makeCoordinator(transport: transport, store: store)
+
+    let result = try await coordinator.establish(
+        connection: try sessionConnection(),
+        credential: GitHubCredential(accessToken: "ghu_access")
+    )
+
+    #expect(result.account.identity.id == "42")
+    #expect(result.account.identity.login == "renamed-login")
+    #expect(result.inventory.account.identity == result.account.identity)
+    #expect(await store.saves() == 1)
+}
+
+@Test
 func establishRejectsInventoryAccountDriftBeforePersistence() async throws {
     let transport = SessionQueueTransport([
         SessionStubResponse(userJSON(id: 42, login: "octocat")),
