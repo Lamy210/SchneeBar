@@ -6,6 +6,25 @@ public enum GitHubDeploymentKind: String, Codable, CaseIterable, Sendable {
     case enterpriseServer
 }
 
+public enum GitHubConnectionDisplayNamePolicy {
+    public static let maximumCharacters = 128
+    public static let maximumUTF8Bytes = 512
+
+    public static func isValid(_ displayName: String) -> Bool {
+        guard !displayName.isEmpty,
+              displayName == displayName.trimmingCharacters(
+                  in: .whitespacesAndNewlines
+              ),
+              displayName.count <= maximumCharacters,
+              displayName.utf8.count <= maximumUTF8Bytes,
+              GitHubPresentationTextPolicy.hasSafeScalars(displayName)
+        else {
+            return false
+        }
+        return true
+    }
+}
+
 public struct GitHubConnection: Identifiable, Codable, Equatable, Sendable {
     public let id: UUID
     public var displayName: String
