@@ -53,7 +53,7 @@ public enum GitHubConnectionProfileIdentityPolicy {
         connection: GitHubConnection,
         accountID: String
     ) -> GitHubConnectionProfileIdentity? {
-        guard let canonicalAccountID = canonicalAccountID(accountID),
+        guard let normalizedAccountID = canonicalAccountID(accountID),
               let endpoints = try? GitHubEndpointResolver.resolve(
                   deploymentKind: connection.deploymentKind,
                   webBaseURL: connection.webBaseURL
@@ -65,7 +65,7 @@ public enum GitHubConnectionProfileIdentityPolicy {
         return GitHubConnectionProfileIdentity(
             deploymentKind: connection.deploymentKind.rawValue,
             canonicalWebBaseURL: endpoints.webBaseURL.absoluteString,
-            accountID: canonicalAccountID
+            accountID: normalizedAccountID
         )
     }
 
