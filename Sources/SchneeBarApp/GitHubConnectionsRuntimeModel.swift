@@ -697,14 +697,16 @@ final class GitHubConnectionsRuntimeModel {
 
         Task { @MainActor [weak self] in
             guard let self,
-                  profiles.contains(where: { $0.id == profileID })
+                  profiles.first(where: { $0.id == profileID }) == profile
             else {
                 return
             }
 
             do {
                 try await profileStore.save(profile)
-                guard isCurrentOperationGeneration(generation, for: profileID) else {
+                guard isCurrentOperationGeneration(generation, for: profileID),
+                      profiles.first(where: { $0.id == profileID }) == profile
+                else {
                     await repairProfileStoreAfterStaleWrite(profileID: profileID)
                     return
                 }
