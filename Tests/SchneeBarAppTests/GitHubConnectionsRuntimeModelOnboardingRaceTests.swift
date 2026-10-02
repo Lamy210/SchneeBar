@@ -238,7 +238,7 @@ func cancellingReconnectDuringRebindRollsBackProfileAndCredential() async throws
     model.onboardingDraft = GitHubConnectionDraft(
         deploymentKind: .githubDotCom,
         displayName: "GitHub.com",
-        serverURL: "",
+        serverURL: "https://github.com",
         clientID: "test-client-id"
     )
     model.connectDraft()
@@ -265,7 +265,7 @@ func cancellingReconnectDuringRebindRollsBackProfileAndCredential() async throws
     #expect(!model.isPresentingOnboarding)
     #expect(try await profileStore.load(id: original.id) == original)
     #expect(
-        try await credentialStore.value(for: existingKey)
+        await credentialStore.value(for: existingKey)
             == existingCredential
     )
     #expect(await credentialStore.count() == 1)
