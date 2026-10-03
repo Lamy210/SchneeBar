@@ -39,13 +39,14 @@ public actor ApplicationSupportGitHubConnectionProfileStore: GitHubConnectionPro
 
     public func save(_ profile: GitHubConnectionProfile) async throws {
         var profiles = try readProfiles()
+        try rejectDuplicateLogicalProfile(
+            profile,
+            existingProfiles: profiles
+        )
+
         if let index = profiles.firstIndex(where: { $0.id == profile.id }) {
             profiles[index] = profile
         } else {
-            try rejectDuplicateLogicalProfile(
-                profile,
-                existingProfiles: profiles
-            )
             profiles.append(profile)
         }
         try writeProfiles(profiles)
@@ -68,7 +69,8 @@ public actor ApplicationSupportGitHubConnectionProfileStore: GitHubConnectionPro
         }
 
         guard let existing = existingProfiles.first(where: {
-            logicalIdentity(for: $0) == attemptedIdentity
+            $0.id != profile.id
+                && logicalIdentity(for: $0) == attemptedIdentity
         }) else {
             return
         }
