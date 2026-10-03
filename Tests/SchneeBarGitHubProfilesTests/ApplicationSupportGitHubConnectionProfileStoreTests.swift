@@ -79,7 +79,7 @@ func savingDifferentUUIDForSameEndpointAndAccountIsRejected() async throws {
         id: UUID(uuidString: "10000000-0000-0000-0000-000000000002")!,
         displayName: "Renamed GitHub",
         deploymentKind: original.connection.deploymentKind,
-        webBaseURL: original.connection.webBaseURL,
+        webBaseURL: try #require(URL(string: "https://github.com:443")),
         serverVersion: original.connection.serverVersion,
         apiVersion: original.connection.apiVersion
     )
@@ -88,14 +88,41 @@ func savingDifferentUUIDForSameEndpointAndAccountIsRejected() async throws {
         login: "renamed-login"
     )
 
-    do {
+    await #expect(
+        throws: GitHubConnectionProfileStoreError.duplicateSemanticIdentity(
+            existingConnectionID: original.id
+        )
+    ) {
         try await context.store.save(duplicate)
-        Issue.record("Expected duplicate semantic profile identity to be rejected")
-    } catch {
-        // Expected: a second UUID must not claim the same endpoint/account identity.
     }
 
     #expect(try await context.store.loadAll() == [original])
+}
+
+@Test
+func savingSameEndpointForDifferentStableAccountIsAllowed() async throws {
+    let context = try temporaryProfileStore()
+    defer { try? FileManager.default.removeItem(at: context.directory) }
+    let original = try makeProfile()
+    try await context.store.save(original)
+
+    var secondAccount = original
+    secondAccount.connection = GitHubConnection(
+        id: UUID(uuidString: "10000000-0000-0000-0000-000000000003")!,
+        displayName: original.connection.displayName,
+        deploymentKind: original.connection.deploymentKind,
+        webBaseURL: original.connection.webBaseURL,
+        serverVersion: original.connection.serverVersion,
+        apiVersion: original.connection.apiVersion
+    )
+    secondAccount.account = GitHubAccountIdentity(
+        id: "99",
+        login: "another-account"
+    )
+
+    try await context.store.save(secondAccount)
+
+    #expect(try await context.store.loadAll() == [original, secondAccount])
 }
 
 @Test
@@ -119,7 +146,7 @@ func unsupportedSchemaVersionIsRejectedWithoutOverwritingFile() async throws {
         at: context.directory,
         withIntermediateDirectories: true
     )
-    let raw = #"{\"profiles\":[],\"schemaVersion\":999}"#
+    let raw = #"{"profiles":[],"schemaVersion":999}"#
     try Data(raw.utf8).write(to: context.fileURL)
 
     await #expect(
@@ -144,7 +171,7 @@ func profileStoreRejectsSymlinkBackingFile() async throws {
         "target.json",
         isDirectory: false
     )
-    try Data(#"{\"profiles\":[],\"schemaVersion\":1}"#.utf8)
+    try Data(#"{"profiles":[],"schemaVersion":1}"#.utf8)
         .write(to: target)
     try FileManager.default.createSymbolicLink(
         at: context.fileURL,
@@ -171,7 +198,7 @@ func profileStoreRejectsHardLinkedBackingFile() async throws {
         "target.json",
         isDirectory: false
     )
-    try Data(#"{\"profiles\":[],\"schemaVersion\":1}"#.utf8)
+    try Data(#"{"profiles":[],"schemaVersion":1}"#.utf8)
         .write(to: target)
     try FileManager.default.linkItem(
         at: target,

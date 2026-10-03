@@ -6,6 +6,7 @@ public enum GitHubConnectionProfileStoreError: Error, Equatable, Sendable {
     case unsupportedSchemaVersion(Int)
     case invalidBackingFile
     case payloadTooLarge
+    case duplicateSemanticIdentity(existingConnectionID: UUID)
 }
 
 public actor ApplicationSupportGitHubConnectionProfileStore: GitHubConnectionProfileStore {
@@ -35,6 +36,24 @@ public actor ApplicationSupportGitHubConnectionProfileStore: GitHubConnectionPro
 
     public func save(_ profile: GitHubConnectionProfile) async throws {
         var profiles = try readProfiles()
+
+        if let semanticIdentity = GitHubConnectionProfileSemanticIdentity(
+            profile: profile
+        ), let duplicate = profiles.first(where: { existing in
+            guard existing.id != profile.id,
+                  let existingIdentity = GitHubConnectionProfileSemanticIdentity(
+                      profile: existing
+                  )
+            else {
+                return false
+            }
+            return existingIdentity == semanticIdentity
+        }) {
+            throw GitHubConnectionProfileStoreError.duplicateSemanticIdentity(
+                existingConnectionID: duplicate.id
+            )
+        }
+
         if let index = profiles.firstIndex(where: { $0.id == profile.id }) {
             profiles[index] = profile
         } else {
