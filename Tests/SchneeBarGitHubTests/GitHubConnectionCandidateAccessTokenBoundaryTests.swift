@@ -101,6 +101,60 @@ func recoverRejectsOversizedCandidateAccessTokenBeforeNetwork() async throws {
     #expect(await transport.requestCount() == 0)
 }
 
+@Test
+func establishRejectsCandidateAccessExpiryBeyondDefensiveLifetimeBeforeNetwork() async throws {
+    let now = Date(timeIntervalSince1970: 210_000)
+    let connection = try candidateAccessTokenConnection(
+        id: "00000000-0000-0000-0000-000000002672"
+    )
+    let transport = CandidateAccessTokenTransport()
+    let coordinator = GitHubConnectionSessionCoordinator(
+        credentialStore: CandidateAccessTokenCredentialStore(),
+        accessClient: GitHubAccessClient(transport: transport),
+        now: { now }
+    )
+
+    await #expect(
+        throws: GitHubConnectionSessionError.reauthenticationRequired
+    ) {
+        try await coordinator.establish(
+            connection: connection,
+            credential: overlongCandidateCredential(now: now)
+        )
+    }
+
+    #expect(await transport.requestCount() == 0)
+}
+
+@Test
+func recoverRejectsCandidateAccessExpiryBeyondDefensiveLifetimeBeforeNetwork() async throws {
+    let now = Date(timeIntervalSince1970: 210_000)
+    let connection = try candidateAccessTokenConnection(
+        id: "00000000-0000-0000-0000-000000002673"
+    )
+    let transport = CandidateAccessTokenTransport()
+    let coordinator = GitHubConnectionSessionCoordinator(
+        credentialStore: CandidateAccessTokenCredentialStore(),
+        accessClient: GitHubAccessClient(transport: transport),
+        now: { now }
+    )
+
+    await #expect(
+        throws: GitHubConnectionSessionError.reauthenticationRequired
+    ) {
+        try await coordinator.recover(
+            connection: connection,
+            expectedIdentity: GitHubAccountIdentity(
+                id: "42",
+                login: "octocat"
+            ),
+            credential: overlongCandidateCredential(now: now)
+        )
+    }
+
+    #expect(await transport.requestCount() == 0)
+}
+
 private func candidateAccessTokenConnection(
     id: String
 ) throws -> GitHubConnection {
@@ -120,6 +174,20 @@ private func oversizedCandidateCredential() -> GitHubCredential {
             repeating: "a",
             count: GitHubDeviceFlowResponsePolicy
                 .maximumOpaqueTokenCharacters + 1
+        )
+    )
+}
+
+private func overlongCandidateCredential(
+    now: Date
+) -> GitHubCredential {
+    GitHubCredential(
+        accessToken: "candidate_access",
+        accessTokenExpiresAt: now.addingTimeInterval(
+            TimeInterval(
+                GitHubDeviceFlowCredentialLifetimePolicy
+                    .maximumAccessTokenLifetime + 1
+            )
         )
     )
 }
