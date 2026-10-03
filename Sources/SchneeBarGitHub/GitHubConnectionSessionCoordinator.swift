@@ -354,6 +354,7 @@ public actor GitHubConnectionSessionCoordinator {
                 refreshed,
                 connection: connection
             )
+            try validateAccessTokenForGitHubIO(refreshed)
             return refreshed
         }
 
@@ -366,6 +367,7 @@ public actor GitHubConnectionSessionCoordinator {
         )
 
         guard shouldRefresh(credential) else {
+            try validateAccessTokenForGitHubIO(credential)
             return credential
         }
 
@@ -403,6 +405,7 @@ public actor GitHubConnectionSessionCoordinator {
         do {
             let refreshed = try await refreshTask.value
             refreshTasks[key] = nil
+            try validateAccessTokenForGitHubIO(refreshed)
             return refreshed
         } catch {
             refreshTasks[key] = nil
@@ -447,6 +450,16 @@ public actor GitHubConnectionSessionCoordinator {
         if connection.deploymentKind == .enterpriseServer {
             throw GitHubConnectionSessionError
                 .reauthenticationRequired
+        }
+    }
+
+    private func validateAccessTokenForGitHubIO(
+        _ credential: GitHubCredential
+    ) throws {
+        guard GitHubDeviceFlowResponsePolicy.isValidOpaqueToken(
+            credential.accessToken
+        ) else {
+            throw GitHubConnectionSessionError.reauthenticationRequired
         }
     }
 
