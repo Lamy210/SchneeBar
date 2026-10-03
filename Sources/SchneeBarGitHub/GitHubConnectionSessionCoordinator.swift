@@ -59,6 +59,8 @@ public actor GitHubConnectionSessionCoordinator {
         connection: GitHubConnection,
         credential: GitHubCredential
     ) async throws -> GitHubConnectionSession {
+        try validateAccessTokenForGitHubIO(credential)
+
         let account: GitHubAuthenticatedAccount
         do {
             account = try await accessClient.authenticatedAccount(
@@ -119,6 +121,8 @@ public actor GitHubConnectionSessionCoordinator {
         expectedIdentity: GitHubAccountIdentity,
         credential: GitHubCredential
     ) async throws -> GitHubConnectionSession {
+        try validateAccessTokenForGitHubIO(credential)
+
         let account: GitHubAuthenticatedAccount
         do {
             account = try await accessClient.authenticatedAccount(
