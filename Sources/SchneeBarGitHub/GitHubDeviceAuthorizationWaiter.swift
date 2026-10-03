@@ -28,7 +28,12 @@ public struct GitHubDeviceAuthorizationWaiter: Sendable {
         session: GitHubDeviceAuthorizationSession,
         repositoryID: String? = nil
     ) async throws -> GitHubCredential {
-        var delay = max(1, session.pollInterval)
+        guard GitHubDeviceFlowTimingPolicy.isValidPollInterval(
+            session.pollInterval
+        ) else {
+            throw GitHubDeviceFlowError.invalidResponse
+        }
+        var delay = session.pollInterval
 
         while true {
             try Task.checkCancellation()
@@ -45,13 +50,25 @@ public struct GitHubDeviceAuthorizationWaiter: Sendable {
             switch result {
             case let .pending(retryAfter):
                 // Never decrease a delay that was already raised by `slow_down`.
-                delay = max(delay, max(1, retryAfter))
+                let nextDelay = max(delay, retryAfter)
+                guard GitHubDeviceFlowTimingPolicy
+                    .isValidPollInterval(nextDelay)
+                else {
+                    throw GitHubDeviceFlowError.invalidResponse
+                }
+                delay = nextDelay
 
             case let .slowDown(retryAfter):
                 // RFC 8628 / GitHub Device Flow requires adding at least five
                 // seconds after each slow_down response. `pollOnce` is stateless,
                 // so cumulative backoff belongs in this coordinator.
-                delay = max(max(1, retryAfter), delay + 5)
+                let nextDelay = max(retryAfter, delay + 5)
+                guard GitHubDeviceFlowTimingPolicy
+                    .isValidPollInterval(nextDelay)
+                else {
+                    throw GitHubDeviceFlowError.invalidResponse
+                }
+                delay = nextDelay
 
             case let .authorized(credential):
                 return credential
