@@ -6,6 +6,10 @@ public enum GitHubConnectionProfileStoreError: Error, Equatable, Sendable {
     case unsupportedSchemaVersion(Int)
     case invalidBackingFile
     case payloadTooLarge
+    case duplicateAccountEndpoint(
+        existingConnectionID: UUID,
+        attemptedConnectionID: UUID
+    )
 }
 
 public actor ApplicationSupportGitHubConnectionProfileStore: GitHubConnectionProfileStore {
@@ -38,6 +42,10 @@ public actor ApplicationSupportGitHubConnectionProfileStore: GitHubConnectionPro
         if let index = profiles.firstIndex(where: { $0.id == profile.id }) {
             profiles[index] = profile
         } else {
+            try rejectDuplicateLogicalProfile(
+                profile,
+                existingProfiles: profiles
+            )
             profiles.append(profile)
         }
         try writeProfiles(profiles)
@@ -49,6 +57,43 @@ public actor ApplicationSupportGitHubConnectionProfileStore: GitHubConnectionPro
         profiles.removeAll(where: { $0.id == id })
         guard profiles.count != originalCount else { return }
         try writeProfiles(profiles)
+    }
+
+    private func rejectDuplicateLogicalProfile(
+        _ profile: GitHubConnectionProfile,
+        existingProfiles: [GitHubConnectionProfile]
+    ) throws {
+        guard let attemptedIdentity = logicalIdentity(for: profile) else {
+            return
+        }
+
+        guard let existing = existingProfiles.first(where: {
+            logicalIdentity(for: $0) == attemptedIdentity
+        }) else {
+            return
+        }
+
+        throw GitHubConnectionProfileStoreError.duplicateAccountEndpoint(
+            existingConnectionID: existing.id,
+            attemptedConnectionID: profile.id
+        )
+    }
+
+    private func logicalIdentity(
+        for profile: GitHubConnectionProfile
+    ) -> LogicalProfileIdentity? {
+        guard let endpoints = try? GitHubEndpointResolver.resolve(
+            deploymentKind: profile.connection.deploymentKind,
+            webBaseURL: profile.connection.webBaseURL
+        ) else {
+            return nil
+        }
+
+        return LogicalProfileIdentity(
+            deploymentKind: profile.connection.deploymentKind,
+            canonicalWebBaseURL: endpoints.webBaseURL.absoluteString,
+            accountID: profile.account.id
+        )
     }
 
     private func readProfiles() throws -> [GitHubConnectionProfile] {
@@ -124,4 +169,10 @@ private struct PersistedProfiles: Codable {
 
     let schemaVersion: Int
     let profiles: [GitHubConnectionProfile]
+}
+
+private struct LogicalProfileIdentity: Equatable {
+    let deploymentKind: GitHubDeploymentKind
+    let canonicalWebBaseURL: String
+    let accountID: String
 }
