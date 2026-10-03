@@ -6,6 +6,10 @@ public enum GitHubConnectionProfileStoreError: Error, Equatable, Sendable {
     case unsupportedSchemaVersion(Int)
     case invalidBackingFile
     case payloadTooLarge
+    case duplicateLogicalProfile(
+        existingConnectionID: UUID,
+        attemptedConnectionID: UUID
+    )
 }
 
 public actor ApplicationSupportGitHubConnectionProfileStore: GitHubConnectionProfileStore {
@@ -37,6 +41,13 @@ public actor ApplicationSupportGitHubConnectionProfileStore: GitHubConnectionPro
         var profiles = try readProfiles()
         if let index = profiles.firstIndex(where: { $0.id == profile.id }) {
             profiles[index] = profile
+        } else if let existing = profiles.first(where: {
+            isSameLogicalProfile($0, profile)
+        }) {
+            throw GitHubConnectionProfileStoreError.duplicateLogicalProfile(
+                existingConnectionID: existing.id,
+                attemptedConnectionID: profile.id
+            )
         } else {
             profiles.append(profile)
         }
@@ -106,6 +117,40 @@ public actor ApplicationSupportGitHubConnectionProfileStore: GitHubConnectionPro
         )
     }
 
+    private func isSameLogicalProfile(
+        _ lhs: GitHubConnectionProfile,
+        _ rhs: GitHubConnectionProfile
+    ) -> Bool {
+        guard lhs.account.id == rhs.account.id,
+              let lhsEndpoint = logicalEndpointIdentity(
+                  for: lhs.connection
+              ),
+              let rhsEndpoint = logicalEndpointIdentity(
+                  for: rhs.connection
+              )
+        else {
+            return false
+        }
+
+        return lhsEndpoint == rhsEndpoint
+    }
+
+    private func logicalEndpointIdentity(
+        for connection: GitHubConnection
+    ) -> LogicalEndpointIdentity? {
+        guard let endpoints = try? GitHubEndpointResolver.resolve(
+            deploymentKind: connection.deploymentKind,
+            webBaseURL: connection.webBaseURL
+        ) else {
+            return nil
+        }
+
+        return LogicalEndpointIdentity(
+            deploymentKind: connection.deploymentKind,
+            canonicalWebBaseURL: endpoints.webBaseURL.absoluteString
+        )
+    }
+
     private static func defaultFileURL(fileManager: FileManager) -> URL {
         let applicationSupport = fileManager.urls(
             for: .applicationSupportDirectory,
@@ -116,6 +161,11 @@ public actor ApplicationSupportGitHubConnectionProfileStore: GitHubConnectionPro
         return applicationSupport
             .appendingPathComponent("SchneeBar", isDirectory: true)
             .appendingPathComponent("github-connections-v1.json", isDirectory: false)
+    }
+
+    private struct LogicalEndpointIdentity: Equatable {
+        let deploymentKind: GitHubDeploymentKind
+        let canonicalWebBaseURL: String
     }
 }
 
