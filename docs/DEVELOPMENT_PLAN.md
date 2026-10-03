@@ -85,6 +85,7 @@ Implemented foundation:
 - Device Flow timing values use app-owned defensive budgets: provider authorization lifetime/poll intervals and externally constructed session timing must be finite and bounded before sleep/poll I/O, and oversized `slow_down` intervals fail closed instead of being clamped downward
 - Device Flow/OAuth response handling has a dedicated decode budget plus bounded opaque token and error payloads, preventing oversized provider responses from flowing into Keychain, authorization headers, or retained error state
 - Device Flow issued-credential responses fail closed on mixed success/error payloads or incomplete expiring-token rotation metadata across both initial authorization and refresh, while the documented non-expiring-token shape remains supported
+- issued Device Flow credentials require the documented bearer token type before SchneeBar stores or sends them with its fixed Bearer authorization scheme; token-type comparison is case-insensitive but rejects surrounding whitespace or alternate schemes
 - mutable profile persistence (enable/disable and repository selection) is operation-generation/profile-snapshot scoped and repairs stale writes so delayed saves cannot overwrite newer profile state or resurrect a disconnected connection
 - onboarding profile persistence has a post-save cancellation boundary with profile rollback and temporary-credential cleanup, so cancellation during an async profile save cannot commit a connection the user cancelled
 - deterministic connection ordering for stable multi-account UI and polling behavior
