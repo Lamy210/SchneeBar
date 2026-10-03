@@ -5,19 +5,9 @@ import Testing
 
 @Test
 func profileStoreRejectsDifferentUUIDForSameEndpointAndAccount() async throws {
-    let directory = FileManager.default.temporaryDirectory
-        .appendingPathComponent(
-            "SchneeBar-profile-identity-tests-\(UUID().uuidString)",
-            isDirectory: true
-        )
-    defer { try? FileManager.default.removeItem(at: directory) }
+    let context = try identityStoreContext()
+    defer { try? FileManager.default.removeItem(at: context.directory) }
 
-    let store = ApplicationSupportGitHubConnectionProfileStore(
-        fileURL: directory.appendingPathComponent(
-            "connections.json",
-            isDirectory: false
-        )
-    )
     let first = try identityProfile(
         connectionID: UUID(
             uuidString: "51000000-0000-0000-0000-000000000001"
@@ -29,19 +19,79 @@ func profileStoreRejectsDifferentUUIDForSameEndpointAndAccount() async throws {
         )!
     )
 
-    try await store.save(first)
+    try await context.store.save(first)
 
-    do {
-        try await store.save(duplicate)
-        Issue.record(
-            "Expected the store to reject a duplicate logical GitHub identity"
-        )
-    } catch {
-        // Any rejection proves the missing identity invariant before the
-        // production error contract is introduced.
+    await #expect(
+        throws: GitHubConnectionProfileStoreError.duplicateLogicalIdentity
+    ) {
+        try await context.store.save(duplicate)
     }
 
-    #expect(try await store.loadAll() == [first])
+    #expect(try await context.store.loadAll() == [first])
+}
+
+@Test
+func profileStoreRejectsPersistedDuplicateLogicalIdentity() async throws {
+    let context = try identityStoreContext()
+    defer { try? FileManager.default.removeItem(at: context.directory) }
+
+    let first = try identityProfile(
+        connectionID: UUID(
+            uuidString: "52000000-0000-0000-0000-000000000001"
+        )!
+    )
+    let duplicate = try identityProfile(
+        connectionID: UUID(
+            uuidString: "52000000-0000-0000-0000-000000000002"
+        )!
+    )
+    try FileManager.default.createDirectory(
+        at: context.directory,
+        withIntermediateDirectories: true
+    )
+    let payload = IdentityPersistedProfiles(
+        schemaVersion: 1,
+        profiles: [first, duplicate]
+    )
+    let encoder = JSONEncoder()
+    encoder.dateEncodingStrategy = .iso8601
+    try encoder.encode(payload).write(to: context.fileURL)
+
+    await #expect(
+        throws: GitHubConnectionProfileStoreError.duplicateLogicalIdentity
+    ) {
+        try await context.store.loadAll()
+    }
+}
+
+private struct IdentityStoreContext {
+    let directory: URL
+    let fileURL: URL
+    let store: ApplicationSupportGitHubConnectionProfileStore
+}
+
+private struct IdentityPersistedProfiles: Encodable {
+    let schemaVersion: Int
+    let profiles: [GitHubConnectionProfile]
+}
+
+private func identityStoreContext() throws -> IdentityStoreContext {
+    let directory = FileManager.default.temporaryDirectory
+        .appendingPathComponent(
+            "SchneeBar-profile-identity-tests-\(UUID().uuidString)",
+            isDirectory: true
+        )
+    let fileURL = directory.appendingPathComponent(
+        "connections.json",
+        isDirectory: false
+    )
+    return IdentityStoreContext(
+        directory: directory,
+        fileURL: fileURL,
+        store: ApplicationSupportGitHubConnectionProfileStore(
+            fileURL: fileURL
+        )
+    )
 }
 
 private func identityProfile(
