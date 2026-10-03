@@ -83,6 +83,21 @@ public enum GitHubDeviceFlowResponsePolicy {
     }
 }
 
+public enum GitHubDeviceFlowCredentialLifetimePolicy {
+    // These are generous app-owned defensive budgets, not GitHub protocol
+    // maxima. Current documented GitHub values are far below these ceilings.
+    public static let maximumAccessTokenLifetime = 7 * 24 * 60 * 60
+    public static let maximumRefreshTokenLifetime = 2 * 365 * 24 * 60 * 60
+
+    public static func isValidAccessTokenLifetime(_ lifetime: Int) -> Bool {
+        lifetime >= 1 && lifetime <= maximumAccessTokenLifetime
+    }
+
+    public static func isValidRefreshTokenLifetime(_ lifetime: Int) -> Bool {
+        lifetime >= 1 && lifetime <= maximumRefreshTokenLifetime
+    }
+}
+
 public enum GitHubDeviceFlowTimingPolicy {
     // App-owned defensive budgets, not GitHub protocol maxima.
     public static let maximumAuthorizationLifetime: TimeInterval = 86_400
@@ -369,8 +384,6 @@ public struct GitHubDeviceFlowClient: Sendable {
             throw GitHubDeviceFlowError.invalidResponse
         }
 
-        let credential = try credential(from: payload)
-
         switch (
             payload.expiresIn,
             payload.refreshToken,
@@ -379,19 +392,21 @@ public struct GitHubDeviceFlowClient: Sendable {
         case (nil, nil, nil):
             // GitHub omits all expiration/refresh fields when user access
             // token expiration is disabled.
-            return credential
+            return try credential(from: payload)
 
         case let (
             .some(accessTokenLifetime),
             .some(_),
             .some(refreshTokenLifetime)
         ):
-            guard accessTokenLifetime > 0,
-                  refreshTokenLifetime > 0
+            guard GitHubDeviceFlowCredentialLifetimePolicy
+                .isValidAccessTokenLifetime(accessTokenLifetime),
+                GitHubDeviceFlowCredentialLifetimePolicy
+                    .isValidRefreshTokenLifetime(refreshTokenLifetime)
             else {
                 throw GitHubDeviceFlowError.invalidResponse
             }
-            return credential
+            return try credential(from: payload)
 
         default:
             throw GitHubDeviceFlowError.invalidResponse
