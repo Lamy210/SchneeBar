@@ -68,6 +68,37 @@ func savingSameConnectionReplacesProfileInsteadOfDuplicatingIt() async throws {
 }
 
 @Test
+func savingDifferentUUIDForSameEndpointAndAccountIsRejected() async throws {
+    let context = try temporaryProfileStore()
+    defer { try? FileManager.default.removeItem(at: context.directory) }
+    let original = try makeProfile()
+    try await context.store.save(original)
+
+    var duplicate = original
+    duplicate.connection = GitHubConnection(
+        id: UUID(uuidString: "10000000-0000-0000-0000-000000000002")!,
+        displayName: "Renamed GitHub",
+        deploymentKind: original.connection.deploymentKind,
+        webBaseURL: original.connection.webBaseURL,
+        serverVersion: original.connection.serverVersion,
+        apiVersion: original.connection.apiVersion
+    )
+    duplicate.account = GitHubAccountIdentity(
+        id: original.account.id,
+        login: "renamed-login"
+    )
+
+    do {
+        try await context.store.save(duplicate)
+        Issue.record("Expected duplicate semantic profile identity to be rejected")
+    } catch {
+        // Expected: a second UUID must not claim the same endpoint/account identity.
+    }
+
+    #expect(try await context.store.loadAll() == [original])
+}
+
+@Test
 func deletingProfileIsIdempotent() async throws {
     let context = try temporaryProfileStore()
     defer { try? FileManager.default.removeItem(at: context.directory) }
@@ -88,7 +119,7 @@ func unsupportedSchemaVersionIsRejectedWithoutOverwritingFile() async throws {
         at: context.directory,
         withIntermediateDirectories: true
     )
-    let raw = #"{"profiles":[],"schemaVersion":999}"#
+    let raw = #"{\"profiles\":[],\"schemaVersion\":999}"#
     try Data(raw.utf8).write(to: context.fileURL)
 
     await #expect(
@@ -113,7 +144,7 @@ func profileStoreRejectsSymlinkBackingFile() async throws {
         "target.json",
         isDirectory: false
     )
-    try Data(#"{"profiles":[],"schemaVersion":1}"#.utf8)
+    try Data(#"{\"profiles\":[],\"schemaVersion\":1}"#.utf8)
         .write(to: target)
     try FileManager.default.createSymbolicLink(
         at: context.fileURL,
@@ -140,7 +171,7 @@ func profileStoreRejectsHardLinkedBackingFile() async throws {
         "target.json",
         isDirectory: false
     )
-    try Data(#"{"profiles":[],"schemaVersion":1}"#.utf8)
+    try Data(#"{\"profiles\":[],\"schemaVersion\":1}"#.utf8)
         .write(to: target)
     try FileManager.default.linkItem(
         at: target,
