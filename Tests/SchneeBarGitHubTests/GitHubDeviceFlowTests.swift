@@ -122,31 +122,25 @@ func invalidClientIDStopsBeforeDeviceFlowRequest() async throws {
 
 @Test
 func rejectsUnsafeDeviceFlowTimingFromProvider() async throws {
-    let invalidPayloads = [
+    let oversizedLifetime =
+        Int(GitHubDeviceFlowTimingPolicy.maximumAuthorizationLifetime) + 1
+    let oversizedInterval =
+        Int(GitHubDeviceFlowTimingPolicy.maximumPollInterval) + 1
+    let oversizedLifetimePayload =
+        "{\"device_code\":\"device\","
+        + "\"user_code\":\"ABCD-EFGH\","
+        + "\"verification_uri\":\"https://github.com/login/device\","
+        + "\"expires_in\":\(oversizedLifetime),\"interval\":5}"
+    let oversizedIntervalPayload =
+        "{\"device_code\":\"device\","
+        + "\"user_code\":\"ABCD-EFGH\","
+        + "\"verification_uri\":\"https://github.com/login/device\","
+        + "\"expires_in\":900,\"interval\":\(oversizedInterval)}"
+    let invalidPayloads: [String] = [
         #"{"device_code":"device","user_code":"ABCD-EFGH","verification_uri":"https://github.com/login/device","expires_in":0,"interval":5}"#,
         #"{"device_code":"device","user_code":"ABCD-EFGH","verification_uri":"https://github.com/login/device","expires_in":900,"interval":0}"#,
-        "{\"device_code\":\"device\","
-            + "\"user_code\":\"ABCD-EFGH\","
-            + "\"verification_uri\":\"https://github.com/login/device\","
-            + "\"expires_in\":"
-            + String(
-                Int(
-                    GitHubDeviceFlowTimingPolicy
-                        .maximumAuthorizationLifetime
-                ) + 1
-            )
-            + ",\"interval\":5}",
-        "{\"device_code\":\"device\","
-            + "\"user_code\":\"ABCD-EFGH\","
-            + "\"verification_uri\":\"https://github.com/login/device\","
-            + "\"expires_in\":900,\"interval\":"
-            + String(
-                Int(
-                    GitHubDeviceFlowTimingPolicy
-                        .maximumPollInterval
-                ) + 1
-            )
-            + "}",
+        oversizedLifetimePayload,
+        oversizedIntervalPayload,
     ]
 
     for payload in invalidPayloads {
