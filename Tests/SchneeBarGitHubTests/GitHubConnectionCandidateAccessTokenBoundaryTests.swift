@@ -101,6 +101,56 @@ func recoverRejectsOversizedCandidateAccessTokenBeforeNetwork() async throws {
     #expect(await transport.requestCount() == 0)
 }
 
+@Test
+func establishRejectsMismatchedCandidateEndpointBeforeNetwork() async throws {
+    let connection = try candidateAccessTokenConnection(
+        id: "00000000-0000-0000-0000-000000002672"
+    )
+    let transport = CandidateAccessTokenTransport()
+    let coordinator = GitHubConnectionSessionCoordinator(
+        credentialStore: CandidateAccessTokenCredentialStore(),
+        accessClient: GitHubAccessClient(transport: transport)
+    )
+
+    await #expect(
+        throws: GitHubConnectionSessionError.reauthenticationRequired
+    ) {
+        try await coordinator.establish(
+            connection: connection,
+            credential: mismatchedEndpointCandidateCredential()
+        )
+    }
+
+    #expect(await transport.requestCount() == 0)
+}
+
+@Test
+func recoverRejectsMismatchedCandidateEndpointBeforeNetwork() async throws {
+    let connection = try candidateAccessTokenConnection(
+        id: "00000000-0000-0000-0000-000000002673"
+    )
+    let transport = CandidateAccessTokenTransport()
+    let coordinator = GitHubConnectionSessionCoordinator(
+        credentialStore: CandidateAccessTokenCredentialStore(),
+        accessClient: GitHubAccessClient(transport: transport)
+    )
+
+    await #expect(
+        throws: GitHubConnectionSessionError.reauthenticationRequired
+    ) {
+        try await coordinator.recover(
+            connection: connection,
+            expectedIdentity: GitHubAccountIdentity(
+                id: "42",
+                login: "octocat"
+            ),
+            credential: mismatchedEndpointCandidateCredential()
+        )
+    }
+
+    #expect(await transport.requestCount() == 0)
+}
+
 private func candidateAccessTokenConnection(
     id: String
 ) throws -> GitHubConnection {
@@ -121,5 +171,12 @@ private func oversizedCandidateCredential() -> GitHubCredential {
             count: GitHubDeviceFlowResponsePolicy
                 .maximumOpaqueTokenCharacters + 1
         )
+    )
+}
+
+private func mismatchedEndpointCandidateCredential() -> GitHubCredential {
+    GitHubCredential(
+        accessToken: "candidate_access",
+        endpointIdentity: "https://github.enterprise.example"
     )
 }
