@@ -300,6 +300,9 @@ public struct GitHubDeviceFlowClient: Sendable {
             ]
         )
 
+        if payload.error != nil, payload.accessToken != nil {
+            throw GitHubDeviceFlowError.invalidResponse
+        }
         if let error = payload.error {
             let code = try validatedOAuthErrorCode(error)
             let description = try validatedOAuthErrorDescription(
@@ -310,15 +313,18 @@ public struct GitHubDeviceFlowClient: Sendable {
                 description: description
             )
         }
-        return try credential(from: payload)
+        return try issuedCredential(from: payload)
     }
 
     private func pollResult(
         from payload: TokenPayload,
         session: GitHubDeviceAuthorizationSession
     ) throws -> GitHubDeviceFlowPollResult {
+        if payload.accessToken != nil, payload.error != nil {
+            throw GitHubDeviceFlowError.invalidResponse
+        }
         if payload.accessToken != nil {
-            return .authorized(try credential(from: payload))
+            return .authorized(try issuedCredential(from: payload))
         }
 
         guard let rawError = payload.error else {
@@ -347,6 +353,38 @@ public struct GitHubDeviceFlowClient: Sendable {
             return .accessDenied
         default:
             throw mappedOAuthError(code: error, description: payload.errorDescription)
+        }
+    }
+
+    private func issuedCredential(
+        from payload: TokenPayload
+    ) throws -> GitHubCredential {
+        let credential = try credential(from: payload)
+
+        switch (
+            payload.expiresIn,
+            payload.refreshToken,
+            payload.refreshTokenExpiresIn
+        ) {
+        case (nil, nil, nil):
+            // GitHub omits all expiration/refresh fields when user access
+            // token expiration is disabled.
+            return credential
+
+        case let (
+            .some(accessTokenLifetime),
+            .some(_),
+            .some(refreshTokenLifetime)
+        ):
+            guard accessTokenLifetime > 0,
+                  refreshTokenLifetime > 0
+            else {
+                throw GitHubDeviceFlowError.invalidResponse
+            }
+            return credential
+
+        default:
+            throw GitHubDeviceFlowError.invalidResponse
         }
     }
 
