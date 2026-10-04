@@ -68,6 +68,29 @@ func savingSameConnectionReplacesProfileInsteadOfDuplicatingIt() async throws {
 }
 
 @Test
+func savingDifferentConnectionForSameEndpointAndAccountIsRejected() async throws {
+    let context = try temporaryProfileStore()
+    defer { try? FileManager.default.removeItem(at: context.directory) }
+    let existing = try makeProfile()
+    var duplicate = try makeProfile(
+        connectionID: UUID(
+            uuidString: "10000000-0000-0000-0000-000000000099"
+        )!
+    )
+    duplicate.connection.displayName = "Duplicate GitHub"
+    duplicate.account.login = "renamed-login"
+    duplicate.createdAt = existing.createdAt.addingTimeInterval(100)
+
+    try await context.store.save(existing)
+
+    await #expect(throws: GitHubConnectionProfileStoreError.self) {
+        try await context.store.save(duplicate)
+    }
+
+    #expect(try await context.store.loadAll() == [existing])
+}
+
+@Test
 func deletingProfileIsIdempotent() async throws {
     let context = try temporaryProfileStore()
     defer { try? FileManager.default.removeItem(at: context.directory) }
@@ -290,9 +313,13 @@ private func temporaryProfileStore() throws -> TemporaryProfileStore {
     )
 }
 
-private func makeProfile() throws -> GitHubConnectionProfile {
+private func makeProfile(
+    connectionID: UUID = UUID(
+        uuidString: "10000000-0000-0000-0000-000000000001"
+    )!
+) throws -> GitHubConnectionProfile {
     let connection = GitHubConnection(
-        id: UUID(uuidString: "10000000-0000-0000-0000-000000000001")!,
+        id: connectionID,
         displayName: "Personal GitHub",
         deploymentKind: .githubDotCom,
         webBaseURL: try #require(URL(string: "https://github.com")),
