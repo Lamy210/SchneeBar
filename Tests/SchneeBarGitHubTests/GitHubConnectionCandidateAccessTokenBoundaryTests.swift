@@ -207,6 +207,58 @@ func recoverRejectsExpiredCandidateAccessTokenBeforeNetwork() async throws {
     #expect(await transport.requestCount() == 0)
 }
 
+@Test
+func establishRejectsCandidateAccessExpiryBeyondDefensiveLifetimeBeforeNetwork() async throws {
+    let connection = try candidateAccessTokenConnection(
+        id: "00000000-0000-0000-0000-000000002676"
+    )
+    let transport = CandidateAccessTokenTransport()
+    let coordinator = GitHubConnectionSessionCoordinator(
+        credentialStore: CandidateAccessTokenCredentialStore(),
+        accessClient: GitHubAccessClient(transport: transport),
+        now: { candidateAccessTokenNow }
+    )
+
+    await #expect(
+        throws: GitHubConnectionSessionError.reauthenticationRequired
+    ) {
+        try await coordinator.establish(
+            connection: connection,
+            credential: overlongCandidateCredential()
+        )
+    }
+
+    #expect(await transport.requestCount() == 0)
+}
+
+@Test
+func recoverRejectsCandidateAccessExpiryBeyondDefensiveLifetimeBeforeNetwork() async throws {
+    let connection = try candidateAccessTokenConnection(
+        id: "00000000-0000-0000-0000-000000002677"
+    )
+    let transport = CandidateAccessTokenTransport()
+    let coordinator = GitHubConnectionSessionCoordinator(
+        credentialStore: CandidateAccessTokenCredentialStore(),
+        accessClient: GitHubAccessClient(transport: transport),
+        now: { candidateAccessTokenNow }
+    )
+
+    await #expect(
+        throws: GitHubConnectionSessionError.reauthenticationRequired
+    ) {
+        try await coordinator.recover(
+            connection: connection,
+            expectedIdentity: GitHubAccountIdentity(
+                id: "42",
+                login: "octocat"
+            ),
+            credential: overlongCandidateCredential()
+        )
+    }
+
+    #expect(await transport.requestCount() == 0)
+}
+
 private func candidateAccessTokenConnection(
     id: String
 ) throws -> GitHubConnection {
@@ -242,5 +294,17 @@ private func expiredCandidateCredential() -> GitHubCredential {
         accessToken: "candidate_access",
         accessTokenExpiresAt:
             candidateAccessTokenNow.addingTimeInterval(-1)
+    )
+}
+
+private func overlongCandidateCredential() -> GitHubCredential {
+    GitHubCredential(
+        accessToken: "candidate_access",
+        accessTokenExpiresAt: candidateAccessTokenNow.addingTimeInterval(
+            TimeInterval(
+                GitHubDeviceFlowCredentialLifetimePolicy
+                    .maximumAccessTokenLifetime + 1
+            )
+        )
     )
 }

@@ -486,7 +486,15 @@ public actor GitHubConnectionSessionCoordinator {
         guard let expiresAt = credential.accessTokenExpiresAt else {
             return
         }
-        guard expiresAt > now() else {
+
+        let lifetime = expiresAt.timeIntervalSince(now())
+        guard lifetime.isFinite,
+              lifetime > 0,
+              lifetime <= TimeInterval(
+                  GitHubDeviceFlowCredentialLifetimePolicy
+                      .maximumAccessTokenLifetime
+              )
+        else {
             throw GitHubConnectionSessionError.reauthenticationRequired
         }
     }
