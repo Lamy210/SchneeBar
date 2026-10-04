@@ -68,7 +68,13 @@ func establishRejectsOversizedCandidateRefreshTokenBeforeNetwork() async throws 
     ) {
         try await coordinator.establish(
             connection: connection,
-            credential: oversizedCandidateRefreshCredential()
+            credential: candidateRefreshCredential(
+                refreshToken: String(
+                    repeating: "r",
+                    count: GitHubDeviceFlowResponsePolicy
+                        .maximumOpaqueTokenCharacters + 1
+                )
+            )
         )
     }
 
@@ -96,7 +102,65 @@ func recoverRejectsOversizedCandidateRefreshTokenBeforeNetwork() async throws {
                 id: "42",
                 login: "octocat"
             ),
-            credential: oversizedCandidateRefreshCredential()
+            credential: candidateRefreshCredential(
+                refreshToken: String(
+                    repeating: "r",
+                    count: GitHubDeviceFlowResponsePolicy
+                        .maximumOpaqueTokenCharacters + 1
+                )
+            )
+        )
+    }
+
+    #expect(await transport.requestCount() == 0)
+}
+
+@Test
+func establishRejectsEmptyCandidateRefreshTokenBeforeNetwork() async throws {
+    let connection = try candidateRefreshTokenConnection(
+        id: "00000000-0000-0000-0000-000000002832"
+    )
+    let transport = CandidateRefreshTokenTransport()
+    let coordinator = GitHubConnectionSessionCoordinator(
+        credentialStore: CandidateRefreshTokenStore(),
+        accessClient: GitHubAccessClient(transport: transport),
+        now: { candidateRefreshTokenNow }
+    )
+
+    await #expect(
+        throws: GitHubConnectionSessionError.reauthenticationRequired
+    ) {
+        try await coordinator.establish(
+            connection: connection,
+            credential: candidateRefreshCredential(refreshToken: "")
+        )
+    }
+
+    #expect(await transport.requestCount() == 0)
+}
+
+@Test
+func recoverRejectsEmptyCandidateRefreshTokenBeforeNetwork() async throws {
+    let connection = try candidateRefreshTokenConnection(
+        id: "00000000-0000-0000-0000-000000002833"
+    )
+    let transport = CandidateRefreshTokenTransport()
+    let coordinator = GitHubConnectionSessionCoordinator(
+        credentialStore: CandidateRefreshTokenStore(),
+        accessClient: GitHubAccessClient(transport: transport),
+        now: { candidateRefreshTokenNow }
+    )
+
+    await #expect(
+        throws: GitHubConnectionSessionError.reauthenticationRequired
+    ) {
+        try await coordinator.recover(
+            connection: connection,
+            expectedIdentity: GitHubAccountIdentity(
+                id: "42",
+                login: "octocat"
+            ),
+            credential: candidateRefreshCredential(refreshToken: "")
         )
     }
 
@@ -116,14 +180,12 @@ private func candidateRefreshTokenConnection(
     )
 }
 
-private func oversizedCandidateRefreshCredential() -> GitHubCredential {
+private func candidateRefreshCredential(
+    refreshToken: String
+) -> GitHubCredential {
     GitHubCredential(
         accessToken: "candidate_access",
-        refreshToken: String(
-            repeating: "r",
-            count: GitHubDeviceFlowResponsePolicy
-                .maximumOpaqueTokenCharacters + 1
-        ),
+        refreshToken: refreshToken,
         accessTokenExpiresAt:
             candidateRefreshTokenNow.addingTimeInterval(3_600),
         refreshTokenExpiresAt:
