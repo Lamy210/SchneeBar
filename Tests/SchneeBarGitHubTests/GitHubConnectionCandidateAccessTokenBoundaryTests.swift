@@ -51,6 +51,10 @@ private actor CandidateAccessTokenTransport: GitHubHTTPTransport {
     }
 }
 
+private let candidateAccessTokenNow = Date(
+    timeIntervalSince1970: 20_000
+)
+
 @Test
 func establishRejectsOversizedCandidateAccessTokenBeforeNetwork() async throws {
     let connection = try candidateAccessTokenConnection(
@@ -151,6 +155,58 @@ func recoverRejectsMismatchedCandidateEndpointBeforeNetwork() async throws {
     #expect(await transport.requestCount() == 0)
 }
 
+@Test
+func establishRejectsExpiredCandidateAccessTokenBeforeNetwork() async throws {
+    let connection = try candidateAccessTokenConnection(
+        id: "00000000-0000-0000-0000-000000002674"
+    )
+    let transport = CandidateAccessTokenTransport()
+    let coordinator = GitHubConnectionSessionCoordinator(
+        credentialStore: CandidateAccessTokenCredentialStore(),
+        accessClient: GitHubAccessClient(transport: transport),
+        now: { candidateAccessTokenNow }
+    )
+
+    await #expect(
+        throws: GitHubConnectionSessionError.reauthenticationRequired
+    ) {
+        try await coordinator.establish(
+            connection: connection,
+            credential: expiredCandidateCredential()
+        )
+    }
+
+    #expect(await transport.requestCount() == 0)
+}
+
+@Test
+func recoverRejectsExpiredCandidateAccessTokenBeforeNetwork() async throws {
+    let connection = try candidateAccessTokenConnection(
+        id: "00000000-0000-0000-0000-000000002675"
+    )
+    let transport = CandidateAccessTokenTransport()
+    let coordinator = GitHubConnectionSessionCoordinator(
+        credentialStore: CandidateAccessTokenCredentialStore(),
+        accessClient: GitHubAccessClient(transport: transport),
+        now: { candidateAccessTokenNow }
+    )
+
+    await #expect(
+        throws: GitHubConnectionSessionError.reauthenticationRequired
+    ) {
+        try await coordinator.recover(
+            connection: connection,
+            expectedIdentity: GitHubAccountIdentity(
+                id: "42",
+                login: "octocat"
+            ),
+            credential: expiredCandidateCredential()
+        )
+    }
+
+    #expect(await transport.requestCount() == 0)
+}
+
 private func candidateAccessTokenConnection(
     id: String
 ) throws -> GitHubConnection {
@@ -178,5 +234,13 @@ private func mismatchedEndpointCandidateCredential() -> GitHubCredential {
     GitHubCredential(
         accessToken: "candidate_access",
         endpointIdentity: "https://github.enterprise.example"
+    )
+}
+
+private func expiredCandidateCredential() -> GitHubCredential {
+    GitHubCredential(
+        accessToken: "candidate_access",
+        accessTokenExpiresAt:
+            candidateAccessTokenNow.addingTimeInterval(-1)
     )
 }
