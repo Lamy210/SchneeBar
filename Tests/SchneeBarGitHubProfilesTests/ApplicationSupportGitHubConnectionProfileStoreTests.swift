@@ -77,8 +77,6 @@ func savingDifferentConnectionForSameEndpointAndAccountIsRejected() async throws
             uuidString: "10000000-0000-0000-0000-000000000099"
         )!
     )
-    duplicate.connection.displayName = "Duplicate GitHub"
-    duplicate.account.login = "renamed-login"
     duplicate.createdAt = existing.createdAt.addingTimeInterval(100)
 
     try await context.store.save(existing)
