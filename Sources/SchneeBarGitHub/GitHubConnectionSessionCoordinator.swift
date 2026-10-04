@@ -491,8 +491,10 @@ public actor GitHubConnectionSessionCoordinator {
             throw GitHubConnectionSessionError.reauthenticationRequired
         }
 
-        if credential.refreshToken != nil {
-            guard let refreshExpiresAt = credential.refreshTokenExpiresAt else {
+        if let refreshToken = credential.refreshToken {
+            guard !refreshToken.isEmpty,
+                  let refreshExpiresAt = credential.refreshTokenExpiresAt
+            else {
                 throw GitHubConnectionSessionError.reauthenticationRequired
             }
 
