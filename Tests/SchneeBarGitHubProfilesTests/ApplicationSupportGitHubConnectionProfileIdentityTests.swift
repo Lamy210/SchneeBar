@@ -21,12 +21,10 @@ func savingDuplicateCanonicalEndpointAndAccountIdentityIsRejected() async throws
 
     try await context.store.save(original)
 
-    do {
+    await #expect(
+        throws: GitHubConnectionProfileStoreError.duplicateConnectionIdentity
+    ) {
         try await context.store.save(duplicate)
-        Issue.record("Expected duplicate connection identity to be rejected")
-    } catch {
-        // Expected: the persisted profile identity is unique by canonical
-        // endpoint plus stable numeric GitHub account ID, not by UUID/login.
     }
 
     #expect(try await context.store.loadAll() == [original])
@@ -52,12 +50,10 @@ func loadingPersistedDuplicateCanonicalEndpointAndAccountIdentityIsRejected() as
         to: context.fileURL
     )
 
-    do {
-        _ = try await context.store.loadAll()
-        Issue.record("Expected duplicate persisted connection identity to be rejected")
-    } catch {
-        // Expected: fail closed rather than launching duplicate polling/session
-        // state for the same GitHub endpoint/account identity.
+    await #expect(
+        throws: GitHubConnectionProfileStoreError.duplicateConnectionIdentity
+    ) {
+        try await context.store.loadAll()
     }
 }
 
@@ -82,7 +78,10 @@ func sameEndpointDifferentStableAccountsRemainSupported() async throws {
     try await context.store.save(first)
     try await context.store.save(second)
 
-    #expect(Set(try await context.store.loadAll().map(\.id)) == Set([first.id, second.id]))
+    #expect(
+        Set(try await context.store.loadAll().map(\.id))
+            == Set([first.id, second.id])
+    )
 }
 
 private struct DuplicateIdentityProfileStoreContext {
