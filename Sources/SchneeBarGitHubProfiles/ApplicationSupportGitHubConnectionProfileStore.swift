@@ -6,6 +6,7 @@ public enum GitHubConnectionProfileStoreError: Error, Equatable, Sendable {
     case unsupportedSchemaVersion(Int)
     case invalidBackingFile
     case payloadTooLarge
+    case duplicateConnectionIdentity
 }
 
 public actor ApplicationSupportGitHubConnectionProfileStore: GitHubConnectionProfileStore {
@@ -40,6 +41,7 @@ public actor ApplicationSupportGitHubConnectionProfileStore: GitHubConnectionPro
         } else {
             profiles.append(profile)
         }
+        try validateUniqueConnectionIdentities(profiles)
         try writeProfiles(profiles)
     }
 
@@ -61,7 +63,42 @@ public actor ApplicationSupportGitHubConnectionProfileStore: GitHubConnectionPro
         guard payload.schemaVersion == PersistedProfiles.currentSchemaVersion else {
             throw GitHubConnectionProfileStoreError.unsupportedSchemaVersion(payload.schemaVersion)
         }
+        try validateUniqueConnectionIdentities(payload.profiles)
         return payload.profiles
+    }
+
+    private func validateUniqueConnectionIdentities(
+        _ profiles: [GitHubConnectionProfile]
+    ) throws {
+        var identities: Set<PersistedConnectionIdentity> = []
+        identities.reserveCapacity(profiles.count)
+
+        for profile in profiles {
+            let identity = try persistedConnectionIdentity(for: profile)
+            guard identities.insert(identity).inserted else {
+                throw GitHubConnectionProfileStoreError.duplicateConnectionIdentity
+            }
+        }
+    }
+
+    private func persistedConnectionIdentity(
+        for profile: GitHubConnectionProfile
+    ) throws -> PersistedConnectionIdentity {
+        let endpoints: GitHubEndpointSet
+        do {
+            endpoints = try GitHubEndpointResolver.resolve(
+                deploymentKind: profile.connection.deploymentKind,
+                webBaseURL: profile.connection.webBaseURL
+            )
+        } catch {
+            throw GitHubConnectionProfileStoreError.invalidBackingFile
+        }
+
+        return PersistedConnectionIdentity(
+            deploymentKind: profile.connection.deploymentKind.rawValue,
+            canonicalWebBaseURL: endpoints.webBaseURL.absoluteString,
+            accountID: profile.account.id
+        )
     }
 
     private func readPersistedDataIfPresent() throws -> Data? {
@@ -117,6 +154,12 @@ public actor ApplicationSupportGitHubConnectionProfileStore: GitHubConnectionPro
             .appendingPathComponent("SchneeBar", isDirectory: true)
             .appendingPathComponent("github-connections-v1.json", isDirectory: false)
     }
+}
+
+private struct PersistedConnectionIdentity: Hashable {
+    let deploymentKind: String
+    let canonicalWebBaseURL: String
+    let accountID: String
 }
 
 private struct PersistedProfiles: Codable {
