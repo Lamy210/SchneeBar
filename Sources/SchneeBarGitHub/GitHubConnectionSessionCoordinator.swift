@@ -491,13 +491,13 @@ public actor GitHubConnectionSessionCoordinator {
             }
 
             let refreshLifetime = refreshExpiresAt.timeIntervalSince(referenceDate)
-            if refreshLifetime.isFinite,
-               (refreshLifetime <= 0
-                   || refreshLifetime > TimeInterval(
-                       GitHubDeviceFlowCredentialLifetimePolicy
-                           .maximumRefreshTokenLifetime
-                   ))
-            {
+            guard refreshLifetime.isFinite,
+                  refreshLifetime > 0,
+                  refreshLifetime <= TimeInterval(
+                      GitHubDeviceFlowCredentialLifetimePolicy
+                          .maximumRefreshTokenLifetime
+                  )
+            else {
                 throw GitHubConnectionSessionError.reauthenticationRequired
             }
         }
