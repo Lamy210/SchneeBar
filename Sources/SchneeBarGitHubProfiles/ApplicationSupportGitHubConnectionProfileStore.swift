@@ -6,6 +6,7 @@ public enum GitHubConnectionProfileStoreError: Error, Equatable, Sendable {
     case unsupportedSchemaVersion(Int)
     case invalidBackingFile
     case payloadTooLarge
+    case duplicateConnectionIdentity
 }
 
 public actor ApplicationSupportGitHubConnectionProfileStore: GitHubConnectionProfileStore {
@@ -35,6 +36,8 @@ public actor ApplicationSupportGitHubConnectionProfileStore: GitHubConnectionPro
 
     public func save(_ profile: GitHubConnectionProfile) async throws {
         var profiles = try readProfiles()
+        try rejectDuplicateIdentity(for: profile, in: profiles)
+
         if let index = profiles.firstIndex(where: { $0.id == profile.id }) {
             profiles[index] = profile
         } else {
@@ -49,6 +52,40 @@ public actor ApplicationSupportGitHubConnectionProfileStore: GitHubConnectionPro
         profiles.removeAll(where: { $0.id == id })
         guard profiles.count != originalCount else { return }
         try writeProfiles(profiles)
+    }
+
+    private func rejectDuplicateIdentity(
+        for profile: GitHubConnectionProfile,
+        in profiles: [GitHubConnectionProfile]
+    ) throws {
+        guard let endpoint = endpointIdentity(for: profile.connection) else {
+            return
+        }
+
+        let hasConflict = profiles.contains { existing in
+            existing.id != profile.id
+                && existing.account.id == profile.account.id
+                && endpointIdentity(for: existing.connection) == endpoint
+        }
+        guard !hasConflict else {
+            throw GitHubConnectionProfileStoreError.duplicateConnectionIdentity
+        }
+    }
+
+    private func endpointIdentity(
+        for connection: GitHubConnection
+    ) -> EndpointIdentity? {
+        guard let endpoints = try? GitHubEndpointResolver.resolve(
+            deploymentKind: connection.deploymentKind,
+            webBaseURL: connection.webBaseURL
+        ) else {
+            return nil
+        }
+
+        return EndpointIdentity(
+            deploymentKind: connection.deploymentKind,
+            canonicalWebBaseURL: endpoints.webBaseURL.absoluteString
+        )
     }
 
     private func readProfiles() throws -> [GitHubConnectionProfile] {
@@ -116,6 +153,11 @@ public actor ApplicationSupportGitHubConnectionProfileStore: GitHubConnectionPro
         return applicationSupport
             .appendingPathComponent("SchneeBar", isDirectory: true)
             .appendingPathComponent("github-connections-v1.json", isDirectory: false)
+    }
+
+    private struct EndpointIdentity: Equatable {
+        let deploymentKind: GitHubDeploymentKind
+        let canonicalWebBaseURL: String
     }
 }
 
