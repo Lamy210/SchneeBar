@@ -64,6 +64,7 @@ public actor GitHubConnectionSessionCoordinator {
             credential,
             connection: connection
         )
+        try validateCandidateAccessTokenLifetime(credential)
 
         let account: GitHubAuthenticatedAccount
         do {
@@ -130,6 +131,7 @@ public actor GitHubConnectionSessionCoordinator {
             credential,
             connection: connection
         )
+        try validateCandidateAccessTokenLifetime(credential)
 
         let account: GitHubAuthenticatedAccount
         do {
@@ -476,6 +478,17 @@ public actor GitHubConnectionSessionCoordinator {
             credential,
             connection: connection
         )
+    }
+
+    private func validateCandidateAccessTokenLifetime(
+        _ credential: GitHubCredential
+    ) throws {
+        guard let expiresAt = credential.accessTokenExpiresAt else {
+            return
+        }
+        guard expiresAt > now() else {
+            throw GitHubConnectionSessionError.reauthenticationRequired
+        }
     }
 
     private func validateAccessTokenForGitHubIO(
