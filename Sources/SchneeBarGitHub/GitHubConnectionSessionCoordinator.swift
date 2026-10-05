@@ -482,6 +482,13 @@ public actor GitHubConnectionSessionCoordinator {
                 .reauthenticationRequired
         }
 
+        guard credential.refreshToken == nil
+                || credential.refreshTokenExpiresAt != nil
+        else {
+            throw GitHubConnectionSessionError
+                .reauthenticationRequired
+        }
+
         guard let expiresAt = credential.accessTokenExpiresAt else {
             let hasRefreshMetadata = credential.refreshToken != nil
                 || credential.refreshTokenExpiresAt != nil
