@@ -68,6 +68,41 @@ func savingSameConnectionReplacesProfileInsteadOfDuplicatingIt() async throws {
 }
 
 @Test
+func savingSameEndpointAndAccountWithDifferentConnectionIDIsRejected() async throws {
+    let context = try temporaryProfileStore()
+    defer { try? FileManager.default.removeItem(at: context.directory) }
+    let existing = try makeProfile()
+    let duplicate = GitHubConnectionProfile(
+        connection: GitHubConnection(
+            id: UUID(uuidString: "10000000-0000-0000-0000-000000000002")!,
+            displayName: "Renamed GitHub",
+            deploymentKind: .githubDotCom,
+            webBaseURL: try #require(URL(string: "https://GITHUB.COM/")),
+            apiVersion: "2026-03-10"
+        ),
+        account: GitHubAccountIdentity(id: "42", login: "renamed-login"),
+        authenticationMethod: .deviceFlow,
+        clientID: "Iv1.other-client",
+        repositorySelection: .selected([999]),
+        isEnabled: false,
+        createdAt: Date(timeIntervalSince1970: 2_000),
+        lastConnectedAt: Date(timeIntervalSince1970: 2_500)
+    )
+    try await context.store.save(existing)
+
+    do {
+        try await context.store.save(duplicate)
+        Issue.record(
+            "Expected semantic duplicate connection identity to be rejected"
+        )
+    } catch {
+        // The exact public error contract is introduced with the implementation.
+    }
+
+    #expect(try await context.store.loadAll() == [existing])
+}
+
+@Test
 func deletingProfileIsIdempotent() async throws {
     let context = try temporaryProfileStore()
     defer { try? FileManager.default.removeItem(at: context.directory) }
