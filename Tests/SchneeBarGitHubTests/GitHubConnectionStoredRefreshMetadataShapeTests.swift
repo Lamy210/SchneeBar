@@ -169,7 +169,7 @@ func restoreRejectsEmptyStoredRefreshTokenBeforeNetwork() async throws {
 }
 
 @Test
-func restoreRejectsStoredRefreshTokenWithoutExpiryBeforeNetwork() async throws {
+func restoreRejectsStoredRefreshTokenWithoutExpiryWhileAccessTokenFreshBeforeNetwork() async throws {
     let now = Date(timeIntervalSince1970: 205_000)
     let connection = GitHubConnection(
         id: UUID(
