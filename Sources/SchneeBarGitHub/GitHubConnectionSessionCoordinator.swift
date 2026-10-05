@@ -492,7 +492,9 @@ public actor GitHubConnectionSessionCoordinator {
         }
 
         if let refreshToken = credential.refreshToken {
-            guard !refreshToken.isEmpty,
+            guard GitHubDeviceFlowResponsePolicy.isValidOpaqueToken(
+                refreshToken
+            ),
                   let refreshExpiresAt = credential.refreshTokenExpiresAt
             else {
                 throw GitHubConnectionSessionError.reauthenticationRequired
