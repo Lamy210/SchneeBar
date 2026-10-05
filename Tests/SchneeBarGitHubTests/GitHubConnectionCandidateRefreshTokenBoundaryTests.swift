@@ -107,6 +107,58 @@ func recoverRejectsOversizedCandidateRefreshTokenBeforeNetwork() async throws {
     #expect(await transport.requestCount() == 0)
 }
 
+@Test
+func establishRejectsRotatingCandidateWithoutAccessExpiryBeforeNetwork() async throws {
+    let connection = try candidateRefreshTokenBoundaryConnection(
+        id: "00000000-0000-0000-0000-000000002880"
+    )
+    let transport = CandidateRefreshTokenBoundaryTransport()
+    let coordinator = GitHubConnectionSessionCoordinator(
+        credentialStore: CandidateRefreshTokenBoundaryStore(),
+        accessClient: GitHubAccessClient(transport: transport),
+        now: { candidateRefreshTokenBoundaryNow }
+    )
+
+    await #expect(
+        throws: GitHubConnectionSessionError.reauthenticationRequired
+    ) {
+        try await coordinator.establish(
+            connection: connection,
+            credential: rotatingCandidateWithoutAccessExpiry()
+        )
+    }
+
+    #expect(await transport.requestCount() == 0)
+}
+
+@Test
+func recoverRejectsRotatingCandidateWithoutAccessExpiryBeforeNetwork() async throws {
+    let connection = try candidateRefreshTokenBoundaryConnection(
+        id: "00000000-0000-0000-0000-000000002881"
+    )
+    let transport = CandidateRefreshTokenBoundaryTransport()
+    let coordinator = GitHubConnectionSessionCoordinator(
+        credentialStore: CandidateRefreshTokenBoundaryStore(),
+        accessClient: GitHubAccessClient(transport: transport),
+        now: { candidateRefreshTokenBoundaryNow }
+    )
+
+    await #expect(
+        throws: GitHubConnectionSessionError.reauthenticationRequired
+    ) {
+        try await coordinator.recover(
+            connection: connection,
+            expectedIdentity: GitHubAccountIdentity(
+                id: "42",
+                login: "octocat"
+            ),
+            credential: rotatingCandidateWithoutAccessExpiry()
+        )
+    }
+
+    #expect(await transport.requestCount() == 0)
+}
+
 private func candidateRefreshTokenBoundaryConnection(
     id: String
 ) throws -> GitHubConnection {
@@ -131,6 +183,16 @@ private func oversizedRefreshTokenCandidateCredential() -> GitHubCredential {
         ),
         accessTokenExpiresAt:
             candidateRefreshTokenBoundaryNow.addingTimeInterval(3_600),
+        refreshTokenExpiresAt:
+            candidateRefreshTokenBoundaryNow.addingTimeInterval(7_200)
+    )
+}
+
+private func rotatingCandidateWithoutAccessExpiry() -> GitHubCredential {
+    GitHubCredential(
+        accessToken: "candidate_access",
+        refreshToken: "candidate_refresh",
+        accessTokenExpiresAt: nil,
         refreshTokenExpiresAt:
             candidateRefreshTokenBoundaryNow.addingTimeInterval(7_200)
     )
