@@ -16,6 +16,15 @@ public struct GitHubConnection: Identifiable, Codable, Equatable, Sendable {
     public private(set) var serverVersion: String?
     public var apiVersion: String?
 
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case displayName
+        case deploymentKind
+        case webBaseURL
+        case serverVersion
+        case apiVersion
+    }
+
     public init(
         id: UUID = UUID(),
         displayName: String,
@@ -28,14 +37,55 @@ public struct GitHubConnection: Identifiable, Codable, Equatable, Sendable {
         self.displayName = displayName
         self.deploymentKind = deploymentKind
         self.webBaseURL = webBaseURL
-        self.serverVersion = serverVersion
+        self.serverVersion = Self.normalizedServerVersion(
+            serverVersion,
+            deploymentKind: deploymentKind
+        )
         if let apiVersion {
             self.apiVersion = apiVersion
         } else if deploymentKind == .enterpriseServer {
-            self.apiVersion = Self.preferredEnterpriseAPIVersion(for: serverVersion)
+            self.apiVersion = Self.preferredEnterpriseAPIVersion(
+                for: self.serverVersion
+            )
         } else {
             self.apiVersion = nil
         }
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        displayName = try container.decode(String.self, forKey: .displayName)
+        deploymentKind = try container.decode(
+            GitHubDeploymentKind.self,
+            forKey: .deploymentKind
+        )
+        webBaseURL = try container.decode(URL.self, forKey: .webBaseURL)
+        let decodedServerVersion = try container.decodeIfPresent(
+            String.self,
+            forKey: .serverVersion
+        )
+        serverVersion = Self.normalizedServerVersion(
+            decodedServerVersion,
+            deploymentKind: deploymentKind
+        )
+        // Preserve explicit/custom persisted overrides exactly. Validation of
+        // that separate request-header boundary is intentionally out of scope
+        // for GHES version presentation normalization.
+        apiVersion = try container.decodeIfPresent(
+            String.self,
+            forKey: .apiVersion
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(displayName, forKey: .displayName)
+        try container.encode(deploymentKind, forKey: .deploymentKind)
+        try container.encode(webBaseURL, forKey: .webBaseURL)
+        try container.encodeIfPresent(serverVersion, forKey: .serverVersion)
+        try container.encodeIfPresent(apiVersion, forKey: .apiVersion)
     }
 
     public mutating func applyDiscoveredServerVersion(
@@ -50,21 +100,40 @@ public struct GitHubConnection: Identifiable, Codable, Equatable, Sendable {
         )
         let shouldRefreshDerivedVersion = apiVersion == nil
             || apiVersion == previouslyDerivedVersion
+        let normalizedVersion = Self.normalizedServerVersion(
+            discoveredVersion,
+            deploymentKind: deploymentKind
+        )
 
-        serverVersion = discoveredVersion
+        serverVersion = normalizedVersion
 
         if shouldRefreshDerivedVersion {
             apiVersion = Self.preferredEnterpriseAPIVersion(
-                for: discoveredVersion
+                for: normalizedVersion
             )
         }
+    }
+
+    private static func normalizedServerVersion(
+        _ serverVersion: String?,
+        deploymentKind: GitHubDeploymentKind
+    ) -> String? {
+        guard deploymentKind == .enterpriseServer else {
+            return serverVersion
+        }
+        return GitHubEnterpriseServerVersionPresentationPolicy
+            .normalizedPersistedValue(serverVersion)
     }
 
     private static func preferredEnterpriseAPIVersion(
         for serverVersion: String?
     ) -> String? {
-        let parsedVersion = serverVersion.flatMap(GitHubEnterpriseServerVersion.init(parsing:))
-        return GitHubRESTAPIVersionPolicy().preferredVersion(for: parsedVersion)
+        let parsedVersion = serverVersion.flatMap(
+            GitHubEnterpriseServerVersion.init(parsing:)
+        )
+        return GitHubRESTAPIVersionPolicy().preferredVersion(
+            for: parsedVersion
+        )
     }
 }
 
