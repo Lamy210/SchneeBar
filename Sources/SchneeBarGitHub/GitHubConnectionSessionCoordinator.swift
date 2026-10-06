@@ -367,19 +367,32 @@ public actor GitHubConnectionSessionCoordinator {
             credential,
             connection: connection
         )
-        try validateStoredAccessTokenLifetime(credential)
+        let referenceDate = now()
+        try validateStoredAccessTokenLifetime(
+            credential,
+            referenceDate: referenceDate
+        )
 
-        guard shouldRefresh(credential) else {
+        guard shouldRefresh(
+            credential,
+            referenceDate: referenceDate
+        ) else {
             try validateAccessTokenForGitHubIO(credential)
             return credential
         }
 
-        try validateStoredRefreshTokenLifetime(credential)
+        try validateStoredRefreshTokenLifetime(
+            credential,
+            referenceDate: referenceDate
+        )
 
         guard let clientID,
               let refreshToken = credential.refreshToken,
               !refreshToken.isEmpty,
-              refreshTokenIsUsable(credential)
+              refreshTokenIsUsable(
+                  credential,
+                  referenceDate: referenceDate
+              )
         else {
             throw GitHubConnectionSessionError.reauthenticationRequired
         }
@@ -469,7 +482,8 @@ public actor GitHubConnectionSessionCoordinator {
     }
 
     private func validateStoredAccessTokenLifetime(
-        _ credential: GitHubCredential
+        _ credential: GitHubCredential,
+        referenceDate: Date
     ) throws {
         if let refreshToken = credential.refreshToken,
            refreshToken.isEmpty
@@ -501,7 +515,7 @@ public actor GitHubConnectionSessionCoordinator {
             return
         }
 
-        let remaining = expiresAt.timeIntervalSince(now())
+        let remaining = expiresAt.timeIntervalSince(referenceDate)
         guard remaining.isFinite,
               remaining
                 <= TimeInterval(
@@ -514,13 +528,14 @@ public actor GitHubConnectionSessionCoordinator {
     }
 
     private func validateStoredRefreshTokenLifetime(
-        _ credential: GitHubCredential
+        _ credential: GitHubCredential,
+        referenceDate: Date
     ) throws {
         guard let expiresAt = credential.refreshTokenExpiresAt else {
             throw GitHubConnectionSessionError.reauthenticationRequired
         }
 
-        let remaining = expiresAt.timeIntervalSince(now())
+        let remaining = expiresAt.timeIntervalSince(referenceDate)
         guard remaining.isFinite,
               remaining
                 <= TimeInterval(
@@ -614,17 +629,25 @@ public actor GitHubConnectionSessionCoordinator {
         return lhsEndpoint == rhsEndpoint
     }
 
-    private func shouldRefresh(_ credential: GitHubCredential) -> Bool {
+    private func shouldRefresh(
+        _ credential: GitHubCredential,
+        referenceDate: Date
+    ) -> Bool {
         guard let expiresAt = credential.accessTokenExpiresAt else {
             return false
         }
-        return expiresAt <= now().addingTimeInterval(refreshLeeway)
+        return expiresAt
+            <= referenceDate.addingTimeInterval(refreshLeeway)
     }
 
-    private func refreshTokenIsUsable(_ credential: GitHubCredential) -> Bool {
+    private func refreshTokenIsUsable(
+        _ credential: GitHubCredential,
+        referenceDate: Date
+    ) -> Bool {
         guard let expiresAt = credential.refreshTokenExpiresAt else {
             return true
         }
-        return expiresAt > now().addingTimeInterval(refreshLeeway)
+        return expiresAt
+            > referenceDate.addingTimeInterval(refreshLeeway)
     }
 }
