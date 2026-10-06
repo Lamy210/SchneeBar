@@ -228,6 +228,12 @@ public enum GitHubEnterpriseServerDiscoveryError: Error, Equatable, Sendable {
 }
 
 public struct GitHubEnterpriseServerDiscoveryClient: Sendable {
+    // GHES /meta contains more than the installed version. This generous
+    // app-owned decode budget is not a GitHub protocol maximum; it prevents
+    // unrelated provider-controlled metadata from growing decoder work without
+    // bound before SchneeBar consumes the small subset it needs.
+    private static let maximumMetaResponseBytes = 1024 * 1024
+
     // Internal defensive input budget, not a GitHub protocol limit. GHES
     // version strings are tiny in practice; bounding the provider-controlled
     // value keeps untrusted metadata from growing UI/profile state without
@@ -279,6 +285,9 @@ public struct GitHubEnterpriseServerDiscoveryClient: Sendable {
 
         guard (200 ... 299).contains(response.statusCode) else {
             throw GitHubEnterpriseServerDiscoveryError.httpStatus(response.statusCode)
+        }
+        guard data.count <= Self.maximumMetaResponseBytes else {
+            throw GitHubEnterpriseServerDiscoveryError.invalidPayload
         }
 
         let payload: MetaPayload
