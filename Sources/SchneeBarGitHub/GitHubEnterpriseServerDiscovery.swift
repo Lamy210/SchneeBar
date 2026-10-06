@@ -182,12 +182,25 @@ public struct GitHubEnterpriseMetadataRefreshPolicy: Sendable {
         guard connection.deploymentKind == .enterpriseServer else {
             return false
         }
+
+        let nowReference = now.timeIntervalSinceReferenceDate
+        guard nowReference.isFinite else {
+            return false
+        }
+
         guard let lastCheckedAt else {
             return true
         }
 
-        let elapsed = now.timeIntervalSince(lastCheckedAt)
-        return elapsed < 0 || elapsed >= minimumInterval
+        let lastCheckedReference = lastCheckedAt.timeIntervalSinceReferenceDate
+        guard lastCheckedReference.isFinite else {
+            return true
+        }
+
+        if nowReference < lastCheckedReference {
+            return true
+        }
+        return nowReference - lastCheckedReference >= minimumInterval
     }
 }
 
