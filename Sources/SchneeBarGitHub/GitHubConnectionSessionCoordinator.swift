@@ -70,38 +70,43 @@ public actor GitHubConnectionSessionCoordinator {
         {
             throw GitHubConnectionSessionError.ssoRequired
         }
+
+        try Task.checkCancellation()
         let key = credentialKey(connection: connection, identity: account.identity)
-        let persistedCredential = try boundCredential(
-            credential,
-            to: connection
-        )
 
-        try await credentialStore.save(persistedCredential, for: key)
-
+        let inventory: GitHubAccessInventory
         do {
-            let inventory = try await accessClient.inventory(
+            inventory = try await accessClient.inventory(
                 connection: connection,
                 credential: credential
             )
-            let capabilities = capabilityEvaluator.evaluate(
-                connection: connection,
-                inventory: inventory
-            )
-            return GitHubConnectionSession(
-                connectionID: connection.id,
-                account: account,
-                credentialKey: key,
-                inventory: inventory,
-                capabilities: capabilities
-            )
         } catch let error as GitHubAccessClientError where error.statusCode == 401 {
-            try? await credentialStore.delete(for: key)
             throw GitHubConnectionSessionError.reauthenticationRequired
         } catch let error as GitHubAccessClientError
             where isSSORequired(error)
         {
             throw GitHubConnectionSessionError.ssoRequired
         }
+
+        let capabilities = capabilityEvaluator.evaluate(
+            connection: connection,
+            inventory: inventory
+        )
+        let persistedCredential = try boundCredential(
+            credential,
+            to: connection
+        )
+
+        try Task.checkCancellation()
+        try await credentialStore.save(persistedCredential, for: key)
+
+        return GitHubConnectionSession(
+            connectionID: connection.id,
+            account: account,
+            credentialKey: key,
+            inventory: inventory,
+            capabilities: capabilities
+        )
     }
 
     public func recover(

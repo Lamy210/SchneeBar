@@ -79,6 +79,93 @@ private actor SessionQueueTransport: GitHubHTTPTransport {
     }
 }
 
+private actor EstablishIdentityGateTransport: GitHubHTTPTransport {
+    private let identityStarted = SessionRefreshGate()
+    private let identityRelease = SessionRefreshGate()
+    private var requestCount = 0
+
+    func data(
+        for request: URLRequest
+    ) async throws -> (Data, HTTPURLResponse) {
+        requestCount += 1
+        if request.url?.path.hasSuffix("/user") == true {
+            await identityStarted.open()
+            await identityRelease.wait()
+        }
+
+        let response = try #require(
+            HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: "HTTP/1.1",
+                headerFields: nil
+            )
+        )
+        return (
+            Data(userJSON(id: 42, login: "octocat").utf8),
+            response
+        )
+    }
+
+    func waitUntilIdentityStarted() async {
+        await identityStarted.wait()
+    }
+
+    func releaseIdentity() async {
+        await identityRelease.open()
+    }
+
+    func requests() -> Int {
+        requestCount
+    }
+}
+
+private actor EstablishInventoryGateTransport: GitHubHTTPTransport {
+    private let inventoryStarted = SessionRefreshGate()
+    private let inventoryRelease = SessionRefreshGate()
+    private var requestCount = 0
+
+    func data(
+        for request: URLRequest
+    ) async throws -> (Data, HTTPURLResponse) {
+        requestCount += 1
+        let path = request.url?.path ?? ""
+
+        let json: String
+        if path.hasSuffix("/user") {
+            json = userJSON(id: 42, login: "octocat")
+        } else if path.hasSuffix("/user/installations") {
+            await inventoryStarted.open()
+            await inventoryRelease.wait()
+            json = #"{"total_count":0,"installations":[]}"#
+        } else {
+            json = #"{"message":"Not Found"}"#
+        }
+
+        let response = try #require(
+            HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: "HTTP/1.1",
+                headerFields: nil
+            )
+        )
+        return (Data(json.utf8), response)
+    }
+
+    func waitUntilInventoryStarted() async {
+        await inventoryStarted.wait()
+    }
+
+    func releaseInventory() async {
+        await inventoryRelease.open()
+    }
+
+    func requests() -> Int {
+        requestCount
+    }
+}
+
 private actor SessionRefreshGate {
     private var isOpen = false
     private var waiters: [CheckedContinuation<Void, Never>] = []
@@ -202,6 +289,227 @@ func establishDoesNotPersistCredentialWhenIdentityValidationFails() async throws
     }
 
     #expect(await store.saves() == 0)
+}
+
+@Test
+func establishDoesNotPersistCredentialWhenInventoryRejectsCredential() async throws {
+    let transport = SessionQueueTransport([
+        SessionStubResponse(userJSON(id: 42, login: "octocat")),
+        SessionStubResponse(userJSON(id: 42, login: "octocat")),
+        SessionStubResponse(#"{"message":"Bad credentials"}"#, statusCode: 401),
+    ])
+    let store = MemoryGitHubCredentialStore()
+    let coordinator = makeCoordinator(transport: transport, store: store)
+
+    await #expect(
+        throws: GitHubConnectionSessionError.reauthenticationRequired
+    ) {
+        try await coordinator.establish(
+            connection: try sessionConnection(),
+            credential: GitHubCredential(accessToken: "ghu_access")
+        )
+    }
+
+    #expect(await store.saves() == 0)
+    #expect(await store.deletes() == 0)
+}
+
+@Test
+func failedEstablishPreservesExistingCredentialForSameConnectionAccount() async throws {
+    let transport = SessionQueueTransport([
+        SessionStubResponse(userJSON(id: 42, login: "octocat")),
+        SessionStubResponse(userJSON(id: 42, login: "octocat")),
+        SessionStubResponse(#"{"message":"Bad credentials"}"#, statusCode: 401),
+    ])
+    let store = MemoryGitHubCredentialStore()
+    let connection = try sessionConnection()
+    let key = GitHubCredentialKey(
+        connectionID: connection.id,
+        accountID: "42"
+    )
+    let existing = GitHubCredential(
+        accessToken: "existing-token",
+        endpointIdentity: "https://github.com"
+    )
+    try await store.save(existing, for: key)
+    let baselineSaves = await store.saves()
+    let coordinator = makeCoordinator(transport: transport, store: store)
+
+    await #expect(
+        throws: GitHubConnectionSessionError.reauthenticationRequired
+    ) {
+        try await coordinator.establish(
+            connection: connection,
+            credential: GitHubCredential(accessToken: "candidate-token")
+        )
+    }
+
+    #expect(await store.credential(for: key) == existing)
+    #expect(await store.saves() == baselineSaves)
+    #expect(await store.deletes() == 0)
+}
+
+@Test
+func establishDoesNotPersistCredentialWhenInventoryRequiresSSO() async throws {
+    let transport = SessionQueueTransport([
+        SessionStubResponse(userJSON(id: 42, login: "octocat")),
+        SessionStubResponse(userJSON(id: 42, login: "octocat")),
+        SessionStubResponse(
+            #"{"message":"SSO required"}"#,
+            statusCode: 403,
+            headers: [
+                "X-GitHub-SSO":
+                    "required; url=https://github.com/orgs/acme/sso?authorization_request=sensitive",
+            ]
+        ),
+    ])
+    let store = MemoryGitHubCredentialStore()
+    let coordinator = makeCoordinator(transport: transport, store: store)
+
+    await #expect(
+        throws: GitHubConnectionSessionError.ssoRequired
+    ) {
+        try await coordinator.establish(
+            connection: try sessionConnection(),
+            credential: GitHubCredential(accessToken: "ghu_access")
+        )
+    }
+
+    #expect(await store.saves() == 0)
+    #expect(await store.deletes() == 0)
+}
+
+@Test
+func ssoFailedEstablishPreservesExistingCredentialForSameConnectionAccount() async throws {
+    let transport = SessionQueueTransport([
+        SessionStubResponse(userJSON(id: 42, login: "octocat")),
+        SessionStubResponse(userJSON(id: 42, login: "octocat")),
+        SessionStubResponse(
+            #"{"message":"SSO required"}"#,
+            statusCode: 403,
+            headers: [
+                "X-GitHub-SSO":
+                    "required; url=https://github.com/orgs/acme/sso?authorization_request=sensitive",
+            ]
+        ),
+    ])
+    let store = MemoryGitHubCredentialStore()
+    let connection = try sessionConnection()
+    let key = GitHubCredentialKey(
+        connectionID: connection.id,
+        accountID: "42"
+    )
+    let existing = GitHubCredential(
+        accessToken: "existing-token",
+        endpointIdentity: "https://github.com"
+    )
+    try await store.save(existing, for: key)
+    let baselineSaves = await store.saves()
+    let coordinator = makeCoordinator(transport: transport, store: store)
+
+    await #expect(
+        throws: GitHubConnectionSessionError.ssoRequired
+    ) {
+        try await coordinator.establish(
+            connection: connection,
+            credential: GitHubCredential(accessToken: "candidate-token")
+        )
+    }
+
+    #expect(await store.credential(for: key) == existing)
+    #expect(await store.saves() == baselineSaves)
+    #expect(await store.deletes() == 0)
+}
+
+@Test
+func establishDoesNotPersistCredentialWhenInventoryIsUnavailable() async throws {
+    let transport = SessionQueueTransport([
+        SessionStubResponse(userJSON(id: 42, login: "octocat")),
+        SessionStubResponse(userJSON(id: 42, login: "octocat")),
+        SessionStubResponse(#"{"message":"Unavailable"}"#, statusCode: 503),
+    ])
+    let store = MemoryGitHubCredentialStore()
+    let coordinator = makeCoordinator(transport: transport, store: store)
+
+    await #expect(
+        throws: GitHubAccessClientError.httpStatus(503)
+    ) {
+        try await coordinator.establish(
+            connection: try sessionConnection(),
+            credential: GitHubCredential(accessToken: "ghu_access")
+        )
+    }
+
+    #expect(await store.saves() == 0)
+    #expect(await store.deletes() == 0)
+}
+
+@Test
+func establishCancellationAfterIdentityStartsStopsBeforeInventory() async throws {
+    let transport = EstablishIdentityGateTransport()
+    let store = MemoryGitHubCredentialStore()
+    let coordinator = GitHubConnectionSessionCoordinator(
+        credentialStore: store,
+        accessClient: GitHubAccessClient(transport: transport),
+        deviceFlowClient: GitHubDeviceFlowClient(
+            transport: transport,
+            now: { sessionNow }
+        ),
+        now: { sessionNow },
+        refreshLeeway: 300
+    )
+
+    let task = Task {
+        try await coordinator.establish(
+            connection: try sessionConnection(),
+            credential: GitHubCredential(accessToken: "ghu_access")
+        )
+    }
+
+    await transport.waitUntilIdentityStarted()
+    task.cancel()
+    await transport.releaseIdentity()
+
+    await #expect(throws: CancellationError.self) {
+        try await task.value
+    }
+    #expect(await transport.requests() == 1)
+    #expect(await store.saves() == 0)
+    #expect(await store.deletes() == 0)
+}
+
+@Test
+func establishCancellationAfterInventoryStartsDoesNotPersistCredential() async throws {
+    let transport = EstablishInventoryGateTransport()
+    let store = MemoryGitHubCredentialStore()
+    let coordinator = GitHubConnectionSessionCoordinator(
+        credentialStore: store,
+        accessClient: GitHubAccessClient(transport: transport),
+        deviceFlowClient: GitHubDeviceFlowClient(
+            transport: transport,
+            now: { sessionNow }
+        ),
+        now: { sessionNow },
+        refreshLeeway: 300
+    )
+
+    let task = Task {
+        try await coordinator.establish(
+            connection: try sessionConnection(),
+            credential: GitHubCredential(accessToken: "ghu_access")
+        )
+    }
+
+    await transport.waitUntilInventoryStarted()
+    task.cancel()
+    await transport.releaseInventory()
+
+    await #expect(throws: CancellationError.self) {
+        try await task.value
+    }
+    #expect(await store.saves() == 0)
+    #expect(await store.deletes() == 0)
+    #expect(await transport.requests() == 3)
 }
 
 @Test
