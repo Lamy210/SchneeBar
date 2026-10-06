@@ -83,6 +83,7 @@ Implemented foundation:
 - stale refresh / recovery race protection
 - cancellation-safe existing-profile credential rebinding with a pre-mutation cancellation boundary and rollback-preserving move semantics
 - refresh-task draining before credential rebinding so stale target refresh writes cannot overwrite a newly rebound credential
+- post-drain credential reload before rebinding so source refresh-token rotation cannot be discarded by moving a pre-refresh credential snapshot
 - evidence-backed SSO-required installation/connection health from explicit GitHub failure signals only; no inference from empty or forbidden resource sets
 
 Remaining:
