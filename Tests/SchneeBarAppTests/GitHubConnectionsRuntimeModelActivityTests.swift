@@ -5,6 +5,8 @@ import SchneeBarGitHub
 import SchneeBarGitHubActivityProvider
 import Testing
 
+private let activityRuntimeNow = Date(timeIntervalSince1970: 45_000)
+
 private actor ActivityRuntimeProfileStore: GitHubConnectionProfileStore {
     private var values: [UUID: GitHubConnectionProfile]
 
@@ -103,6 +105,24 @@ private struct ActivityRuntimeCheckLoader: GitHubCheckRunLoading {
     ) async throws -> [GitHubCheckRun] {
         []
     }
+}
+
+@Test @MainActor
+func refreshUsesInjectedClockForLastConnectedAt() async throws {
+    let fixture = try activityRuntimeFixture(
+        installationPermissions: [:],
+        workflowRuns: [],
+        reviewRequests: []
+    )
+
+    await fixture.model.refresh(profileID: fixture.profile.id)
+
+    let updated = try #require(
+        fixture.model.profiles.first(where: {
+            $0.id == fixture.profile.id
+        })
+    )
+    #expect(updated.lastConnectedAt == activityRuntimeNow)
 }
 
 @Test @MainActor
@@ -253,7 +273,8 @@ private func activityRuntimeFixture(
     let model = GitHubConnectionsRuntimeModel(
         profileStore: profileStore,
         sessionCoordinator: coordinator,
-        activityProvider: provider
+        activityProvider: provider,
+        now: { activityRuntimeNow }
     )
     model.profiles = [profile]
     return ActivityRuntimeFixture(model: model, profile: profile)

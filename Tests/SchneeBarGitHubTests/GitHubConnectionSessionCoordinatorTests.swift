@@ -513,6 +513,32 @@ func establishCancellationAfterInventoryStartsDoesNotPersistCredential() async t
 }
 
 @Test
+func establishRejectsInventoryAccountDriftBeforePersistence() async throws {
+    let transport = SessionQueueTransport([
+        SessionStubResponse(userJSON(id: 42, login: "octocat")),
+        SessionStubResponse(userJSON(id: 99, login: "other-user")),
+        SessionStubResponse(#"{"total_count":0,"installations":[]}"#),
+    ])
+    let store = MemoryGitHubCredentialStore()
+    let coordinator = makeCoordinator(transport: transport, store: store)
+
+    await #expect(
+        throws: GitHubConnectionSessionError.accountMismatch(
+            expectedID: "42",
+            actualID: "99"
+        )
+    ) {
+        try await coordinator.establish(
+            connection: try sessionConnection(),
+            credential: GitHubCredential(accessToken: "ghu_access")
+        )
+    }
+
+    #expect(await store.saves() == 0)
+    #expect(await store.deletes() == 0)
+}
+
+@Test
 func restoreMapsHeaderBacked401ToReauthenticationRequired() async throws {
     let transport = SessionQueueTransport([
         SessionStubResponse(
@@ -816,6 +842,45 @@ func concurrentRefreshCannotCrossGHESCredentialEndpointBinding() async throws {
     let hosts = await transport.hosts()
     #expect(hosts.contains("source.internal.example"))
     #expect(!hosts.contains("redirected.internal.example"))
+}
+
+@Test
+func restoreRejectsInventoryAccountDrift() async throws {
+    let transport = SessionQueueTransport([
+        SessionStubResponse(userJSON(id: 42, login: "octocat")),
+        SessionStubResponse(userJSON(id: 99, login: "other-user")),
+        SessionStubResponse(#"{"total_count":0,"installations":[]}"#),
+    ])
+    let store = MemoryGitHubCredentialStore()
+    let connection = try sessionConnection()
+    let identity = GitHubAccountIdentity(id: "42", login: "octocat")
+    let key = GitHubCredentialKey(
+        connectionID: connection.id,
+        accountID: identity.id
+    )
+    let existing = GitHubCredential(
+        accessToken: "ghu_access",
+        endpointIdentity: "https://github.com"
+    )
+    try await store.save(existing, for: key)
+    let baselineSaves = await store.saves()
+    let coordinator = makeCoordinator(transport: transport, store: store)
+
+    await #expect(
+        throws: GitHubConnectionSessionError.accountMismatch(
+            expectedID: "42",
+            actualID: "99"
+        )
+    ) {
+        try await coordinator.restore(
+            connection: connection,
+            identity: identity
+        )
+    }
+
+    #expect(await store.credential(for: key) == existing)
+    #expect(await store.saves() == baselineSaves)
+    #expect(await store.deletes() == 0)
 }
 
 @Test
