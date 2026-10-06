@@ -98,7 +98,11 @@ func nanLastCheckedAtIsTreatedAsStaleMetadata() throws {
     )
 }
 
-@Test(arguments: [Double.nan, -Double.infinity])
+@Test(arguments: [
+    Double.nan,
+    Double.infinity,
+    -Double.infinity,
+])
 func nonFiniteCurrentTimeSuppressesMetadataRefresh(
     _ referenceInterval: Double
 ) throws {
