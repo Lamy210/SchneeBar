@@ -25,7 +25,21 @@ public struct GitHubRESTAPIVersionPolicy: Sendable {
     private func normalized(_ value: String?) -> String? {
         guard let value else { return nil }
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty ? nil : trimmed
+        guard !trimmed.isEmpty,
+              !trimmed.unicodeScalars.contains(where: isUnsafeHeaderScalar)
+        else {
+            return nil
+        }
+        return trimmed
+    }
+
+    private func isUnsafeHeaderScalar(_ scalar: Unicode.Scalar) -> Bool {
+        switch scalar.properties.generalCategory {
+        case .control, .format, .lineSeparator, .paragraphSeparator:
+            true
+        default:
+            false
+        }
     }
 
     public func preferredVersion(
