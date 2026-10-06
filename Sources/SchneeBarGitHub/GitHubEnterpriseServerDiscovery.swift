@@ -309,15 +309,24 @@ public struct GitHubEnterpriseServerDiscoveryClient: Sendable {
         )
         guard !value.isEmpty,
               value.utf8.count <= Self.maximumInstalledVersionUTF8Bytes,
-              !value.unicodeScalars.contains(where: isControlScalar)
+              !value.unicodeScalars.contains(
+                  where: isUnsafePresentationScalar
+              )
         else {
             throw GitHubEnterpriseServerDiscoveryError.invalidPayload
         }
         return value
     }
 
-    private func isControlScalar(_ scalar: Unicode.Scalar) -> Bool {
-        scalar.value < 0x20 || (0x7F ... 0x9F).contains(scalar.value)
+    private func isUnsafePresentationScalar(
+        _ scalar: Unicode.Scalar
+    ) -> Bool {
+        switch scalar.properties.generalCategory {
+        case .control, .format, .lineSeparator, .paragraphSeparator:
+            true
+        default:
+            false
+        }
     }
 }
 
