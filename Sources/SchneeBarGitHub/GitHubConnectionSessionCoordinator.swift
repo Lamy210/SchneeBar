@@ -52,7 +52,9 @@ public actor GitHubConnectionSessionCoordinator {
         self.deviceFlowClient = deviceFlowClient
         self.capabilityEvaluator = capabilityEvaluator
         self.now = now
-        self.refreshLeeway = max(0, refreshLeeway)
+        self.refreshLeeway = refreshLeeway.isFinite
+            ? max(0, refreshLeeway)
+            : 0
     }
 
     public func establish(
