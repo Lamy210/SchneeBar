@@ -46,6 +46,9 @@ public actor GitHubConnectionSessionCoordinator {
     private var refreshTasks: [GitHubCredentialKey: RefreshFlight] = [:]
     private var refreshGenerationByKey: [GitHubCredentialKey: UInt64] = [:]
     private var nextRefreshSequence: UInt64 = 0
+    private var credentialMutationKeys: Set<GitHubCredentialKey> = []
+    private var credentialMutationGenerationByKey: [GitHubCredentialKey: UInt64] = [:]
+    private var credentialMutationWaiters: [CheckedContinuation<Void, Never>] = []
 
     public init(
         credentialStore: any GitHubCredentialStore,
@@ -174,6 +177,12 @@ public actor GitHubConnectionSessionCoordinator {
         let key = credentialKey(connection: connection, identity: expectedIdentity)
 
         try Task.checkCancellation()
+        let mutationKeys: Set<GitHubCredentialKey> = [key]
+        await acquireCredentialMutation(for: mutationKeys)
+        defer {
+            releaseCredentialMutation(for: mutationKeys)
+        }
+        try Task.checkCancellation()
         await cancelAndDrainRefreshTask(for: key)
         try Task.checkCancellation()
         let persistedCredential = try boundCredential(
@@ -242,6 +251,15 @@ public actor GitHubConnectionSessionCoordinator {
             )
         }
 
+        try Task.checkCancellation()
+        let mutationKeys: Set<GitHubCredentialKey> = [
+            sourceKey,
+            targetKey,
+        ]
+        await acquireCredentialMutation(for: mutationKeys)
+        defer {
+            releaseCredentialMutation(for: mutationKeys)
+        }
         try Task.checkCancellation()
 
         await cancelAndDrainRefreshTask(for: sourceKey)
@@ -351,6 +369,11 @@ public actor GitHubConnectionSessionCoordinator {
         identity: GitHubAccountIdentity
     ) async throws {
         let key = credentialKey(connection: connection, identity: identity)
+        let mutationKeys: Set<GitHubCredentialKey> = [key]
+        await acquireCredentialMutation(for: mutationKeys)
+        defer {
+            releaseCredentialMutation(for: mutationKeys)
+        }
         await cancelAndDrainRefreshTask(for: key)
         try await credentialStore.delete(for: key)
     }
@@ -373,6 +396,12 @@ public actor GitHubConnectionSessionCoordinator {
         )
 
         while true {
+            await waitForCredentialMutation(for: key)
+            try Task.checkCancellation()
+            let mutationGeneration = credentialMutationGeneration(
+                for: key
+            )
+
             if let refreshFlight = refreshTasks[key] {
                 do {
                     let refreshed = try await refreshFlight.task.value
@@ -380,6 +409,13 @@ public actor GitHubConnectionSessionCoordinator {
                         for: key,
                         id: refreshFlight.id
                     )
+                    guard credentialMutationGeneration(
+                        for: key
+                    ) == mutationGeneration,
+                    !credentialMutationKeys.contains(key)
+                    else {
+                        continue
+                    }
                     try validateCredentialEndpointBinding(
                         refreshed,
                         connection: connection
@@ -390,21 +426,43 @@ public actor GitHubConnectionSessionCoordinator {
                         for: key,
                         id: refreshFlight.id
                     )
+                    if credentialMutationGeneration(
+                        for: key
+                    ) != mutationGeneration
+                        || credentialMutationKeys.contains(key)
+                    {
+                        try Task.checkCancellation()
+                        continue
+                    }
                     throw error
                 }
             }
 
-            let observedGeneration = refreshGeneration(for: key)
+            let observedRefreshGeneration = refreshGeneration(
+                for: key
+            )
             guard let credential = try await credentialStore.load(
                 for: key
             ) else {
-                guard refreshGeneration(for: key) == observedGeneration else {
+                guard credentialMutationGeneration(
+                    for: key
+                ) == mutationGeneration,
+                !credentialMutationKeys.contains(key),
+                refreshGeneration(for: key)
+                    == observedRefreshGeneration
+                else {
                     continue
                 }
                 throw GitHubConnectionSessionError.credentialNotFound
             }
 
-            guard refreshGeneration(for: key) == observedGeneration else {
+            guard credentialMutationGeneration(
+                for: key
+            ) == mutationGeneration,
+            !credentialMutationKeys.contains(key),
+            refreshGeneration(for: key)
+                == observedRefreshGeneration
+            else {
                 continue
             }
 
@@ -434,7 +492,7 @@ public actor GitHubConnectionSessionCoordinator {
             let refreshID = nextRefreshSequence
             nextRefreshSequence &+= 1
             refreshGenerationByKey[key] =
-                observedGeneration &+ 1
+                observedRefreshGeneration &+ 1
 
             let refreshTask = Task<GitHubCredential, Error> {
                 let refreshed = try await deviceFlowClient.refresh(
@@ -540,6 +598,49 @@ public actor GitHubConnectionSessionCoordinator {
         }
         return evidence.statusCode == 403
             && evidence.ssoSignal == .required
+    }
+
+    private func acquireCredentialMutation(
+        for keys: Set<GitHubCredentialKey>
+    ) async {
+        while !credentialMutationKeys.isDisjoint(with: keys) {
+            await withCheckedContinuation { continuation in
+                credentialMutationWaiters.append(continuation)
+            }
+        }
+
+        for key in keys {
+            credentialMutationKeys.insert(key)
+            credentialMutationGenerationByKey[key] =
+                credentialMutationGeneration(for: key) &+ 1
+        }
+    }
+
+    private func releaseCredentialMutation(
+        for keys: Set<GitHubCredentialKey>
+    ) {
+        credentialMutationKeys.subtract(keys)
+        let waiters = credentialMutationWaiters
+        credentialMutationWaiters.removeAll()
+        for waiter in waiters {
+            waiter.resume()
+        }
+    }
+
+    private func waitForCredentialMutation(
+        for key: GitHubCredentialKey
+    ) async {
+        while credentialMutationKeys.contains(key) {
+            await withCheckedContinuation { continuation in
+                credentialMutationWaiters.append(continuation)
+            }
+        }
+    }
+
+    private func credentialMutationGeneration(
+        for key: GitHubCredentialKey
+    ) -> UInt64 {
+        credentialMutationGenerationByKey[key] ?? 0
     }
 
     private func refreshGeneration(

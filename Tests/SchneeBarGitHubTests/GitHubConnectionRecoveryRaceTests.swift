@@ -168,7 +168,11 @@ func disconnectDrainsOlderRefreshBeforeDeletingCredential() async throws {
     await transport.releaseRefresh()
 
     try await disconnectTask.value
-    _ = try await restoreTask.value
+    await #expect(
+        throws: GitHubConnectionSessionError.credentialNotFound
+    ) {
+        try await restoreTask.value
+    }
 
     #expect(await store.credential(for: key) == nil)
 }
@@ -210,7 +214,11 @@ func cancellingCallerDoesNotAbortDisconnectCleanupAfterItStarts() async throws {
     await transport.releaseRefresh()
 
     try await disconnectTask.value
-    _ = try await restoreTask.value
+    await #expect(
+        throws: GitHubConnectionSessionError.credentialNotFound
+    ) {
+        try await restoreTask.value
+    }
 
     #expect(await store.credential(for: key) == nil)
 }
