@@ -24,22 +24,65 @@ func savingCanonicalEquivalentEndpointForSameStableAccountIsRejected() async thr
     try await context.store.save(original)
     let before = try Data(contentsOf: context.fileURL)
 
-    do {
+    await #expect(
+        throws: GitHubConnectionProfileStoreError.duplicateConnectionIdentity
+    ) {
         try await context.store.save(duplicate)
-        Issue.record("Expected duplicate connection identity to be rejected")
-    } catch {
-        // Any store rejection is sufficient for the red phase; the production
-        // change will define the precise error contract.
     }
 
     #expect(try Data(contentsOf: context.fileURL) == before)
     #expect(try await context.store.loadAll() == [original])
 }
 
+@Test
+func loadingPersistedDuplicateConnectionIdentityIsRejected() async throws {
+    let context = try duplicateIdentityStore()
+    defer { try? FileManager.default.removeItem(at: context.directory) }
+
+    let original = try duplicateIdentityProfile(
+        id: UUID(uuidString: "72000000-0000-0000-0000-000000000001")!,
+        endpoint: "https://github.com",
+        accountID: "42",
+        login: "octocat"
+    )
+    let duplicate = try duplicateIdentityProfile(
+        id: UUID(uuidString: "72000000-0000-0000-0000-000000000002")!,
+        endpoint: "https://GITHUB.COM:443/",
+        accountID: "42",
+        login: "renamed-octocat"
+    )
+
+    try FileManager.default.createDirectory(
+        at: context.directory,
+        withIntermediateDirectories: true
+    )
+    let encoder = JSONEncoder()
+    encoder.dateEncodingStrategy = .iso8601
+    encoder.outputFormatting = [.sortedKeys]
+    let data = try encoder.encode(
+        DuplicateIdentityPersistedProfiles(
+            schemaVersion: 1,
+            profiles: [original, duplicate]
+        )
+    )
+    try data.write(to: context.fileURL)
+
+    await #expect(
+        throws: GitHubConnectionProfileStoreError.duplicateConnectionIdentity
+    ) {
+        try await context.store.loadAll()
+    }
+}
+
 private struct DuplicateIdentityStoreContext {
     let directory: URL
     let fileURL: URL
     let store: ApplicationSupportGitHubConnectionProfileStore
+}
+
+private struct DuplicateIdentityPersistedProfiles: Codable {
+    let schemaVersion: Int
+    let profiles: [GitHubConnectionProfile]
 }
 
 private func duplicateIdentityStore() throws -> DuplicateIdentityStoreContext {
