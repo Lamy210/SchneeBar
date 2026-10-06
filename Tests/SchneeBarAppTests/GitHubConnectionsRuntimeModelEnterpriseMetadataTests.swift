@@ -207,6 +207,34 @@ func rediscoverySurfacesNewUntestedEnterpriseVersion() async throws {
 }
 
 @Test @MainActor
+func persistedUnsafeEnterpriseVersionIsSanitizedInPresentation() async throws {
+    let now = Date(timeIntervalSince1970: 260_000)
+    let unsafeVersion = "3.23.0\u{202E}spoof"
+    let profile = try enterpriseMetadataProfile(
+        serverVersion: unsafeVersion,
+        lastCheckAt: now
+    )
+    let fixture = enterpriseMetadataFixture(
+        profile: profile,
+        now: now,
+        refreshCount: 1
+    )
+    fixture.model.profiles = [profile]
+
+    await fixture.model.refresh(profileID: profile.id)
+
+    #expect(await fixture.discoveryTransport.callCount() == 0)
+    #expect(
+        fixture.model.statusByConnectionID[profile.id]
+            == .untestedServer(version: "Unknown")
+    )
+    #expect(
+        fixture.model.statusByConnectionID[profile.id]?.label
+            == "GHES Unknown · Untested"
+    )
+}
+
+@Test @MainActor
 func metadataCancellationDoesNotAdvanceRefreshCadence() async throws {
     let now = Date(timeIntervalSince1970: 275_000)
     let profile = try enterpriseMetadataProfile(
