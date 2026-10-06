@@ -96,7 +96,137 @@ func plannerEnforcesPerRepositoryAndGlobalBoundsDeterministically() throws {
         maximumPerRepository: 2
     )
 
-    #expect(candidates.map(\.repositoryID) == [1, 1, 2, 2])
+    #expect(candidates.map(\.repositoryID) == [1, 2, 3, 1])
+}
+
+@Test
+func globalBudgetGivesEachRepositoryOneCandidateBeforeSecondCandidates() throws {
+    let planner = GitHubCheckCandidatePlanner()
+    let repositories = try (1 ... 5).map { id in
+        try candidateRepository(
+            id: Int64(id),
+            name: "repo-\(id)"
+        )
+    }
+
+    var reviews: [Int64: [GitHubReviewRequest]] = [:]
+    for repository in repositories {
+        reviews[repository.id] = [
+            try candidateReview(
+                number: Int(repository.id * 10 + 1),
+                sha: String(
+                    repeating: String(repository.id),
+                    count: 40
+                ),
+                updatedAt: 300
+            ),
+            try candidateReview(
+                number: Int(repository.id * 10 + 2),
+                sha: String(
+                    repeating: String((repository.id + 5) % 10),
+                    count: 40
+                ),
+                updatedAt: 200
+            ),
+        ]
+    }
+
+    let candidates = planner.candidates(
+        repositories: repositories,
+        reviewRequestsByRepositoryID: reviews,
+        workflowEvidenceByRepositoryID: [:],
+        maximumTotal: 4,
+        maximumPerRepository: 2
+    )
+
+    #expect(candidates.map(\.repositoryID) == [1, 2, 3, 4])
+}
+
+@Test
+func plannerPreservesProviderRepositoryPriority() throws {
+    let planner = GitHubCheckCandidatePlanner()
+    let repositories = [
+        try candidateRepository(id: 3, name: "gamma"),
+        try candidateRepository(id: 1, name: "alpha"),
+        try candidateRepository(id: 2, name: "beta"),
+    ]
+
+    let candidates = planner.candidates(
+        repositories: repositories,
+        reviewRequestsByRepositoryID: [
+            1: [
+                try candidateReview(
+                    number: 10,
+                    sha: String(repeating: "a", count: 40),
+                    updatedAt: 100
+                ),
+            ],
+            2: [
+                try candidateReview(
+                    number: 20,
+                    sha: String(repeating: "b", count: 40),
+                    updatedAt: 100
+                ),
+            ],
+            3: [
+                try candidateReview(
+                    number: 30,
+                    sha: String(repeating: "c", count: 40),
+                    updatedAt: 100
+                ),
+            ],
+        ],
+        workflowEvidenceByRepositoryID: [:],
+        maximumTotal: 2,
+        maximumPerRepository: 1
+    )
+
+    #expect(candidates.map(\.repositoryID) == [3, 1])
+}
+
+@Test
+func sparseRepositoriesDoNotWasteGlobalCheckBudget() throws {
+    let planner = GitHubCheckCandidatePlanner()
+    let repositories = [
+        try candidateRepository(id: 1, name: "alpha"),
+        try candidateRepository(id: 2, name: "beta"),
+        try candidateRepository(id: 3, name: "gamma"),
+    ]
+
+    let candidates = planner.candidates(
+        repositories: repositories,
+        reviewRequestsByRepositoryID: [
+            1: [
+                try candidateReview(
+                    number: 10,
+                    sha: String(repeating: "a", count: 40),
+                    updatedAt: 300
+                ),
+                try candidateReview(
+                    number: 11,
+                    sha: String(repeating: "b", count: 40),
+                    updatedAt: 200
+                ),
+            ],
+            3: [
+                try candidateReview(
+                    number: 30,
+                    sha: String(repeating: "c", count: 40),
+                    updatedAt: 300
+                ),
+                try candidateReview(
+                    number: 31,
+                    sha: String(repeating: "d", count: 40),
+                    updatedAt: 200
+                ),
+            ],
+        ],
+        workflowEvidenceByRepositoryID: [:],
+        maximumTotal: 4,
+        maximumPerRepository: 2
+    )
+
+    #expect(candidates.map(\.repositoryID) == [1, 3, 1, 3])
 }
 
 private func candidateRepository(id: Int64, name: String) throws -> GitHubRepositoryAccess {

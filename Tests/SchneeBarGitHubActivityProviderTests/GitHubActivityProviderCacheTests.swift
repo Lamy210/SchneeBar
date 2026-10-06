@@ -4,6 +4,72 @@ import SchneeBarGitHub
 import SchneeBarGitHubActivityProvider
 import Testing
 
+private actor CacheLoadGate {
+    private var isOpen = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    func wait() async {
+        if isOpen {
+            return
+        }
+        await withCheckedContinuation { continuation in
+            waiters.append(continuation)
+        }
+    }
+
+    func open() {
+        guard !isOpen else { return }
+        isOpen = true
+        let continuations = waiters
+        waiters.removeAll()
+        for continuation in continuations {
+            continuation.resume()
+        }
+    }
+}
+
+private actor ResetRaceReviewLoader: GitHubReviewRequestLoading {
+    private let firstGate = CacheLoadGate()
+    private let secondGate = CacheLoadGate()
+    private var calls = 0
+
+    func reviewRequests(
+        connection: GitHubConnection,
+        identity: GitHubAccountIdentity,
+        clientID: String?,
+        repository: GitHubRepositoryAccess
+    ) async throws -> [GitHubReviewRequest] {
+        calls += 1
+        switch calls {
+        case 1:
+            await firstGate.wait()
+        case 2:
+            await secondGate.wait()
+        default:
+            break
+        }
+        return []
+    }
+
+    func waitUntilCallCount(_ expectedCount: Int) async {
+        while calls < expectedCount {
+            await Task.yield()
+        }
+    }
+
+    func callCount() -> Int {
+        calls
+    }
+
+    func releaseFirst() async {
+        await firstGate.open()
+    }
+
+    func releaseSecond() async {
+        await secondGate.open()
+    }
+}
+
 private enum CacheReviewStep: Sendable {
     case success([GitHubReviewRequest])
     case httpStatus(Int)
@@ -279,6 +345,50 @@ func resetDuringReviewLoadDiscardsStaleReviewCompletion() async throws {
 
     #expect(stale.items.isEmpty)
     #expect(stale.surface(.reviewRequests).items.isEmpty)
+}
+
+@Test
+func staleLoadCleanupDoesNotClearReplacementInFlightMarker() async throws {
+    let repository = try cacheRepository()
+    let reviews = ResetRaceReviewLoader()
+    let provider = GitHubActivityProvider(
+        workflowRunLoader: CacheWorkflowLoader(),
+        reviewRequestLoader: reviews,
+        checkRunLoader: CacheCheckLoader(),
+        maximumConcurrentRepositories: 1
+    )
+    let profile = try cacheProfile()
+    let inventory = try cacheInventory(repository: repository)
+    let capabilities = cacheCapabilities(repositoryID: repository.id)
+
+    async let staleLoad = provider.load(
+        profile: profile,
+        inventory: inventory,
+        capabilities: capabilities
+    )
+    await reviews.waitUntilCallCount(1)
+
+    await provider.reset(connectionID: profile.id)
+
+    async let replacementLoad = provider.load(
+        profile: profile,
+        inventory: inventory,
+        capabilities: capabilities
+    )
+    await reviews.waitUntilCallCount(2)
+
+    await reviews.releaseFirst()
+    _ = await staleLoad
+
+    _ = await provider.load(
+        profile: profile,
+        inventory: inventory,
+        capabilities: capabilities
+    )
+    #expect(await reviews.callCount() == 2)
+
+    await reviews.releaseSecond()
+    _ = await replacementLoad
 }
 
 private func cacheProfile() throws -> GitHubConnectionProfile {

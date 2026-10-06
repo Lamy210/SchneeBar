@@ -15,29 +15,35 @@ struct GitHubCheckCandidatePlanner: Sendable {
     ) -> [GitHubCheckCandidate] {
         guard maximumTotal > 0, maximumPerRepository > 0 else { return [] }
 
+        let repositoryCandidates = repositories
+            .map { repository in
+                candidates(
+                    repository: repository,
+                    reviewRequests: reviewRequestsByRepositoryID[
+                        repository.id,
+                        default: []
+                    ],
+                    workflowEvidence: workflowEvidenceByRepositoryID[
+                        repository.id,
+                        default: []
+                    ],
+                    maximum: maximumPerRepository
+                )
+            }
+
         var result: [GitHubCheckCandidate] = []
         result.reserveCapacity(maximumTotal)
 
-        for repository in repositories.sorted(by: repositorySort) {
-            guard result.count < maximumTotal else { break }
-
-            let repositoryCandidates = candidates(
-                repository: repository,
-                reviewRequests: reviewRequestsByRepositoryID[
-                    repository.id,
-                    default: []
-                ],
-                workflowEvidence: workflowEvidenceByRepositoryID[
-                    repository.id,
-                    default: []
-                ],
-                maximum: maximumPerRepository
-            )
-            result.append(
-                contentsOf: repositoryCandidates.prefix(
-                    maximumTotal - result.count
-                )
-            )
+        for candidateIndex in 0 ..< maximumPerRepository {
+            for candidates in repositoryCandidates {
+                guard result.count < maximumTotal else {
+                    return result
+                }
+                guard candidateIndex < candidates.count else {
+                    continue
+                }
+                result.append(candidates[candidateIndex])
+            }
         }
 
         return result
@@ -86,16 +92,6 @@ struct GitHubCheckCandidatePlanner: Sendable {
         }
 
         return result
-    }
-
-    private func repositorySort(
-        lhs: GitHubRepositoryAccess,
-        rhs: GitHubRepositoryAccess
-    ) -> Bool {
-        if lhs.fullName != rhs.fullName {
-            return lhs.fullName < rhs.fullName
-        }
-        return lhs.id < rhs.id
     }
 
     private func reviewSort(

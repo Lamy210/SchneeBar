@@ -283,9 +283,9 @@ and adds:
 
 A preflight-blocked repository produces a normalized `GitHubRepositoryActivityFailureReason.capabilityUnavailable` failure but does not increment `attemptedRepositoryCount`.
 
-App-level failure aggregation uses `consideredRepositoryCount` when deciding whether all selected work failed. `capabilityUnavailable` contributes to an unavailable connection state, not an authentication-required or transient-network state.
+> **Superseded Activity aggregation note (2026-09-16):** the later multi-source Review / Check design changed connection-level handling for capability-only blocks. A healthy session/inventory remains connected even when every Activity surface is definitively capability-blocked; only attempted operational failures may downgrade connection health. The attempted-vs-blocked accounting defined here remains authoritative.
 
-This keeps "network request attempted" semantically accurate while still surfacing a connection that has no usable Actions capability.
+The original single-surface design used `consideredRepositoryCount` when deciding whether all selected work failed and treated `capabilityUnavailable` as connection-level unavailable. That connection-level conclusion is superseded by the note above; `capabilityUnavailable` remains a normalized target failure and does not increment the attempted network count.
 
 ## Error and recovery behavior
 
