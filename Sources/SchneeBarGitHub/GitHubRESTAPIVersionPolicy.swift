@@ -4,6 +4,8 @@ public struct GitHubRESTAPIVersionPolicy: Sendable {
     public static let legacyVersion = "2022-11-28"
     public static let currentVersion = "2026-03-10"
 
+    private static let maximumHeaderVersionUTF8Bytes = 128
+
     public init() {}
 
     public func headerVersion(for connection: GitHubConnection) -> String? {
@@ -26,6 +28,7 @@ public struct GitHubRESTAPIVersionPolicy: Sendable {
         guard let value else { return nil }
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty,
+              trimmed.utf8.count <= Self.maximumHeaderVersionUTF8Bytes,
               !trimmed.unicodeScalars.contains(where: isUnsafeHeaderScalar)
         else {
             return nil
