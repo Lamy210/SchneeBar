@@ -233,6 +233,8 @@ public actor GitHubConnectionSessionCoordinator {
         }
 
         let previousTargetCredential = try await credentialStore.load(for: targetKey)
+        try Task.checkCancellation()
+
         refreshTasks[sourceKey]?.cancel()
         refreshTasks[sourceKey] = nil
         refreshTasks[targetKey]?.cancel()

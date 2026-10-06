@@ -80,6 +80,7 @@ Implemented foundation:
 - same-account binding enforcement during recovery
 - validate-before-Keychain persistence/replacement semantics across new onboarding and existing-connection recovery
 - stale refresh / recovery race protection
+- cancellation-safe existing-profile credential rebinding with a pre-mutation cancellation boundary and rollback-preserving move semantics
 - evidence-backed SSO-required installation/connection health from explicit GitHub failure signals only; no inference from empty or forbidden resource sets
 
 Remaining:
