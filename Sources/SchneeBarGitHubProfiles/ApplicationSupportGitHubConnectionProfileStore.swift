@@ -6,6 +6,7 @@ public enum GitHubConnectionProfileStoreError: Error, Equatable, Sendable {
     case unsupportedSchemaVersion(Int)
     case invalidBackingFile
     case payloadTooLarge
+    case duplicateConnectionIdentity
 }
 
 public actor ApplicationSupportGitHubConnectionProfileStore: GitHubConnectionProfileStore {
@@ -35,6 +36,13 @@ public actor ApplicationSupportGitHubConnectionProfileStore: GitHubConnectionPro
 
     public func save(_ profile: GitHubConnectionProfile) async throws {
         var profiles = try readProfiles()
+        let incomingIdentity = try persistedIdentity(for: profile)
+        for existing in profiles where existing.id != profile.id {
+            if try persistedIdentity(for: existing) == incomingIdentity {
+                throw GitHubConnectionProfileStoreError.duplicateConnectionIdentity
+            }
+        }
+
         if let index = profiles.firstIndex(where: { $0.id == profile.id }) {
             profiles[index] = profile
         } else {
@@ -62,6 +70,20 @@ public actor ApplicationSupportGitHubConnectionProfileStore: GitHubConnectionPro
             throw GitHubConnectionProfileStoreError.unsupportedSchemaVersion(payload.schemaVersion)
         }
         return payload.profiles
+    }
+
+    private func persistedIdentity(
+        for profile: GitHubConnectionProfile
+    ) throws -> PersistedProfileIdentity {
+        let endpoints = try GitHubEndpointResolver.resolve(
+            deploymentKind: profile.connection.deploymentKind,
+            webBaseURL: profile.connection.webBaseURL
+        )
+        return PersistedProfileIdentity(
+            deploymentKind: profile.connection.deploymentKind,
+            canonicalWebBaseURL: endpoints.webBaseURL.absoluteString,
+            accountID: profile.account.id
+        )
     }
 
     private func readPersistedDataIfPresent() throws -> Data? {
@@ -117,6 +139,12 @@ public actor ApplicationSupportGitHubConnectionProfileStore: GitHubConnectionPro
             .appendingPathComponent("SchneeBar", isDirectory: true)
             .appendingPathComponent("github-connections-v1.json", isDirectory: false)
     }
+}
+
+private struct PersistedProfileIdentity: Equatable {
+    let deploymentKind: GitHubDeploymentKind
+    let canonicalWebBaseURL: String
+    let accountID: String
 }
 
 private struct PersistedProfiles: Codable {
