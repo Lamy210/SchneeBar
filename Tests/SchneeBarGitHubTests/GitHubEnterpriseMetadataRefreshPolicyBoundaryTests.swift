@@ -27,6 +27,25 @@ func infiniteEnterpriseMetadataIntervalFallsBackToDefaultCadence() throws {
 }
 
 @Test
+func negativeInfiniteEnterpriseMetadataIntervalFallsBackToDefaultCadence() throws {
+    let policy = GitHubEnterpriseMetadataRefreshPolicy(
+        minimumInterval: -.infinity
+    )
+    let connection = try enterpriseMetadataBoundaryConnection()
+
+    #expect(policy.minimumInterval == enterpriseMetadataBoundaryDay)
+    #expect(
+        policy.shouldRefresh(
+            connection: connection,
+            lastCheckedAt: enterpriseMetadataBoundaryNow.addingTimeInterval(
+                -(enterpriseMetadataBoundaryDay + 60)
+            ),
+            now: enterpriseMetadataBoundaryNow
+        )
+    )
+}
+
+@Test
 func nanEnterpriseMetadataIntervalFallsBackToDefaultCadence() throws {
     let policy = GitHubEnterpriseMetadataRefreshPolicy(
         minimumInterval: .nan
