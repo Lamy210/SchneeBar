@@ -61,7 +61,7 @@ public actor ApplicationSupportGitHubConnectionProfileStore: GitHubConnectionPro
         guard payload.schemaVersion == PersistedProfiles.currentSchemaVersion else {
             throw GitHubConnectionProfileStoreError.unsupportedSchemaVersion(payload.schemaVersion)
         }
-        return payload.profiles
+        return canonicalProfiles(payload.profiles)
     }
 
     private func readPersistedDataIfPresent() throws -> Data? {
@@ -90,7 +90,7 @@ public actor ApplicationSupportGitHubConnectionProfileStore: GitHubConnectionPro
 
         let payload = PersistedProfiles(
             schemaVersion: PersistedProfiles.currentSchemaVersion,
-            profiles: profiles
+            profiles: canonicalProfiles(profiles)
         )
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
@@ -104,6 +104,58 @@ public actor ApplicationSupportGitHubConnectionProfileStore: GitHubConnectionPro
             [.posixPermissions: 0o600],
             ofItemAtPath: fileURL.path
         )
+    }
+
+    private func canonicalProfiles(
+        _ profiles: [GitHubConnectionProfile]
+    ) -> [GitHubConnectionProfile] {
+        var result: [GitHubConnectionProfile] = []
+        var indexByIdentity: [LogicalProfileIdentity: Int] = [:]
+
+        for profile in profiles {
+            guard let identity = logicalIdentity(for: profile) else {
+                result.append(profile)
+                continue
+            }
+
+            if let index = indexByIdentity[identity] {
+                if profilePrecedes(profile, result[index]) {
+                    result[index] = profile
+                }
+            } else {
+                indexByIdentity[identity] = result.count
+                result.append(profile)
+            }
+        }
+
+        return result
+    }
+
+    private func logicalIdentity(
+        for profile: GitHubConnectionProfile
+    ) -> LogicalProfileIdentity? {
+        guard let endpoints = try? GitHubEndpointResolver.resolve(
+            deploymentKind: profile.connection.deploymentKind,
+            webBaseURL: profile.connection.webBaseURL
+        ) else {
+            return nil
+        }
+
+        return LogicalProfileIdentity(
+            deploymentKind: profile.connection.deploymentKind.rawValue,
+            canonicalWebBaseURL: endpoints.webBaseURL.absoluteString,
+            accountID: profile.account.id
+        )
+    }
+
+    private func profilePrecedes(
+        _ lhs: GitHubConnectionProfile,
+        _ rhs: GitHubConnectionProfile
+    ) -> Bool {
+        if lhs.createdAt != rhs.createdAt {
+            return lhs.createdAt < rhs.createdAt
+        }
+        return lhs.id.uuidString < rhs.id.uuidString
     }
 
     private static func defaultFileURL(fileManager: FileManager) -> URL {
@@ -124,4 +176,10 @@ private struct PersistedProfiles: Codable {
 
     let schemaVersion: Int
     let profiles: [GitHubConnectionProfile]
+}
+
+private struct LogicalProfileIdentity: Hashable {
+    let deploymentKind: String
+    let canonicalWebBaseURL: String
+    let accountID: String
 }
