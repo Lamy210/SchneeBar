@@ -17,3 +17,33 @@ func unsafePersistedHostedAPIVersionFallsBackBeforeHeaderUse() throws {
             == GitHubRESTAPIVersionPolicy.currentVersion
     )
 }
+
+@Test
+func persistedAPIVersionAcceptsExactHeaderByteBudget() throws {
+    let policy = GitHubRESTAPIVersionPolicy()
+    let version = String(repeating: "v", count: 128)
+    let connection = GitHubConnection(
+        displayName: "GitHub.com",
+        deploymentKind: .githubDotCom,
+        webBaseURL: try #require(URL(string: "https://github.com")),
+        apiVersion: version
+    )
+
+    #expect(policy.headerVersion(for: connection) == version)
+}
+
+@Test
+func oversizedPersistedHostedAPIVersionFallsBackBeforeHeaderUse() throws {
+    let policy = GitHubRESTAPIVersionPolicy()
+    let connection = GitHubConnection(
+        displayName: "GitHub.com",
+        deploymentKind: .githubDotCom,
+        webBaseURL: try #require(URL(string: "https://github.com")),
+        apiVersion: String(repeating: "v", count: 129)
+    )
+
+    #expect(
+        policy.headerVersion(for: connection)
+            == GitHubRESTAPIVersionPolicy.currentVersion
+    )
+}
