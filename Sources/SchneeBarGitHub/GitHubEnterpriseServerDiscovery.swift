@@ -168,7 +168,10 @@ public struct GitHubEnterpriseMetadataRefreshPolicy: Sendable {
     public init(
         minimumInterval: TimeInterval = 24 * 60 * 60
     ) {
-        self.minimumInterval = max(0, minimumInterval)
+        let defaultInterval: TimeInterval = 24 * 60 * 60
+        self.minimumInterval = minimumInterval.isFinite
+            ? max(0, minimumInterval)
+            : defaultInterval
     }
 
     public func shouldRefresh(
