@@ -81,6 +81,42 @@ func finiteNegativeEnterpriseMetadataIntervalStillClampsToZero() throws {
     )
 }
 
+@Test
+func nanLastCheckedAtIsTreatedAsStaleMetadata() throws {
+    let policy = GitHubEnterpriseMetadataRefreshPolicy()
+    let connection = try enterpriseMetadataBoundaryConnection()
+    let invalidLastCheckedAt = Date(
+        timeIntervalSinceReferenceDate: .nan
+    )
+
+    #expect(
+        policy.shouldRefresh(
+            connection: connection,
+            lastCheckedAt: invalidLastCheckedAt,
+            now: enterpriseMetadataBoundaryNow
+        )
+    )
+}
+
+@Test(arguments: [Double.nan, -Double.infinity])
+func nonFiniteCurrentTimeSuppressesMetadataRefresh(
+    _ referenceInterval: Double
+) throws {
+    let policy = GitHubEnterpriseMetadataRefreshPolicy()
+    let connection = try enterpriseMetadataBoundaryConnection()
+    let invalidNow = Date(
+        timeIntervalSinceReferenceDate: referenceInterval
+    )
+
+    #expect(
+        !policy.shouldRefresh(
+            connection: connection,
+            lastCheckedAt: enterpriseMetadataBoundaryNow,
+            now: invalidNow
+        )
+    )
+}
+
 private func enterpriseMetadataBoundaryConnection() throws -> GitHubConnection {
     GitHubConnection(
         displayName: "Internal GitHub",
