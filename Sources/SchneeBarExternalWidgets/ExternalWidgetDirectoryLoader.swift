@@ -27,18 +27,22 @@ public struct ExternalWidgetDirectoryLoader: Sendable {
 
     private let rootURL: URL
     private let adapter: ExternalWidgetDocumentAdapter
+    private let expectedOwnerUID: uid_t
 
     public init() {
         rootURL = Self.defaultRootURL
         adapter = .init()
+        expectedOwnerUID = Darwin.geteuid()
     }
 
     init(
         rootURL: URL,
-        adapter: ExternalWidgetDocumentAdapter = .init()
+        adapter: ExternalWidgetDocumentAdapter = .init(),
+        expectedOwnerUID: uid_t = Darwin.geteuid()
     ) {
         self.rootURL = rootURL
         self.adapter = adapter
+        self.expectedOwnerUID = expectedOwnerUID
     }
 
     static var defaultRootURL: URL {
@@ -151,6 +155,7 @@ public struct ExternalWidgetDirectoryLoader: Sendable {
         defer {
             Darwin.close(trustedParentDescriptor)
         }
+        try validateTrustedDirectory(trustedParentDescriptor)
 
         let ownerDescriptor = ownerName.withCString {
             Darwin.openat(
@@ -165,6 +170,7 @@ public struct ExternalWidgetDirectoryLoader: Sendable {
         defer {
             Darwin.close(ownerDescriptor)
         }
+        try validateTrustedDirectory(ownerDescriptor)
 
         let rootDescriptor = rootName.withCString {
             Darwin.openat(
@@ -176,7 +182,120 @@ public struct ExternalWidgetDirectoryLoader: Sendable {
         guard rootDescriptor >= 0 else {
             return try rootOpenFailure()
         }
+
+        do {
+            try validateTrustedDirectory(rootDescriptor)
+        } catch {
+            Darwin.close(rootDescriptor)
+            throw error
+        }
         return rootDescriptor
+    }
+
+    private func validateTrustedDirectory(
+        _ fileDescriptor: Int32
+    ) throws {
+        var metadata = stat()
+        guard Darwin.fstat(fileDescriptor, &metadata) == 0 else {
+            throw ExternalWidgetDirectoryLoaderError.rootUnavailable
+        }
+
+        let writableByOthers = metadata.st_mode
+            & mode_t(S_IWGRP | S_IWOTH)
+
+        guard fileType(of: metadata) == mode_t(S_IFDIR),
+              metadata.st_uid == expectedOwnerUID,
+              writableByOthers == 0,
+              !hasMutatingExtendedACL(fileDescriptor)
+        else {
+            throw ExternalWidgetDirectoryLoaderError.unsafeRoot
+        }
+    }
+
+    private func hasMutatingExtendedACL(
+        _ fileDescriptor: Int32
+    ) -> Bool {
+        errno = 0
+        guard let acl = acl_get_fd_np(
+            fileDescriptor,
+            ACL_TYPE_EXTENDED
+        ) else {
+            return errno != ENOENT
+        }
+        defer {
+            acl_free(UnsafeMutableRawPointer(acl))
+        }
+
+        let mutatingPermissions: [acl_perm_t] = [
+            ACL_WRITE_DATA,
+            ACL_APPEND_DATA,
+            ACL_DELETE,
+            ACL_DELETE_CHILD,
+            ACL_WRITE_ATTRIBUTES,
+            ACL_WRITE_EXTATTRIBUTES,
+            ACL_WRITE_SECURITY,
+            ACL_CHANGE_OWNER,
+        ]
+
+        var entry: acl_entry_t?
+        errno = 0
+        var status = acl_get_entry(
+            acl,
+            ACL_FIRST_ENTRY.rawValue,
+            &entry
+        )
+
+        while true {
+            if status == -1 {
+                return errno != EINVAL
+            }
+            guard status == 0,
+                  let currentEntry = entry
+            else {
+                return true
+            }
+
+            var tag = acl_tag_t(0)
+            guard acl_get_tag_type(
+                currentEntry,
+                &tag
+            ) == 0 else {
+                return true
+            }
+
+            if tag == ACL_EXTENDED_ALLOW {
+                var permissionSet: acl_permset_t?
+                guard acl_get_permset(
+                    currentEntry,
+                    &permissionSet
+                ) == 0,
+                let permissionSet
+                else {
+                    return true
+                }
+
+                for permission in mutatingPermissions {
+                    let result = acl_get_perm_np(
+                        permissionSet,
+                        permission
+                    )
+                    if result == 1 {
+                        return true
+                    }
+                    if result == -1 {
+                        return true
+                    }
+                }
+            }
+
+            entry = nil
+            errno = 0
+            status = acl_get_entry(
+                acl,
+                ACL_NEXT_ENTRY.rawValue,
+                &entry
+            )
+        }
     }
 
     private func rootOpenFailure() throws -> Int32? {
@@ -289,8 +408,14 @@ public struct ExternalWidgetDirectoryLoader: Sendable {
         guard Darwin.fstat(fileDescriptor, &metadata) == 0 else {
             throw ExternalWidgetDirectoryLoaderError.unreadableDocument
         }
+        let writableByOthers = metadata.st_mode
+            & mode_t(S_IWGRP | S_IWOTH)
+
         guard fileType(of: metadata) == mode_t(S_IFREG),
-              metadata.st_nlink == 1
+              metadata.st_nlink == 1,
+              metadata.st_uid == expectedOwnerUID,
+              writableByOthers == 0,
+              !hasMutatingExtendedACL(fileDescriptor)
         else {
             throw ExternalWidgetDirectoryLoaderError
                 .unsafeDocumentEntry

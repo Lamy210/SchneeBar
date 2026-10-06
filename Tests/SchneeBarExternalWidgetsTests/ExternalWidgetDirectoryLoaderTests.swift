@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 import SchneeBarCore
 @testable import SchneeBarExternalWidgets
@@ -123,6 +124,169 @@ func rejectsSymlinkedRootDirectory() async throws {
 }
 
 @Test
+func rejectsTrustedParentOwnedByUnexpectedUser() async throws {
+    let fixture = try LoaderDirectoryFixture()
+    defer { fixture.cleanup() }
+
+    let currentUID = Darwin.geteuid()
+    let unexpectedUID: uid_t = currentUID == 0 ? 1 : 0
+
+    await #expect(
+        throws: ExternalWidgetDirectoryLoaderError.unsafeRoot
+    ) {
+        try await ExternalWidgetDirectoryLoader(
+            rootURL: fixture.rootURL,
+            expectedOwnerUID: unexpectedUID
+        ).load()
+    }
+}
+
+@Test(arguments: [0o775, 0o757])
+func rejectsTrustedParentWritableByGroupOrOthers(
+    permissions: Int
+) async throws {
+    let fixture = try LoaderDirectoryFixture()
+    defer { fixture.cleanup() }
+
+    try FileManager.default.setAttributes(
+        [.posixPermissions: permissions],
+        ofItemAtPath: fixture.anchorURL.path
+    )
+
+    await #expect(
+        throws: ExternalWidgetDirectoryLoaderError.unsafeRoot
+    ) {
+        try await ExternalWidgetDirectoryLoader(
+            rootURL: fixture.rootURL
+        ).load()
+    }
+}
+
+@Test(arguments: [0o775, 0o757])
+func rejectsOwnerDirectoryWritableByGroupOrOthers(
+    permissions: Int
+) async throws {
+    let fixture = try LoaderDirectoryFixture()
+    defer { fixture.cleanup() }
+
+    try FileManager.default.setAttributes(
+        [.posixPermissions: permissions],
+        ofItemAtPath: fixture.baseURL.path
+    )
+
+    await #expect(
+        throws: ExternalWidgetDirectoryLoaderError.unsafeRoot
+    ) {
+        try await ExternalWidgetDirectoryLoader(
+            rootURL: fixture.rootURL
+        ).load()
+    }
+}
+
+@Test
+func rejectsTrustedParentWithMutatingExtendedACL() async throws {
+    let fixture = try LoaderDirectoryFixture()
+    defer { fixture.cleanup() }
+
+    try addWriteACL(at: fixture.anchorURL)
+
+    await #expect(
+        throws: ExternalWidgetDirectoryLoaderError.unsafeRoot
+    ) {
+        try await ExternalWidgetDirectoryLoader(
+            rootURL: fixture.rootURL
+        ).load()
+    }
+}
+
+@Test
+func rejectsOwnerDirectoryWithMutatingExtendedACL() async throws {
+    let fixture = try LoaderDirectoryFixture()
+    defer { fixture.cleanup() }
+
+    try addWriteACL(at: fixture.baseURL)
+
+    await #expect(
+        throws: ExternalWidgetDirectoryLoaderError.unsafeRoot
+    ) {
+        try await ExternalWidgetDirectoryLoader(
+            rootURL: fixture.rootURL
+        ).load()
+    }
+}
+
+@Test
+func rejectsRootDirectoryWithExtendedACL() async throws {
+    let fixture = try LoaderDirectoryFixture()
+    defer { fixture.cleanup() }
+
+    try addWriteACL(at: fixture.rootURL)
+
+    await #expect(
+        throws: ExternalWidgetDirectoryLoaderError.unsafeRoot
+    ) {
+        try await ExternalWidgetDirectoryLoader(
+            rootURL: fixture.rootURL
+        ).load()
+    }
+}
+
+@Test
+func allowsReadOnlyExtendedACL() async throws {
+    let fixture = try LoaderDirectoryFixture()
+    defer { fixture.cleanup() }
+
+    try addACL(
+        "everyone allow read",
+        at: fixture.rootURL
+    )
+
+    let definitions = try await ExternalWidgetDirectoryLoader(
+        rootURL: fixture.rootURL
+    ).load()
+
+    #expect(definitions.isEmpty)
+}
+
+@Test
+func allowsDenyOnlyMutatingACL() async throws {
+    let fixture = try LoaderDirectoryFixture()
+    defer { fixture.cleanup() }
+
+    try addACL(
+        "everyone deny write",
+        at: fixture.rootURL
+    )
+
+    let definitions = try await ExternalWidgetDirectoryLoader(
+        rootURL: fixture.rootURL
+    ).load()
+
+    #expect(definitions.isEmpty)
+}
+
+@Test(arguments: [0o775, 0o757])
+func rejectsRootDirectoryWritableByGroupOrOthers(
+    permissions: Int
+) async throws {
+    let fixture = try LoaderDirectoryFixture()
+    defer { fixture.cleanup() }
+
+    try FileManager.default.setAttributes(
+        [.posixPermissions: permissions],
+        ofItemAtPath: fixture.rootURL.path
+    )
+
+    await #expect(
+        throws: ExternalWidgetDirectoryLoaderError.unsafeRoot
+    ) {
+        try await ExternalWidgetDirectoryLoader(
+            rootURL: fixture.rootURL
+        ).load()
+    }
+}
+
+@Test
 func rejectsSymlinkedJSONDocumentWithoutFollowingIt() async throws {
     let fixture = try LoaderDirectoryFixture()
     defer { fixture.cleanup() }
@@ -133,6 +297,47 @@ func rejectsSymlinkedJSONDocumentWithoutFollowingIt() async throws {
     try FileManager.default.createSymbolicLink(
         at: fixture.rootURL.appendingPathComponent("linked.json"),
         withDestinationURL: outside
+    )
+
+    await #expect(
+        throws: ExternalWidgetDirectoryLoaderError.unsafeDocumentEntry
+    ) {
+        try await ExternalWidgetDirectoryLoader(
+            rootURL: fixture.rootURL
+        ).load()
+    }
+}
+
+@Test
+func rejectsJSONDocumentWithExtendedACL() async throws {
+    let fixture = try LoaderDirectoryFixture()
+    defer { fixture.cleanup() }
+
+    let url = fixture.rootURL.appendingPathComponent("acl.json")
+    try loaderDocumentData(id: "external.acl.build").write(to: url)
+    try addWriteACL(at: url)
+
+    await #expect(
+        throws: ExternalWidgetDirectoryLoaderError.unsafeDocumentEntry
+    ) {
+        try await ExternalWidgetDirectoryLoader(
+            rootURL: fixture.rootURL
+        ).load()
+    }
+}
+
+@Test(arguments: [0o664, 0o646])
+func rejectsJSONDocumentWritableByGroupOrOthers(
+    permissions: Int
+) async throws {
+    let fixture = try LoaderDirectoryFixture()
+    defer { fixture.cleanup() }
+
+    let url = fixture.rootURL.appendingPathComponent("writable.json")
+    try loaderDocumentData(id: "external.writable.build").write(to: url)
+    try FileManager.default.setAttributes(
+        [.posixPermissions: permissions],
+        ofItemAtPath: url.path
     )
 
     await #expect(
@@ -403,21 +608,67 @@ func preservesCancellationBeforeFilesystemWork() async throws {
     }
 }
 
+private enum LoaderACLFixtureError: Error {
+    case chmodFailed(Int32)
+}
+
+private func addWriteACL(
+    at url: URL
+) throws {
+    try addACL(
+        "everyone allow write",
+        at: url
+    )
+}
+
+private func addACL(
+    _ entry: String,
+    at url: URL
+) throws {
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: "/bin/chmod")
+    process.arguments = [
+        "+a",
+        entry,
+        url.path,
+    ]
+    process.standardOutput = FileHandle.nullDevice
+    process.standardError = FileHandle.nullDevice
+
+    try process.run()
+    process.waitUntilExit()
+
+    guard process.terminationStatus == 0 else {
+        throw LoaderACLFixtureError.chmodFailed(
+            process.terminationStatus
+        )
+    }
+}
+
 private struct LoaderDirectoryFixture {
+    let anchorURL: URL
     let baseURL: URL
     let rootURL: URL
 
     init(createRoot: Bool = true) throws {
-        baseURL = FileManager.default.temporaryDirectory
+        anchorURL = FileManager.default.temporaryDirectory
             .appendingPathComponent(
                 "SchneeBarExternalWidgetLoaderTests-\(UUID().uuidString)",
                 isDirectory: true
             )
+        baseURL = anchorURL.appendingPathComponent(
+            "SchneeBar",
+            isDirectory: true
+        )
         rootURL = baseURL.appendingPathComponent(
             "ExternalWidgets",
             isDirectory: true
         )
 
+        try FileManager.default.createDirectory(
+            at: anchorURL,
+            withIntermediateDirectories: false
+        )
         try FileManager.default.createDirectory(
             at: baseURL,
             withIntermediateDirectories: false
@@ -451,7 +702,7 @@ private struct LoaderDirectoryFixture {
     }
 
     func cleanup() {
-        try? FileManager.default.removeItem(at: baseURL)
+        try? FileManager.default.removeItem(at: anchorURL)
     }
 }
 
