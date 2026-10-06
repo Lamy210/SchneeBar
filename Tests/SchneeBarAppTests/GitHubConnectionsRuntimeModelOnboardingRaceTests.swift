@@ -227,7 +227,8 @@ func cancellingReconnectDuringRebindRollsBackProfileAndCredential() async throws
         authorizationWaiter: GitHubDeviceAuthorizationWaiter(
             client: deviceFlowClient,
             sleeper: { _ in }
-        )
+        ),
+        now: { onboardingRaceNow }
     )
     model.profiles = [original]
     model.statusByConnectionID[original.id] = .connected(
@@ -250,6 +251,7 @@ func cancellingReconnectDuringRebindRollsBackProfileAndCredential() async throws
     )
     #expect(savedBeforeCancellation.account.login == "reconnected-user")
     #expect(savedBeforeCancellation.id == original.id)
+    #expect(savedBeforeCancellation.lastConnectedAt == onboardingRaceNow)
 
     model.cancelOnboarding()
     await credentialStore.releaseTargetLoad()
