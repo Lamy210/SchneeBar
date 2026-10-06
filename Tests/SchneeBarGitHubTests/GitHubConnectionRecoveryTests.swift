@@ -143,6 +143,43 @@ func recoverRejectsDifferentAccountWithoutMutatingCredentialStore() async throws
 }
 
 @Test
+func recoverRejectsInventoryAccountDriftWithoutReplacingCredential() async throws {
+    let transport = RecoveryQueueTransport([
+        .http(recoveryUserJSON(id: 42, login: "octocat")),
+        .http(recoveryUserJSON(id: 99, login: "other-user")),
+        .http(#"{"total_count":0,"installations":[]}"#),
+    ])
+    let store = RecoveryCredentialStore()
+    let connection = try recoveryConnection()
+    let expected = GitHubAccountIdentity(id: "42", login: "octocat")
+    let key = GitHubCredentialKey(
+        connectionID: connection.id,
+        accountID: expected.id
+    )
+    let oldCredential = GitHubCredential(accessToken: "old-token")
+    try await store.save(oldCredential, for: key)
+    let baselineSaves = await store.saves()
+    let coordinator = recoveryCoordinator(transport: transport, store: store)
+
+    await #expect(
+        throws: GitHubConnectionSessionError.accountMismatch(
+            expectedID: "42",
+            actualID: "99"
+        )
+    ) {
+        try await coordinator.recover(
+            connection: connection,
+            expectedIdentity: expected,
+            credential: GitHubCredential(accessToken: "fresh-token")
+        )
+    }
+
+    #expect(await store.credential(for: key) == oldCredential)
+    #expect(await store.saves() == baselineSaves)
+    #expect(await store.deletes() == 0)
+}
+
+@Test
 func recoverMapsAccountLookup401WithoutReplacingCredential() async throws {
     let transport = RecoveryQueueTransport([
         .http(#"{"message":"Bad credentials"}"#, statusCode: 401),

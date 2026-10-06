@@ -88,6 +88,11 @@ public actor GitHubConnectionSessionCoordinator {
             throw GitHubConnectionSessionError.ssoRequired
         }
 
+        try validateInventoryIdentity(
+            inventory,
+            expectedID: account.identity.id
+        )
+
         let capabilities = capabilityEvaluator.evaluate(
             connection: connection,
             inventory: inventory
@@ -149,6 +154,11 @@ public actor GitHubConnectionSessionCoordinator {
             throw GitHubConnectionSessionError.ssoRequired
         }
 
+        try validateInventoryIdentity(
+            inventory,
+            expectedID: account.identity.id
+        )
+
         let capabilities = capabilityEvaluator.evaluate(
             connection: connection,
             inventory: inventory
@@ -184,6 +194,10 @@ public actor GitHubConnectionSessionCoordinator {
         ) else {
             throw GitHubConnectionSessionError.connectionEndpointMismatch
         }
+        try validateInventoryIdentity(
+            session.inventory,
+            expectedID: session.account.identity.id
+        )
 
         let sourceKey = credentialKey(
             connection: sourceConnection,
@@ -292,6 +306,11 @@ public actor GitHubConnectionSessionCoordinator {
             throw GitHubConnectionSessionError.ssoRequired
         }
 
+        try validateInventoryIdentity(
+            inventory,
+            expectedID: account.identity.id
+        )
+
         let capabilities = capabilityEvaluator.evaluate(
             connection: connection,
             inventory: inventory
@@ -388,6 +407,19 @@ public actor GitHubConnectionSessionCoordinator {
         } catch {
             refreshTasks[key] = nil
             throw error
+        }
+    }
+
+    private func validateInventoryIdentity(
+        _ inventory: GitHubAccessInventory,
+        expectedID: String
+    ) throws {
+        let actualID = inventory.account.identity.id
+        guard actualID == expectedID else {
+            throw GitHubConnectionSessionError.accountMismatch(
+                expectedID: expectedID,
+                actualID: actualID
+            )
         }
     }
 
