@@ -36,18 +36,12 @@ public actor ApplicationSupportGitHubConnectionProfileStore: GitHubConnectionPro
 
     public func save(_ profile: GitHubConnectionProfile) async throws {
         var profiles = try readProfiles()
-        let incomingIdentity = try persistedIdentity(for: profile)
-        for existing in profiles where existing.id != profile.id {
-            if try persistedIdentity(for: existing) == incomingIdentity {
-                throw GitHubConnectionProfileStoreError.duplicateConnectionIdentity
-            }
-        }
-
         if let index = profiles.firstIndex(where: { $0.id == profile.id }) {
             profiles[index] = profile
         } else {
             profiles.append(profile)
         }
+        try validateUniquePersistedIdentities(profiles)
         try writeProfiles(profiles)
     }
 
@@ -69,7 +63,20 @@ public actor ApplicationSupportGitHubConnectionProfileStore: GitHubConnectionPro
         guard payload.schemaVersion == PersistedProfiles.currentSchemaVersion else {
             throw GitHubConnectionProfileStoreError.unsupportedSchemaVersion(payload.schemaVersion)
         }
+        try validateUniquePersistedIdentities(payload.profiles)
         return payload.profiles
+    }
+
+    private func validateUniquePersistedIdentities(
+        _ profiles: [GitHubConnectionProfile]
+    ) throws {
+        var identities: Set<PersistedProfileIdentity> = []
+        for profile in profiles {
+            let identity = try persistedIdentity(for: profile)
+            guard identities.insert(identity).inserted else {
+                throw GitHubConnectionProfileStoreError.duplicateConnectionIdentity
+            }
+        }
     }
 
     private func persistedIdentity(
@@ -141,7 +148,7 @@ public actor ApplicationSupportGitHubConnectionProfileStore: GitHubConnectionPro
     }
 }
 
-private struct PersistedProfileIdentity: Equatable {
+private struct PersistedProfileIdentity: Hashable {
     let deploymentKind: GitHubDeploymentKind
     let canonicalWebBaseURL: String
     let accountID: String
