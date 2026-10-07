@@ -88,7 +88,7 @@ public actor GitHubConnectionSessionCoordinator {
             throw GitHubConnectionSessionError.ssoRequired
         }
 
-        try validateInventoryIdentity(
+        let validatedAccount = try validatedInventoryAccount(
             inventory,
             expectedID: account.identity.id
         )
@@ -107,7 +107,7 @@ public actor GitHubConnectionSessionCoordinator {
 
         return GitHubConnectionSession(
             connectionID: connection.id,
-            account: account,
+            account: validatedAccount,
             credentialKey: key,
             inventory: inventory,
             capabilities: capabilities
@@ -154,7 +154,7 @@ public actor GitHubConnectionSessionCoordinator {
             throw GitHubConnectionSessionError.ssoRequired
         }
 
-        try validateInventoryIdentity(
+        let validatedAccount = try validatedInventoryAccount(
             inventory,
             expectedID: account.identity.id
         )
@@ -176,7 +176,7 @@ public actor GitHubConnectionSessionCoordinator {
 
         return GitHubConnectionSession(
             connectionID: connection.id,
-            account: account,
+            account: validatedAccount,
             credentialKey: key,
             inventory: inventory,
             capabilities: capabilities
@@ -194,7 +194,7 @@ public actor GitHubConnectionSessionCoordinator {
         ) else {
             throw GitHubConnectionSessionError.connectionEndpointMismatch
         }
-        try validateInventoryIdentity(
+        let validatedAccount = try validatedInventoryAccount(
             session.inventory,
             expectedID: session.account.identity.id
         )
@@ -225,7 +225,7 @@ public actor GitHubConnectionSessionCoordinator {
         guard targetKey != sourceKey else {
             return GitHubConnectionSession(
                 connectionID: targetConnection.id,
-                account: session.account,
+                account: validatedAccount,
                 credentialKey: targetKey,
                 inventory: session.inventory,
                 capabilities: capabilities
@@ -254,7 +254,7 @@ public actor GitHubConnectionSessionCoordinator {
 
         return GitHubConnectionSession(
             connectionID: targetConnection.id,
-            account: session.account,
+            account: validatedAccount,
             credentialKey: targetKey,
             inventory: session.inventory,
             capabilities: capabilities
@@ -308,7 +308,7 @@ public actor GitHubConnectionSessionCoordinator {
             throw GitHubConnectionSessionError.ssoRequired
         }
 
-        try validateInventoryIdentity(
+        let validatedAccount = try validatedInventoryAccount(
             inventory,
             expectedID: account.identity.id
         )
@@ -319,7 +319,7 @@ public actor GitHubConnectionSessionCoordinator {
         )
         return GitHubConnectionSession(
             connectionID: connection.id,
-            account: account,
+            account: validatedAccount,
             credentialKey: key,
             inventory: inventory,
             capabilities: capabilities
@@ -412,17 +412,18 @@ public actor GitHubConnectionSessionCoordinator {
         }
     }
 
-    private func validateInventoryIdentity(
+    private func validatedInventoryAccount(
         _ inventory: GitHubAccessInventory,
         expectedID: String
-    ) throws {
-        let actualID = inventory.account.identity.id
-        guard actualID == expectedID else {
+    ) throws -> GitHubAuthenticatedAccount {
+        let account = inventory.account
+        guard account.identity.id == expectedID else {
             throw GitHubConnectionSessionError.accountMismatch(
                 expectedID: expectedID,
-                actualID: actualID
+                actualID: account.identity.id
             )
         }
+        return account
     }
 
     private func validateCredentialEndpointBinding(

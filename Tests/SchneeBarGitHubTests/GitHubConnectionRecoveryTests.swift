@@ -79,7 +79,7 @@ private let recoveryNow = Date(timeIntervalSince1970: 20_000)
 @Test
 func recoverMatchingAccountValidatesBeforeReplacingCredential() async throws {
     let transport = RecoveryQueueTransport([
-        .http(recoveryUserJSON(id: 42, login: "octocat-renamed")),
+        .http(recoveryUserJSON(id: 42, login: "octocat")),
         .http(recoveryUserJSON(id: 42, login: "octocat-renamed")),
         .http(#"{"total_count":0,"installations":[]}"#),
     ])

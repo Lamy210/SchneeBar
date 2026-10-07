@@ -132,7 +132,16 @@ func rebindEstablishedSessionMovesCredentialToExistingConnectionIdentity() async
     try await store.save(credential, for: temporaryKey)
 
     let account = GitHubAuthenticatedAccount(identity: identity)
-    let inventory = GitHubAccessInventory(account: account, installations: [])
+    let inventoryAccount = GitHubAuthenticatedAccount(
+        identity: GitHubAccountIdentity(
+            id: identity.id,
+            login: "octocat-renamed"
+        )
+    )
+    let inventory = GitHubAccessInventory(
+        account: inventoryAccount,
+        installations: []
+    )
     let session = GitHubConnectionSession(
         connectionID: temporaryConnection.id,
         account: account,
@@ -151,6 +160,7 @@ func rebindEstablishedSessionMovesCredentialToExistingConnectionIdentity() async
     )
 
     #expect(rebound.connectionID == existingConnection.id)
+    #expect(rebound.account.identity.login == "octocat-renamed")
     #expect(rebound.credentialKey == existingKey)
     #expect(await store.value(for: temporaryKey) == nil)
     #expect(await store.value(for: existingKey) == credential)
