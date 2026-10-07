@@ -168,7 +168,10 @@ public struct GitHubEnterpriseMetadataRefreshPolicy: Sendable {
     public init(
         minimumInterval: TimeInterval = 24 * 60 * 60
     ) {
-        self.minimumInterval = max(0, minimumInterval)
+        let defaultInterval: TimeInterval = 24 * 60 * 60
+        self.minimumInterval = minimumInterval.isFinite
+            ? max(0, minimumInterval)
+            : defaultInterval
     }
 
     public func shouldRefresh(
@@ -179,12 +182,25 @@ public struct GitHubEnterpriseMetadataRefreshPolicy: Sendable {
         guard connection.deploymentKind == .enterpriseServer else {
             return false
         }
+
+        let nowReference = now.timeIntervalSinceReferenceDate
+        guard nowReference.isFinite else {
+            return false
+        }
+
         guard let lastCheckedAt else {
             return true
         }
 
-        let elapsed = now.timeIntervalSince(lastCheckedAt)
-        return elapsed < 0 || elapsed >= minimumInterval
+        let lastCheckedReference = lastCheckedAt.timeIntervalSinceReferenceDate
+        guard lastCheckedReference.isFinite else {
+            return true
+        }
+
+        if nowReference < lastCheckedReference {
+            return true
+        }
+        return nowReference - lastCheckedReference >= minimumInterval
     }
 }
 
@@ -212,6 +228,12 @@ public enum GitHubEnterpriseServerDiscoveryError: Error, Equatable, Sendable {
 }
 
 public struct GitHubEnterpriseServerDiscoveryClient: Sendable {
+    // GHES /meta contains more than the installed version. This generous
+    // app-owned decode budget is not a GitHub protocol maximum; it prevents
+    // unrelated provider-controlled metadata from growing decoder work without
+    // bound before SchneeBar consumes the small subset it needs.
+    private static let maximumMetaResponseBytes = 1024 * 1024
+
     // Internal defensive input budget, not a GitHub protocol limit. GHES
     // version strings are tiny in practice; bounding the provider-controlled
     // value keeps untrusted metadata from growing UI/profile state without
@@ -264,6 +286,9 @@ public struct GitHubEnterpriseServerDiscoveryClient: Sendable {
         guard (200 ... 299).contains(response.statusCode) else {
             throw GitHubEnterpriseServerDiscoveryError.httpStatus(response.statusCode)
         }
+        guard data.count <= Self.maximumMetaResponseBytes else {
+            throw GitHubEnterpriseServerDiscoveryError.invalidPayload
+        }
 
         let payload: MetaPayload
         do {
@@ -293,15 +318,24 @@ public struct GitHubEnterpriseServerDiscoveryClient: Sendable {
         )
         guard !value.isEmpty,
               value.utf8.count <= Self.maximumInstalledVersionUTF8Bytes,
-              !value.unicodeScalars.contains(where: isControlScalar)
+              !value.unicodeScalars.contains(
+                  where: isUnsafePresentationScalar
+              )
         else {
             throw GitHubEnterpriseServerDiscoveryError.invalidPayload
         }
         return value
     }
 
-    private func isControlScalar(_ scalar: Unicode.Scalar) -> Bool {
-        scalar.value < 0x20 || (0x7F ... 0x9F).contains(scalar.value)
+    private func isUnsafePresentationScalar(
+        _ scalar: Unicode.Scalar
+    ) -> Bool {
+        switch scalar.properties.generalCategory {
+        case .control, .format, .lineSeparator, .paragraphSeparator:
+            true
+        default:
+            false
+        }
     }
 }
 

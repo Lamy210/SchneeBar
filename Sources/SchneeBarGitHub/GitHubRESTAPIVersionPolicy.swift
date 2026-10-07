@@ -4,6 +4,8 @@ public struct GitHubRESTAPIVersionPolicy: Sendable {
     public static let legacyVersion = "2022-11-28"
     public static let currentVersion = "2026-03-10"
 
+    private static let maximumHeaderVersionUTF8Bytes = 128
+
     public init() {}
 
     public func headerVersion(for connection: GitHubConnection) -> String? {
@@ -25,7 +27,22 @@ public struct GitHubRESTAPIVersionPolicy: Sendable {
     private func normalized(_ value: String?) -> String? {
         guard let value else { return nil }
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty ? nil : trimmed
+        guard !trimmed.isEmpty,
+              trimmed.utf8.count <= Self.maximumHeaderVersionUTF8Bytes,
+              !trimmed.unicodeScalars.contains(where: isUnsafeHeaderScalar)
+        else {
+            return nil
+        }
+        return trimmed
+    }
+
+    private func isUnsafeHeaderScalar(_ scalar: Unicode.Scalar) -> Bool {
+        switch scalar.properties.generalCategory {
+        case .control, .format, .lineSeparator, .paragraphSeparator:
+            true
+        default:
+            false
+        }
     }
 
     public func preferredVersion(

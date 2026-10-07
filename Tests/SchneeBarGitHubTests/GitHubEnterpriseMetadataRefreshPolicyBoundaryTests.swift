@@ -1,0 +1,132 @@
+import Foundation
+import SchneeBarGitHub
+import Testing
+
+private let enterpriseMetadataBoundaryDay: TimeInterval = 24 * 60 * 60
+private let enterpriseMetadataBoundaryNow = Date(
+    timeIntervalSince1970: 200_000
+)
+
+@Test
+func infiniteEnterpriseMetadataIntervalFallsBackToDefaultCadence() throws {
+    let policy = GitHubEnterpriseMetadataRefreshPolicy(
+        minimumInterval: .infinity
+    )
+    let connection = try enterpriseMetadataBoundaryConnection()
+
+    #expect(policy.minimumInterval == enterpriseMetadataBoundaryDay)
+    #expect(
+        policy.shouldRefresh(
+            connection: connection,
+            lastCheckedAt: enterpriseMetadataBoundaryNow.addingTimeInterval(
+                -(enterpriseMetadataBoundaryDay + 60)
+            ),
+            now: enterpriseMetadataBoundaryNow
+        )
+    )
+}
+
+@Test
+func negativeInfiniteEnterpriseMetadataIntervalFallsBackToDefaultCadence() throws {
+    let policy = GitHubEnterpriseMetadataRefreshPolicy(
+        minimumInterval: -.infinity
+    )
+    let connection = try enterpriseMetadataBoundaryConnection()
+
+    #expect(policy.minimumInterval == enterpriseMetadataBoundaryDay)
+    #expect(
+        policy.shouldRefresh(
+            connection: connection,
+            lastCheckedAt: enterpriseMetadataBoundaryNow.addingTimeInterval(
+                -(enterpriseMetadataBoundaryDay + 60)
+            ),
+            now: enterpriseMetadataBoundaryNow
+        )
+    )
+}
+
+@Test
+func nanEnterpriseMetadataIntervalFallsBackToDefaultCadence() throws {
+    let policy = GitHubEnterpriseMetadataRefreshPolicy(
+        minimumInterval: .nan
+    )
+    let connection = try enterpriseMetadataBoundaryConnection()
+
+    #expect(policy.minimumInterval == enterpriseMetadataBoundaryDay)
+    #expect(
+        policy.shouldRefresh(
+            connection: connection,
+            lastCheckedAt: enterpriseMetadataBoundaryNow.addingTimeInterval(
+                -(enterpriseMetadataBoundaryDay + 60)
+            ),
+            now: enterpriseMetadataBoundaryNow
+        )
+    )
+}
+
+@Test
+func finiteNegativeEnterpriseMetadataIntervalStillClampsToZero() throws {
+    let policy = GitHubEnterpriseMetadataRefreshPolicy(
+        minimumInterval: -1
+    )
+    let connection = try enterpriseMetadataBoundaryConnection()
+
+    #expect(policy.minimumInterval == 0)
+    #expect(
+        policy.shouldRefresh(
+            connection: connection,
+            lastCheckedAt: enterpriseMetadataBoundaryNow,
+            now: enterpriseMetadataBoundaryNow
+        )
+    )
+}
+
+@Test
+func nanLastCheckedAtIsTreatedAsStaleMetadata() throws {
+    let policy = GitHubEnterpriseMetadataRefreshPolicy()
+    let connection = try enterpriseMetadataBoundaryConnection()
+    let invalidLastCheckedAt = Date(
+        timeIntervalSinceReferenceDate: .nan
+    )
+
+    #expect(
+        policy.shouldRefresh(
+            connection: connection,
+            lastCheckedAt: invalidLastCheckedAt,
+            now: enterpriseMetadataBoundaryNow
+        )
+    )
+}
+
+@Test(arguments: [
+    Double.nan,
+    Double.infinity,
+    -Double.infinity,
+])
+func nonFiniteCurrentTimeSuppressesMetadataRefresh(
+    _ referenceInterval: Double
+) throws {
+    let policy = GitHubEnterpriseMetadataRefreshPolicy()
+    let connection = try enterpriseMetadataBoundaryConnection()
+    let invalidNow = Date(
+        timeIntervalSinceReferenceDate: referenceInterval
+    )
+
+    #expect(
+        !policy.shouldRefresh(
+            connection: connection,
+            lastCheckedAt: enterpriseMetadataBoundaryNow,
+            now: invalidNow
+        )
+    )
+}
+
+private func enterpriseMetadataBoundaryConnection() throws -> GitHubConnection {
+    GitHubConnection(
+        displayName: "Internal GitHub",
+        deploymentKind: .enterpriseServer,
+        webBaseURL: try #require(
+            URL(string: "https://github.internal.example")
+        )
+    )
+}
