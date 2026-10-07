@@ -62,7 +62,11 @@ New-connection onboarding persists the bound credential only after authenticated
 identity, fresh repository inventory, and capability evaluation all succeed.
 Inventory authentication/SSO/availability failures and cancellation observed
 before the final save leave no newly persisted Keychain credential. Existing-
-connection recovery follows the same validate-before-mutate boundary.
+connection recovery follows the same validate-before-mutate boundary. Because
+inventory refresh revalidates the authenticated user, its stable numeric account
+ID must match the account identity established earlier in the same session
+transaction; identity drift fails closed before capability/session state or
+credential persistence can proceed.
 
 ### Developer preview client ID
 
