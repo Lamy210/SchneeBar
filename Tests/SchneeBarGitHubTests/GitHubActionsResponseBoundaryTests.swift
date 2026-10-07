@@ -66,6 +66,27 @@ func oversizedWorkflowRunsResponseFailsBeforeDecode() async throws {
     #expect(await transport.recordedRequests().count == 1)
 }
 
+@Test
+func oversizedWorkflowJobsResponseFailsBeforeDecode() async throws {
+    let padding = String(repeating: "x", count: 8 * 1024 * 1024)
+    let json = #"{"total_count":0,"jobs":[],"padding":"\#(padding)"}"#
+    let transport = ActionsBoundaryTransport([
+        ActionsBoundaryResponse(data: Data(json.utf8))
+    ])
+    let client = GitHubActionsJobsClient(transport: transport)
+
+    await #expect(throws: GitHubActionsClientError.invalidResponse) {
+        _ = try await client.jobs(
+            runID: 501,
+            repository: try actionsBoundaryRepository(),
+            connection: try actionsBoundaryConnection(),
+            credential: GitHubCredential(accessToken: "ghu_actions")
+        )
+    }
+
+    #expect(await transport.recordedRequests().count == 1)
+}
+
 private func actionsBoundaryConnection() throws -> GitHubConnection {
     GitHubConnection(
         displayName: "GitHub.com",
