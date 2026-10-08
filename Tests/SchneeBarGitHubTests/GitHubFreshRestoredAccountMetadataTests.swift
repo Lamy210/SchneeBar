@@ -72,7 +72,7 @@ func restoreUsesFreshInventoryAccountMetadataWhenStableIDMatches() async throws 
     let transport = RestoredAccountTransport([
         RestoredAccountStubResponse(restoredAccountUserJSON(id: 42, login: "old-login")),
         RestoredAccountStubResponse(restoredAccountUserJSON(id: 42, login: "renamed-login")),
-        RestoredAccountStubResponse(#"{\"total_count\":0,\"installations\":[]}"#),
+        RestoredAccountStubResponse(#"{"total_count":0,"installations":[]}"#),
     ])
     let store = RestoredAccountCredentialStore()
     let key = GitHubCredentialKey(
