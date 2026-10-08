@@ -149,6 +149,7 @@ public struct GitHubWorkflowJobQuery: Equatable, Sendable {
 public struct GitHubActionsJobsClient: Sendable {
     private static let maximumPages = 10
     private static let maximumResults = 500
+    private static let maximumSuccessfulResponseBytes = 8 * 1024 * 1024
 
     private let transport: any GitHubHTTPTransport
 
@@ -252,6 +253,9 @@ public struct GitHubActionsJobsClient: Sendable {
         let (data, response) = try await transport.data(for: request)
         guard (200 ... 299).contains(response.statusCode) else {
             throw GitHubActionsClientError.httpStatus(response.statusCode)
+        }
+        guard data.count <= Self.maximumSuccessfulResponseBytes else {
+            throw GitHubActionsClientError.invalidResponse
         }
 
         do {
