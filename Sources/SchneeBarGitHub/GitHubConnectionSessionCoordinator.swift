@@ -353,6 +353,7 @@ public actor GitHubConnectionSessionCoordinator {
             inventory,
             expectedID: account.identity.id
         )
+        let validatedAccount = inventory.account
 
         let capabilities = capabilityEvaluator.evaluate(
             connection: connection,
@@ -360,7 +361,7 @@ public actor GitHubConnectionSessionCoordinator {
         )
         return GitHubConnectionSession(
             connectionID: connection.id,
-            account: account,
+            account: validatedAccount,
             credentialKey: key,
             inventory: inventory,
             capabilities: capabilities
