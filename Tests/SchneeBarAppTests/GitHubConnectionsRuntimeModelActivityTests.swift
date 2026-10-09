@@ -126,6 +126,33 @@ func refreshUsesInjectedClockForLastConnectedAt() async throws {
 }
 
 @Test @MainActor
+func refreshPersistsRenamedAccountMetadataForStableAccountID() async throws {
+    let fixture = try activityRuntimeFixture(
+        installationPermissions: [:],
+        workflowRuns: [],
+        reviewRequests: [],
+        sessionLogin: "renamed-user"
+    )
+
+    await fixture.model.refresh(profileID: fixture.profile.id)
+
+    let updated = try #require(
+        fixture.model.profiles.first(where: { $0.id == fixture.profile.id })
+    )
+    #expect(updated.account.id == fixture.profile.account.id)
+    #expect(updated.account.login == "renamed-user")
+    #expect(updated.repositorySelection == fixture.profile.repositorySelection)
+    #expect(updated.createdAt == fixture.profile.createdAt)
+
+    let stored = try #require(
+        await fixture.profileStore.load(id: fixture.profile.id)
+    )
+    #expect(stored.account == updated.account)
+    #expect(stored.repositorySelection == fixture.profile.repositorySelection)
+    #expect(stored.createdAt == fixture.profile.createdAt)
+}
+
+@Test @MainActor
 func capabilityOnlyActivityBlocksDoNotDowngradeHealthyConnection() async throws {
     let fixture = try activityRuntimeFixture(
         installationPermissions: [:],
@@ -246,19 +273,24 @@ func activityRuntimeBoundsLargeRetainedActivitySnapshotWithoutDowngradingSource(
 private struct ActivityRuntimeFixture {
     let model: GitHubConnectionsRuntimeModel
     let profile: GitHubConnectionProfile
+    let profileStore: ActivityRuntimeProfileStore
 }
 
 @MainActor
 private func activityRuntimeFixture(
     installationPermissions: [String: String],
     workflowRuns: [GitHubWorkflowRun],
-    reviewRequests: [GitHubReviewRequest]
+    reviewRequests: [GitHubReviewRequest],
+    sessionLogin: String = "snow-user"
 ) throws -> ActivityRuntimeFixture {
     let profile = try activityRuntimeProfile()
     let profileStore = ActivityRuntimeProfileStore([profile])
     let credentialStore = ActivityRuntimeCredentialStore(profile: profile)
     let transport = ActivityRuntimeTransport(
-        activityRuntimeSessionResponses(installationPermissions: installationPermissions)
+        activityRuntimeSessionResponses(
+            installationPermissions: installationPermissions,
+            login: sessionLogin
+        )
     )
     let coordinator = GitHubConnectionSessionCoordinator(
         credentialStore: credentialStore,
@@ -277,7 +309,11 @@ private func activityRuntimeFixture(
         now: { activityRuntimeNow }
     )
     model.profiles = [profile]
-    return ActivityRuntimeFixture(model: model, profile: profile)
+    return ActivityRuntimeFixture(
+        model: model,
+        profile: profile,
+        profileStore: profileStore
+    )
 }
 
 private func activityRuntimeProfile() throws -> GitHubConnectionProfile {
@@ -297,13 +333,16 @@ private func activityRuntimeProfile() throws -> GitHubConnectionProfile {
 }
 
 private func activityRuntimeSessionResponses(
-    installationPermissions: [String: String]
+    installationPermissions: [String: String],
+    login: String = "snow-user"
 ) -> [ActivityRuntimeHTTPResponse] {
     let permissions = installationPermissions
         .sorted { $0.key < $1.key }
         .map { key, value in "\"\(key)\":\"\(value)\"" }
         .joined(separator: ",")
-    let user = #"{"id":42,"login":"snow-user","name":"Snow User","avatar_url":null}"#
+    let user = """
+    {"id":42,"login":"\(login)","name":"Snow User","avatar_url":null}
+    """
     let installation = """
     {"total_count":1,"installations":[{"id":10,"account":{"id":100,"login":"snow","type":"Organization","avatar_url":null},"repository_selection":"all","permissions":{\(permissions)},"suspended_at":null}]}
     """
