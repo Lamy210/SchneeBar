@@ -219,6 +219,7 @@ public actor GitHubConnectionSessionCoordinator {
             session.inventory,
             expectedID: session.account.identity.id
         )
+        let validatedAccount = session.inventory.account
 
         let sourceKey = credentialKey(
             connection: sourceConnection,
@@ -248,7 +249,7 @@ public actor GitHubConnectionSessionCoordinator {
         guard targetKey != sourceKey else {
             return GitHubConnectionSession(
                 connectionID: targetConnection.id,
-                account: session.account,
+                account: validatedAccount,
                 credentialKey: targetKey,
                 inventory: session.inventory,
                 capabilities: capabilities
@@ -296,7 +297,7 @@ public actor GitHubConnectionSessionCoordinator {
 
         return GitHubConnectionSession(
             connectionID: targetConnection.id,
-            account: session.account,
+            account: validatedAccount,
             credentialKey: targetKey,
             inventory: session.inventory,
             capabilities: capabilities
