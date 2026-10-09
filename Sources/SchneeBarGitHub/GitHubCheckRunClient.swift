@@ -91,6 +91,8 @@ public enum GitHubCheckRunClientError: Error, Equatable, Sendable {
 }
 
 public struct GitHubCheckRunClient: Sendable {
+    private static let maximumSuccessfulResponseBytes = 8 * 1024 * 1024
+
     private let transport: any GitHubHTTPTransport
 
     public init(transport: any GitHubHTTPTransport = URLSessionGitHubHTTPTransport()) {
@@ -142,6 +144,9 @@ public struct GitHubCheckRunClient: Sendable {
         let (data, response) = try await transport.data(for: request)
         guard (200 ... 299).contains(response.statusCode) else {
             throw GitHubCheckRunClientError.httpStatus(response.statusCode)
+        }
+        guard data.count <= Self.maximumSuccessfulResponseBytes else {
+            throw GitHubCheckRunClientError.invalidResponse
         }
 
         let payload: CheckRunsPayload
