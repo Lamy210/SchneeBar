@@ -17,6 +17,7 @@ public enum GitHubCommitPullRequestClientError: Error, Equatable, Sendable {
 public struct GitHubCommitPullRequestClient: Sendable {
     private static let pageSize = 100
     private static let maximumPages = 10
+    private static let maximumSuccessfulResponseBytes = 8 * 1024 * 1024
 
     private let transport: any GitHubHTTPTransport
 
@@ -158,6 +159,9 @@ public struct GitHubCommitPullRequestClient: Sendable {
         let (data, response) = try await transport.data(for: request)
         guard (200 ... 299).contains(response.statusCode) else {
             throw GitHubCommitPullRequestClientError.httpStatus(response.statusCode)
+        }
+        guard data.count <= Self.maximumSuccessfulResponseBytes else {
+            throw GitHubCommitPullRequestClientError.invalidResponse
         }
 
         do {
