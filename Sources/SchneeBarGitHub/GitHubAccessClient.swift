@@ -173,6 +173,7 @@ public enum GitHubAccessClientError: Error, Equatable, Sendable {
 
 public struct GitHubAccessClient: Sendable {
     private static let maximumPages = 1_000
+    private static let maximumSuccessfulResponseBytes = 8 * 1024 * 1024
 
     private let transport: any GitHubHTTPTransport
 
@@ -439,6 +440,9 @@ public struct GitHubAccessClient: Sendable {
                 throw GitHubAccessClientError.httpFailure(evidence)
             }
             throw GitHubAccessClientError.httpStatus(response.statusCode)
+        }
+        guard data.count <= Self.maximumSuccessfulResponseBytes else {
+            throw GitHubAccessClientError.invalidResponse
         }
 
         do {
