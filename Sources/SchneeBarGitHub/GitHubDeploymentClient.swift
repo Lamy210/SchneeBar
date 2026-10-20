@@ -95,6 +95,7 @@ public enum GitHubDeploymentClientError: Error, Equatable, Sendable {
 
 public struct GitHubDeploymentClient: Sendable {
     private static let maximumDeploymentLimit = 20
+    private static let maximumSuccessfulResponseBytes = 8 * 1024 * 1024
 
     private let transport: any GitHubHTTPTransport
 
@@ -269,6 +270,9 @@ public struct GitHubDeploymentClient: Sendable {
         let (data, response) = try await transport.data(for: request)
         guard (200 ... 299).contains(response.statusCode) else {
             throw GitHubDeploymentClientError.httpStatus(response.statusCode)
+        }
+        guard data.count <= Self.maximumSuccessfulResponseBytes else {
+            throw GitHubDeploymentClientError.invalidResponse
         }
 
         do {
