@@ -70,6 +70,8 @@ public enum GitHubPullRequestMetadataClientError: Error, Equatable, Sendable {
 /// The payload's `html_url` is intentionally ignored. The browser destination
 /// is rebuilt from the trusted connection endpoint and repository identity.
 public struct GitHubPullRequestMetadataClient: Sendable {
+    private static let maximumSuccessfulResponseBytes = 8 * 1024 * 1024
+
     private let transport: any GitHubHTTPTransport
 
     public init(transport: any GitHubHTTPTransport = URLSessionGitHubHTTPTransport()) {
@@ -117,6 +119,9 @@ public struct GitHubPullRequestMetadataClient: Sendable {
         let (data, response) = try await transport.data(for: request)
         guard (200 ... 299).contains(response.statusCode) else {
             throw GitHubPullRequestMetadataClientError.httpStatus(response.statusCode)
+        }
+        guard data.count <= Self.maximumSuccessfulResponseBytes else {
+            throw GitHubPullRequestMetadataClientError.invalidResponse
         }
 
         let payload: PullRequestPayload
