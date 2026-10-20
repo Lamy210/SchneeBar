@@ -73,6 +73,7 @@ Implemented foundation:
 - Actions / Reviews / Checks / Deployments availability surfaced independently in repository management
 - same-endpoint/same-account reconnect reconciliation that preserves connection identity, repository selection, monitoring state, and original creation time
 - same-endpoint/different-account coexistence with connection-scoped credential isolation
+- mutable profile persistence (enable/disable and repository selection) is operation-generation/profile-snapshot scoped and repairs stale writes so delayed saves cannot overwrite newer profile state or resurrect a disconnected connection
 - deterministic connection ordering for stable multi-account UI and polling behavior
 - dedicated existing-connection Device Flow reauthentication
 - local-first Device Flow security decision with shared onboarding/recovery anti-phishing guidance and no embedded client secret
