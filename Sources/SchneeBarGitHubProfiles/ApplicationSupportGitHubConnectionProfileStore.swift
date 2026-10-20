@@ -6,6 +6,12 @@ public enum GitHubConnectionProfileStoreError: Error, Equatable, Sendable {
     case unsupportedSchemaVersion(Int)
     case invalidBackingFile
     case payloadTooLarge
+    case duplicateConnectionID(UUID)
+    case connectionIdentityChanged(UUID)
+    case duplicateConnectionIdentity(
+        existingID: UUID,
+        incomingID: UUID
+    )
 }
 
 public actor ApplicationSupportGitHubConnectionProfileStore: GitHubConnectionProfileStore {
@@ -35,7 +41,40 @@ public actor ApplicationSupportGitHubConnectionProfileStore: GitHubConnectionPro
 
     public func save(_ profile: GitHubConnectionProfile) async throws {
         var profiles = try readProfiles()
-        if let index = profiles.firstIndex(where: { $0.id == profile.id }) {
+        let matchingConnectionIDs = profiles.indices.filter {
+            profiles[$0].id == profile.id
+        }
+        guard matchingConnectionIDs.count <= 1 else {
+            throw GitHubConnectionProfileStoreError
+                .duplicateConnectionID(profile.id)
+        }
+
+        if let existingID =
+            GitHubConnectionProfileIdentityPolicy.conflictingProfileID(
+                for: profile,
+                in: profiles
+            )
+        {
+            throw GitHubConnectionProfileStoreError
+                .duplicateConnectionIdentity(
+                    existingID: existingID,
+                    incomingID: profile.id
+                )
+        }
+
+        if let index = matchingConnectionIDs.first {
+            let existingIdentity =
+                GitHubConnectionProfileIdentityPolicy.identity(
+                    for: profiles[index]
+                )
+            let incomingIdentity =
+                GitHubConnectionProfileIdentityPolicy.identity(
+                    for: profile
+                )
+            guard existingIdentity == incomingIdentity else {
+                throw GitHubConnectionProfileStoreError
+                    .connectionIdentityChanged(profile.id)
+            }
             profiles[index] = profile
         } else {
             profiles.append(profile)
