@@ -49,6 +49,43 @@ public enum GitHubClientIDPolicy {
     }
 }
 
+public enum GitHubDeviceFlowTimingPolicy {
+    // App-owned defensive budgets, not GitHub protocol maxima.
+    public static let maximumAuthorizationLifetime: TimeInterval = 86_400
+    public static let maximumPollInterval: TimeInterval = 3_600
+
+    public static func isValidAuthorizationLifetime(
+        _ lifetime: TimeInterval
+    ) -> Bool {
+        lifetime.isFinite
+            && lifetime >= 1
+            && lifetime <= maximumAuthorizationLifetime
+    }
+
+    public static func isValidPollInterval(
+        _ interval: TimeInterval
+    ) -> Bool {
+        interval.isFinite
+            && interval >= 1
+            && interval <= maximumPollInterval
+    }
+
+    public static func isValidSessionTiming(
+        _ session: GitHubDeviceAuthorizationSession,
+        now: Date
+    ) -> Bool {
+        guard session.expiresAt.timeIntervalSinceReferenceDate.isFinite,
+              isValidPollInterval(session.pollInterval)
+        else {
+            return false
+        }
+
+        let remaining = session.expiresAt.timeIntervalSince(now)
+        return remaining.isFinite
+            && remaining <= maximumAuthorizationLifetime
+    }
+}
+
 public enum GitHubDeviceFlowCodePolicy {
     public static let maximumDeviceCodeCharacters = 4_096
     public static let maximumDeviceCodeUTF8Bytes = 16_384
@@ -130,15 +167,21 @@ public struct GitHubDeviceFlowClient: Sendable {
             rawVerificationURI,
             authenticationBaseURL: endpoints.authenticationBaseURL
         )
-        let expiresIn = max(1, response.expiresIn ?? 900)
-        let interval = max(1, response.interval ?? 5)
+        let expiresIn = TimeInterval(response.expiresIn ?? 900)
+        let interval = TimeInterval(response.interval ?? 5)
+        guard GitHubDeviceFlowTimingPolicy
+            .isValidAuthorizationLifetime(expiresIn),
+            GitHubDeviceFlowTimingPolicy.isValidPollInterval(interval)
+        else {
+            throw GitHubDeviceFlowError.invalidResponse
+        }
 
         return GitHubDeviceAuthorizationSession(
             deviceCode: deviceCode,
             userCode: userCode,
             verificationURI: verificationURI,
-            expiresAt: now().addingTimeInterval(TimeInterval(expiresIn)),
-            pollInterval: TimeInterval(interval)
+            expiresAt: now().addingTimeInterval(expiresIn),
+            pollInterval: interval
         )
     }
 
@@ -149,7 +192,14 @@ public struct GitHubDeviceFlowClient: Sendable {
         repositoryID: String? = nil
     ) async throws -> GitHubDeviceFlowPollResult {
         let clientID = try validatedClientID(clientID)
-        guard now() < session.expiresAt else {
+        let referenceDate = now()
+        guard GitHubDeviceFlowTimingPolicy.isValidSessionTiming(
+            session,
+            now: referenceDate
+        ) else {
+            throw GitHubDeviceFlowError.invalidResponse
+        }
+        guard referenceDate < session.expiresAt else {
             return .expired
         }
         guard GitHubDeviceFlowCodePolicy.isValidDeviceCode(
@@ -231,9 +281,14 @@ public struct GitHubDeviceFlowClient: Sendable {
         case "authorization_pending":
             return .pending(retryAfter: session.pollInterval)
         case "slow_down":
-            let interval = payload.interval.map { TimeInterval($0) }
+            let interval = payload.interval.map(TimeInterval.init)
                 ?? (session.pollInterval + 5)
-            return .slowDown(retryAfter: max(1, interval))
+            guard GitHubDeviceFlowTimingPolicy
+                .isValidPollInterval(interval)
+            else {
+                throw GitHubDeviceFlowError.invalidResponse
+            }
+            return .slowDown(retryAfter: interval)
         case "expired_token", "token_expired":
             return .expired
         case "access_denied":
