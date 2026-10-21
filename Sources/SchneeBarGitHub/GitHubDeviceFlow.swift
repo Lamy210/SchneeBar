@@ -359,6 +359,16 @@ public struct GitHubDeviceFlowClient: Sendable {
     private func issuedCredential(
         from payload: TokenPayload
     ) throws -> GitHubCredential {
+        guard let tokenType = payload.tokenType,
+              tokenType == tokenType.trimmingCharacters(
+                  in: .whitespacesAndNewlines
+              ),
+              tokenType.caseInsensitiveCompare("bearer")
+                == .orderedSame
+        else {
+            throw GitHubDeviceFlowError.invalidResponse
+        }
+
         let credential = try credential(from: payload)
 
         switch (
