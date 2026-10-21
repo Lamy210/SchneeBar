@@ -74,6 +74,55 @@ func loadsAuthenticatedAccountWithHostedAPIHeaders() async throws {
 }
 
 @Test
+func authenticatedAccountRejectsUnsafeLoginPresentationContent() async throws {
+    let unsafeLogins = [
+        "octo\\ncat",
+        " octocat",
+        String(
+            repeating: "a",
+            count:
+                GitHubAccountIdentityPolicy.maximumLoginCharacters + 1
+        ),
+    ]
+
+    for escapedLogin in unsafeLogins {
+        let loginJSON: String
+        if escapedLogin == "octo\\ncat" {
+            loginJSON = #"octo\ncat"#
+        } else {
+            loginJSON = escapedLogin
+        }
+
+        let transport = AccessQueueTransport([
+            AccessStubResponse(
+                "{\"id\":42,\"login\":\"\(loginJSON)\",\"name\":null,\"avatar_url\":null}"
+            )
+        ])
+        let client = GitHubAccessClient(transport: transport)
+
+        await #expect(
+            throws: GitHubAccessClientError.invalidResponse
+        ) {
+            try await client.authenticatedAccount(
+                connection: try githubDotComAccessConnection(),
+                credential: GitHubCredential(
+                    accessToken: "ghu_access"
+                )
+            )
+        }
+    }
+}
+
+@Test
+func accountLoginPolicyDoesNotAssumeGitHubUsernameSyntax() {
+    #expect(
+        GitHubAccountIdentityPolicy.isValidLogin(
+            "managed_user.enterprise-01"
+        )
+    )
+}
+
+@Test
 func paginatesAccessibleInstallationsAndPreservesPermissions() async throws {
     let transport = AccessQueueTransport([
         AccessStubResponse(
