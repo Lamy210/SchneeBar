@@ -239,6 +239,42 @@ func savingResolverInvalidEndpointIsRejectedWithoutWritingFile() async throws {
 }
 
 @Test
+func savingUnsafeClientIDIsRejectedWithoutWritingFile() async throws {
+    let context = try temporaryProfileStore()
+    defer { try? FileManager.default.removeItem(at: context.directory) }
+
+    var profile = try makeProfile()
+    profile.clientID = "Iv1.\u{202E}client"
+
+    await #expect(
+        throws:
+            GitHubConnectionProfileStoreError
+                .invalidClientID(profile.id)
+    ) {
+        try await context.store.save(profile)
+    }
+
+    #expect(
+        !FileManager.default.fileExists(
+            atPath: context.fileURL.path
+        )
+    )
+}
+
+@Test
+func savingProfileWithoutClientIDRemainsSupported() async throws {
+    let context = try temporaryProfileStore()
+    defer { try? FileManager.default.removeItem(at: context.directory) }
+
+    var profile = try makeProfile()
+    profile.clientID = nil
+
+    try await context.store.save(profile)
+
+    #expect(try await context.store.loadAll() == [profile])
+}
+
+@Test
 func savingUnsafeConnectionDisplayNameIsRejectedWithoutWritingFile() async throws {
     let context = try temporaryProfileStore()
     defer { try? FileManager.default.removeItem(at: context.directory) }
@@ -459,9 +495,13 @@ func profileStoreDoesNotWritePayloadItCannotReadBack() async throws {
     defer { try? FileManager.default.removeItem(at: context.directory) }
 
     var profile = try makeProfile()
-    profile.clientID = String(
-        repeating: "a",
-        count: 8 * 1024 * 1024 + 1
+    let firstRepositoryID: Int64 = 1_000_000_000_000_000_000
+    profile.repositorySelection = .selected(
+        Set(
+            (0 ..< 440_000).map {
+                firstRepositoryID + Int64($0)
+            }
+        )
     )
 
     await #expect(
