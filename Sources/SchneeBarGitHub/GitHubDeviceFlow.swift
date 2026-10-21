@@ -49,6 +49,40 @@ public enum GitHubClientIDPolicy {
     }
 }
 
+public enum GitHubDeviceFlowResponsePolicy {
+    // Device Flow/OAuth responses are expected to be small. These are generous
+    // app-owned defensive budgets, not GitHub protocol maxima.
+    public static let maximumResponseBytes = 256 * 1024
+    public static let maximumOpaqueTokenCharacters = 16_384
+    public static let maximumOpaqueTokenUTF8Bytes = 65_536
+    public static let maximumOAuthErrorCodeCharacters = 256
+    public static let maximumOAuthErrorCodeUTF8Bytes = 1_024
+    public static let maximumOAuthErrorDescriptionCharacters = 4_096
+    public static let maximumOAuthErrorDescriptionUTF8Bytes = 16_384
+
+    public static func isValidOpaqueToken(_ value: String) -> Bool {
+        !value.isEmpty
+            && value.count <= maximumOpaqueTokenCharacters
+            && value.utf8.count <= maximumOpaqueTokenUTF8Bytes
+    }
+
+    public static func isValidOAuthErrorCode(_ value: String) -> Bool {
+        !value.isEmpty
+            && value.count <= maximumOAuthErrorCodeCharacters
+            && value.utf8.count <= maximumOAuthErrorCodeUTF8Bytes
+            && GitHubPresentationTextPolicy.hasSafeScalars(value)
+    }
+
+    public static func isValidOAuthErrorDescription(
+        _ value: String
+    ) -> Bool {
+        value.count <= maximumOAuthErrorDescriptionCharacters
+            && value.utf8.count
+                <= maximumOAuthErrorDescriptionUTF8Bytes
+            && GitHubPresentationTextPolicy.hasSafeScalars(value)
+    }
+}
+
 public enum GitHubDeviceFlowTimingPolicy {
     // App-owned defensive budgets, not GitHub protocol maxima.
     public static let maximumAuthorizationLifetime: TimeInterval = 86_400
@@ -151,7 +185,14 @@ public struct GitHubDeviceFlowClient: Sendable {
             parameters: ["client_id": clientID]
         )
         if let error = response.error {
-            throw mappedOAuthError(code: error, description: response.errorDescription)
+            let code = try validatedOAuthErrorCode(error)
+            let description = try validatedOAuthErrorDescription(
+                response.errorDescription
+            )
+            throw mappedOAuthError(
+                code: code,
+                description: description
+            )
         }
 
         guard let deviceCode = response.deviceCode,
@@ -260,7 +301,14 @@ public struct GitHubDeviceFlowClient: Sendable {
         )
 
         if let error = payload.error {
-            throw mappedOAuthError(code: error, description: payload.errorDescription)
+            let code = try validatedOAuthErrorCode(error)
+            let description = try validatedOAuthErrorDescription(
+                payload.errorDescription
+            )
+            throw mappedOAuthError(
+                code: code,
+                description: description
+            )
         }
         return try credential(from: payload)
     }
@@ -273,9 +321,13 @@ public struct GitHubDeviceFlowClient: Sendable {
             return .authorized(try credential(from: payload))
         }
 
-        guard let error = payload.error else {
+        guard let rawError = payload.error else {
             throw GitHubDeviceFlowError.invalidResponse
         }
+        let error = try validatedOAuthErrorCode(rawError)
+        _ = try validatedOAuthErrorDescription(
+            payload.errorDescription
+        )
 
         switch error {
         case "authorization_pending":
@@ -300,8 +352,15 @@ public struct GitHubDeviceFlowClient: Sendable {
 
     private func credential(from payload: TokenPayload) throws -> GitHubCredential {
         guard let accessToken = payload.accessToken,
-              !accessToken.isEmpty
+              GitHubDeviceFlowResponsePolicy
+                .isValidOpaqueToken(accessToken)
         else {
+            throw GitHubDeviceFlowError.invalidResponse
+        }
+        if let refreshToken = payload.refreshToken,
+           !GitHubDeviceFlowResponsePolicy
+            .isValidOpaqueToken(refreshToken)
+        {
             throw GitHubDeviceFlowError.invalidResponse
         }
 
@@ -316,6 +375,31 @@ public struct GitHubDeviceFlowClient: Sendable {
                 referenceDate.addingTimeInterval(TimeInterval($0))
             }
         )
+    }
+
+    private func validatedOAuthErrorCode(
+        _ code: String
+    ) throws -> String {
+        guard GitHubDeviceFlowResponsePolicy
+            .isValidOAuthErrorCode(code)
+        else {
+            throw GitHubDeviceFlowError.invalidResponse
+        }
+        return code
+    }
+
+    private func validatedOAuthErrorDescription(
+        _ description: String?
+    ) throws -> String? {
+        guard let description else {
+            return nil
+        }
+        guard GitHubDeviceFlowResponsePolicy
+            .isValidOAuthErrorDescription(description)
+        else {
+            throw GitHubDeviceFlowError.invalidResponse
+        }
+        return description
     }
 
     private func mappedOAuthError(
@@ -385,6 +469,11 @@ public struct GitHubDeviceFlowClient: Sendable {
         let (data, response) = try await transport.data(for: request)
         guard (200 ... 299).contains(response.statusCode) else {
             throw GitHubDeviceFlowError.httpStatus(response.statusCode)
+        }
+        guard data.count
+            <= GitHubDeviceFlowResponsePolicy.maximumResponseBytes
+        else {
+            throw GitHubDeviceFlowError.invalidResponse
         }
 
         do {
