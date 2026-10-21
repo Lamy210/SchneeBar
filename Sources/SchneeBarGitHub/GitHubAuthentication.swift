@@ -15,6 +15,20 @@ public struct GitHubAccountIdentity: Codable, Equatable, Sendable {
     }
 }
 
+public enum GitHubPresentationTextPolicy {
+    public static func hasSafeScalars(_ value: String) -> Bool {
+        !value.unicodeScalars.contains(where: {
+            switch $0.properties.generalCategory {
+            case .control, .format, .lineSeparator,
+                 .paragraphSeparator:
+                true
+            default:
+                false
+            }
+        })
+    }
+}
+
 public enum GitHubAccountIdentityPolicy {
     // Defensive presentation budget only; this is intentionally not a
     // GitHub username syntax rule so GHES/managed-account naming can evolve.
@@ -28,15 +42,7 @@ public enum GitHubAccountIdentityPolicy {
               ),
               login.count <= maximumLoginCharacters,
               login.utf8.count <= maximumLoginUTF8Bytes,
-              !login.unicodeScalars.contains(where: {
-                  switch $0.properties.generalCategory {
-                  case .control, .format, .lineSeparator,
-                       .paragraphSeparator:
-                      true
-                  default:
-                      false
-                  }
-              })
+              GitHubPresentationTextPolicy.hasSafeScalars(login)
         else {
             return false
         }
