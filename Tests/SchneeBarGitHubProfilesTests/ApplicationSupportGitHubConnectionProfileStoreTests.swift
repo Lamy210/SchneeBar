@@ -239,6 +239,29 @@ func savingResolverInvalidEndpointIsRejectedWithoutWritingFile() async throws {
 }
 
 @Test
+func savingUnsafeConnectionDisplayNameIsRejectedWithoutWritingFile() async throws {
+    let context = try temporaryProfileStore()
+    defer { try? FileManager.default.removeItem(at: context.directory) }
+
+    var profile = try makeProfile()
+    profile.connection.displayName = "Personal\u{202E}GitHub"
+
+    await #expect(
+        throws:
+            GitHubConnectionProfileStoreError
+                .invalidConnectionIdentity(profile.id)
+    ) {
+        try await context.store.save(profile)
+    }
+
+    #expect(
+        !FileManager.default.fileExists(
+            atPath: context.fileURL.path
+        )
+    )
+}
+
+@Test
 func savingInvisibleFormatAccountLoginIsRejectedWithoutWritingFile() async throws {
     let context = try temporaryProfileStore()
     defer { try? FileManager.default.removeItem(at: context.directory) }
