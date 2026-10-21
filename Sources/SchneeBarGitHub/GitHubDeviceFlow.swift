@@ -49,6 +49,29 @@ public enum GitHubClientIDPolicy {
     }
 }
 
+public enum GitHubDeviceFlowCodePolicy {
+    public static let maximumDeviceCodeCharacters = 4_096
+    public static let maximumDeviceCodeUTF8Bytes = 16_384
+    public static let maximumUserCodeCharacters = 128
+    public static let maximumUserCodeUTF8Bytes = 512
+
+    public static func isValidDeviceCode(_ deviceCode: String) -> Bool {
+        !deviceCode.isEmpty
+            && deviceCode.count <= maximumDeviceCodeCharacters
+            && deviceCode.utf8.count <= maximumDeviceCodeUTF8Bytes
+    }
+
+    public static func isValidUserCode(_ userCode: String) -> Bool {
+        !userCode.isEmpty
+            && userCode == userCode.trimmingCharacters(
+                in: .whitespacesAndNewlines
+            )
+            && userCode.count <= maximumUserCodeCharacters
+            && userCode.utf8.count <= maximumUserCodeUTF8Bytes
+            && GitHubPresentationTextPolicy.hasSafeScalars(userCode)
+    }
+}
+
 public enum GitHubDeviceFlowError: Error, Equatable, Sendable {
     case invalidClientID
     case missingRefreshToken
@@ -97,8 +120,8 @@ public struct GitHubDeviceFlowClient: Sendable {
         guard let deviceCode = response.deviceCode,
               let userCode = response.userCode,
               let rawVerificationURI = response.verificationURI,
-              !deviceCode.isEmpty,
-              !userCode.isEmpty
+              GitHubDeviceFlowCodePolicy.isValidDeviceCode(deviceCode),
+              GitHubDeviceFlowCodePolicy.isValidUserCode(userCode)
         else {
             throw GitHubDeviceFlowError.invalidResponse
         }
@@ -128,6 +151,11 @@ public struct GitHubDeviceFlowClient: Sendable {
         let clientID = try validatedClientID(clientID)
         guard now() < session.expiresAt else {
             return .expired
+        }
+        guard GitHubDeviceFlowCodePolicy.isValidDeviceCode(
+            session.deviceCode
+        ) else {
+            throw GitHubDeviceFlowError.invalidResponse
         }
 
         let endpoints = try GitHubEndpointResolver.resolve(
