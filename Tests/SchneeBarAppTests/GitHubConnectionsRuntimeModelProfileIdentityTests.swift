@@ -234,6 +234,40 @@ func loadQuarantinesSingleNonCanonicalAccountIdentityWithoutRefreshing() async t
 }
 
 @Test @MainActor
+func loadQuarantinesUnsafePersistedAccountLoginWithoutRefreshing() async throws {
+    var profile = try profileCollisionProfile(
+        id: UUID(
+            uuidString: "77000000-0000-0000-0000-000000000032"
+        )!,
+        webURL: "https://github.com",
+        login: "octocat"
+    )
+    profile.account = GitHubAccountIdentity(
+        id: profile.account.id,
+        login: "octocat\nspoofed"
+    )
+    let profileStore = ProfileCollisionStore([profile])
+    let credentialStore = ProfileCollisionCredentialStore()
+    let transport = ProfileCollisionTransport()
+    let model = GitHubConnectionsRuntimeModel(
+        profileStore: profileStore,
+        sessionCoordinator: GitHubConnectionSessionCoordinator(
+            credentialStore: credentialStore,
+            accessClient: GitHubAccessClient(transport: transport)
+        ),
+        activityProvider: GitHubActivityProvider(
+            workflowRunLoader: ProfileCollisionWorkflowLoader()
+        )
+    )
+
+    await model.load()
+
+    #expect(model.profiles.map(\.id) == [profile.id])
+    #expect(model.statusByConnectionID[profile.id] == .unavailable)
+    #expect(await transport.requestCount() == 0)
+}
+
+@Test @MainActor
 func quarantinedProfileBlocksManualNetworkAndMutableActions() async throws {
     let first = try profileCollisionProfile(
         id: UUID(
