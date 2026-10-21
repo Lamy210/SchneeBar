@@ -74,6 +74,7 @@ Implemented foundation:
 - same-endpoint/same-account reconnect reconciliation that preserves connection identity, repository selection, monitoring state, and original creation time
 - same-endpoint/different-account coexistence with connection-scoped credential isolation
 - canonical endpoint + stable-account profile identity collisions are rejected on new persistence and existing ambiguous profiles are quarantined from refresh/activity without destructive auto-merge
+- profile identity quarantine is enforced across refresh/recovery/toggle/selection entrypoints and automatically releases the remaining profile after an explicit duplicate disconnect, with enabled profiles resynchronized from fresh session state
 - mutable profile persistence (enable/disable and repository selection) is operation-generation/profile-snapshot scoped and repairs stale writes so delayed saves cannot overwrite newer profile state or resurrect a disconnected connection
 - onboarding profile persistence has a post-save cancellation boundary with profile rollback and temporary-credential cleanup, so cancellation during an async profile save cannot commit a connection the user cancelled
 - deterministic connection ordering for stable multi-account UI and polling behavior
