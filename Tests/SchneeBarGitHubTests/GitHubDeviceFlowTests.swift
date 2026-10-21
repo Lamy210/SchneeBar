@@ -92,6 +92,35 @@ func beginsDeviceFlowAgainstCustomPortGHES() async throws {
 }
 
 @Test
+func invalidClientIDStopsBeforeDeviceFlowRequest() async throws {
+    let invalidClientIDs = [
+        " Iv1.client",
+        "Iv1.client ",
+        "Iv1.\u{202E}client",
+        String(
+            repeating: "a",
+            count: GitHubClientIDPolicy.maximumCharacters + 1
+        ),
+    ]
+
+    for clientID in invalidClientIDs {
+        let transport = QueueGitHubTransport([])
+        let client = GitHubDeviceFlowClient(
+            transport: transport,
+            now: { fixedNow }
+        )
+
+        await #expect(throws: GitHubDeviceFlowError.invalidClientID) {
+            try await client.begin(
+                connection: try githubDotComConnection(),
+                clientID: clientID
+            )
+        }
+        #expect(await transport.recordedRequests().isEmpty)
+    }
+}
+
+@Test
 func mapsDeviceFlowDisabledErrorDuringBegin() async throws {
     let transport = QueueGitHubTransport([
         DeviceFlowStubResponse(#"{"error":"device_flow_disabled","error_description":"Enable Device Flow"}"#)
