@@ -7,6 +7,7 @@ public enum GitHubConnectionProfileStoreError: Error, Equatable, Sendable {
     case invalidBackingFile
     case payloadTooLarge
     case invalidConnectionIdentity(UUID)
+    case invalidClientID(UUID)
     case duplicateConnectionID(UUID)
     case connectionIdentityChanged(UUID)
     case duplicateConnectionIdentity(
@@ -41,6 +42,13 @@ public actor ApplicationSupportGitHubConnectionProfileStore: GitHubConnectionPro
     }
 
     public func save(_ profile: GitHubConnectionProfile) async throws {
+        if let clientID = profile.clientID,
+           !GitHubClientIDPolicy.isValid(clientID)
+        {
+            throw GitHubConnectionProfileStoreError
+                .invalidClientID(profile.id)
+        }
+
         guard GitHubConnectionProfileIdentityPolicy
             .hasCanonicalIdentity(profile)
         else {
