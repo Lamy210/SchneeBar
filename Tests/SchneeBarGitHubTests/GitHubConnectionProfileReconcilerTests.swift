@@ -159,6 +159,54 @@ func profileReconcilerRefreshesEnterpriseMetadataCheckTimeOnReconnect() throws {
 }
 
 @Test
+func profileIdentityPolicyDetectsCanonicalSameAccountCollisions() throws {
+    let first = makeLifecycleProfile(
+        id: UUID(
+            uuidString: "00000000-0000-0000-0000-000000000441"
+        )!,
+        accountID: "42",
+        login: "old-login"
+    )
+    let second = GitHubConnectionProfile(
+        connection: GitHubConnection(
+            id: UUID(
+                uuidString:
+                    "00000000-0000-0000-0000-000000000442"
+            )!,
+            displayName: "Renamed GitHub",
+            deploymentKind: .githubDotCom,
+            webBaseURL: try #require(
+                URL(string: "https://GITHUB.COM/")
+            )
+        ),
+        account: GitHubAccountIdentity(
+            id: "42",
+            login: "renamed-login"
+        ),
+        authenticationMethod: .deviceFlow
+    )
+    let otherAccount = makeLifecycleProfile(
+        id: UUID(
+            uuidString: "00000000-0000-0000-0000-000000000443"
+        )!,
+        accountID: "99",
+        login: "other-user"
+    )
+
+    #expect(
+        GitHubConnectionProfileIdentityPolicy.ambiguousProfileIDs(
+            in: [first, second, otherAccount]
+        ) == Set([first.id, second.id])
+    )
+    #expect(
+        GitHubConnectionProfileIdentityPolicy.conflictingProfileID(
+            for: second,
+            in: [first, otherAccount]
+        ) == first.id
+    )
+}
+
+@Test
 func profileOrderingIsDeterministicAcrossInputOrder() throws {
     let alphaA = makeLifecycleProfile(
         id: UUID(uuidString: "00000000-0000-0000-0000-000000000001")!,

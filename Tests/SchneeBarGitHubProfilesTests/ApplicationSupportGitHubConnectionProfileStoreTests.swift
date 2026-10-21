@@ -68,6 +68,116 @@ func savingSameConnectionReplacesProfileInsteadOfDuplicatingIt() async throws {
 }
 
 @Test
+func savingSameConnectionIDAllowsFreshMetadataForStableIdentity() async throws {
+    let context = try temporaryProfileStore()
+    defer { try? FileManager.default.removeItem(at: context.directory) }
+
+    let existing = try makeProfile()
+    try await context.store.save(existing)
+
+    let updated = GitHubConnectionProfile(
+        connection: GitHubConnection(
+            id: existing.id,
+            displayName: "Renamed GitHub",
+            deploymentKind: .githubDotCom,
+            webBaseURL: try #require(
+                URL(string: "https://GITHUB.COM/")
+            ),
+            apiVersion: existing.connection.apiVersion
+        ),
+        account: GitHubAccountIdentity(
+            id: existing.account.id,
+            login: "renamed-user"
+        ),
+        authenticationMethod: existing.authenticationMethod,
+        clientID: existing.clientID,
+        repositorySelection: existing.repositorySelection,
+        isEnabled: existing.isEnabled,
+        createdAt: existing.createdAt,
+        lastConnectedAt: existing.lastConnectedAt
+    )
+
+    try await context.store.save(updated)
+
+    #expect(try await context.store.loadAll() == [updated])
+}
+
+@Test
+func savingSameConnectionIDCannotChangeStableProfileIdentity() async throws {
+    let context = try temporaryProfileStore()
+    defer { try? FileManager.default.removeItem(at: context.directory) }
+
+    let existing = try makeProfile()
+    try await context.store.save(existing)
+
+    let changedAccount = GitHubConnectionProfile(
+        connection: existing.connection,
+        account: GitHubAccountIdentity(
+            id: "99",
+            login: "different-user"
+        ),
+        authenticationMethod: existing.authenticationMethod,
+        clientID: existing.clientID,
+        repositorySelection: existing.repositorySelection,
+        isEnabled: existing.isEnabled,
+        createdAt: existing.createdAt,
+        lastConnectedAt: existing.lastConnectedAt
+    )
+
+    await #expect(
+        throws:
+            GitHubConnectionProfileStoreError
+                .connectionIdentityChanged(existing.id)
+    ) {
+        try await context.store.save(changedAccount)
+    }
+
+    #expect(try await context.store.loadAll() == [existing])
+}
+
+@Test
+func savingSameCanonicalEndpointAndAccountWithDifferentIDIsRejected() async throws {
+    let context = try temporaryProfileStore()
+    defer { try? FileManager.default.removeItem(at: context.directory) }
+
+    let existing = try makeProfile()
+    try await context.store.save(existing)
+
+    let incomingID = UUID(
+        uuidString: "10000000-0000-0000-0000-000000000099"
+    )!
+    let incoming = GitHubConnectionProfile(
+        connection: GitHubConnection(
+            id: incomingID,
+            displayName: "Renamed GitHub",
+            deploymentKind: .githubDotCom,
+            webBaseURL: try #require(
+                URL(string: "https://GITHUB.COM/")
+            )
+        ),
+        account: GitHubAccountIdentity(
+            id: existing.account.id,
+            login: "renamed-user"
+        ),
+        authenticationMethod: .deviceFlow,
+        clientID: "Iv1.other-client"
+    )
+
+    await #expect(
+        throws:
+            GitHubConnectionProfileStoreError
+                .duplicateConnectionIdentity(
+                    existingID: existing.id,
+                    incomingID: incomingID
+                )
+    ) {
+        try await context.store.save(incoming)
+    }
+
+    #expect(try await context.store.loadAll() == [existing])
+}
+
+@Test
 func deletingProfileIsIdempotent() async throws {
     let context = try temporaryProfileStore()
     defer { try? FileManager.default.removeItem(at: context.directory) }
