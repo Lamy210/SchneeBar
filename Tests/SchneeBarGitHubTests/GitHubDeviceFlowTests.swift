@@ -121,6 +121,143 @@ func invalidClientIDStopsBeforeDeviceFlowRequest() async throws {
 }
 
 @Test
+func rejectsUnsafeDeviceFlowTimingFromProvider() async throws {
+    let oversizedLifetime =
+        Int(GitHubDeviceFlowTimingPolicy.maximumAuthorizationLifetime) + 1
+    let oversizedInterval =
+        Int(GitHubDeviceFlowTimingPolicy.maximumPollInterval) + 1
+    let oversizedLifetimePayload =
+        "{\"device_code\":\"device\","
+        + "\"user_code\":\"ABCD-EFGH\","
+        + "\"verification_uri\":\"https://github.com/login/device\","
+        + "\"expires_in\":\(oversizedLifetime),\"interval\":5}"
+    let oversizedIntervalPayload =
+        "{\"device_code\":\"device\","
+        + "\"user_code\":\"ABCD-EFGH\","
+        + "\"verification_uri\":\"https://github.com/login/device\","
+        + "\"expires_in\":900,\"interval\":\(oversizedInterval)}"
+    let invalidPayloads: [String] = [
+        #"{"device_code":"device","user_code":"ABCD-EFGH","verification_uri":"https://github.com/login/device","expires_in":0,"interval":5}"#,
+        #"{"device_code":"device","user_code":"ABCD-EFGH","verification_uri":"https://github.com/login/device","expires_in":900,"interval":0}"#,
+        oversizedLifetimePayload,
+        oversizedIntervalPayload,
+    ]
+
+    for payload in invalidPayloads {
+        let transport = QueueGitHubTransport([
+            DeviceFlowStubResponse(payload),
+        ])
+        let client = GitHubDeviceFlowClient(
+            transport: transport,
+            now: { fixedNow }
+        )
+
+        await #expect(throws: GitHubDeviceFlowError.invalidResponse) {
+            try await client.begin(
+                connection: try githubDotComConnection(),
+                clientID: "Iv1.client"
+            )
+        }
+        #expect(await transport.recordedRequests().count == 1)
+    }
+}
+
+@Test
+func invalidSessionTimingStopsBeforeNetworkPoll() async throws {
+    let invalidIntervals: [TimeInterval] = [
+        .nan,
+        .infinity,
+        0,
+        GitHubDeviceFlowTimingPolicy.maximumPollInterval + 1,
+    ]
+
+    for interval in invalidIntervals {
+        let transport = QueueGitHubTransport([])
+        let client = GitHubDeviceFlowClient(
+            transport: transport,
+            now: { fixedNow }
+        )
+        let session = GitHubDeviceAuthorizationSession(
+            deviceCode: "device",
+            userCode: "ABCD-EFGH",
+            verificationURI: try #require(
+                URL(string: "https://github.com/login/device")
+            ),
+            expiresAt: fixedNow.addingTimeInterval(900),
+            pollInterval: interval
+        )
+
+        await #expect(throws: GitHubDeviceFlowError.invalidResponse) {
+            try await client.pollOnce(
+                connection: try githubDotComConnection(),
+                clientID: "Iv1.client",
+                session: session
+            )
+        }
+        #expect(await transport.recordedRequests().isEmpty)
+    }
+
+    let transport = QueueGitHubTransport([])
+    let client = GitHubDeviceFlowClient(
+        transport: transport,
+        now: { fixedNow }
+    )
+    let farFutureSession = GitHubDeviceAuthorizationSession(
+        deviceCode: "device",
+        userCode: "ABCD-EFGH",
+        verificationURI: try #require(
+            URL(string: "https://github.com/login/device")
+        ),
+        expiresAt: fixedNow.addingTimeInterval(
+            GitHubDeviceFlowTimingPolicy
+                .maximumAuthorizationLifetime + 1
+        ),
+        pollInterval: 5
+    )
+
+    await #expect(throws: GitHubDeviceFlowError.invalidResponse) {
+        try await client.pollOnce(
+            connection: try githubDotComConnection(),
+            clientID: "Iv1.client",
+            session: farFutureSession
+        )
+    }
+    #expect(await transport.recordedRequests().isEmpty)
+}
+
+@Test
+func rejectsOversizedServerSlowDownInterval() async throws {
+    let interval = Int(
+        GitHubDeviceFlowTimingPolicy.maximumPollInterval
+    ) + 1
+    let transport = QueueGitHubTransport([
+        DeviceFlowStubResponse(
+            "{\"error\":\"slow_down\",\"interval\":\(interval)}"
+        ),
+    ])
+    let client = GitHubDeviceFlowClient(
+        transport: transport,
+        now: { fixedNow }
+    )
+
+    await #expect(throws: GitHubDeviceFlowError.invalidResponse) {
+        try await client.pollOnce(
+            connection: try githubDotComConnection(),
+            clientID: "Iv1.client",
+            session: GitHubDeviceAuthorizationSession(
+                deviceCode: "device",
+                userCode: "ABCD-EFGH",
+                verificationURI: try #require(
+                    URL(string: "https://github.com/login/device")
+                ),
+                expiresAt: fixedNow.addingTimeInterval(900),
+                pollInterval: 5
+            )
+        )
+    }
+}
+
+@Test
 func rejectsUnsafeDeviceFlowCodesFromProvider() async throws {
     let unsafePayloads = [
         #"{"device_code":"device","user_code":"ABCD\u202eEFGH","verification_uri":"https://github.com/login/device","expires_in":900,"interval":5}"#,
