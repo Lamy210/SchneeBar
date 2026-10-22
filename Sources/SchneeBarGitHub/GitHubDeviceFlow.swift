@@ -298,6 +298,11 @@ public struct GitHubDeviceFlowClient: Sendable {
         else {
             throw GitHubDeviceFlowError.missingRefreshToken
         }
+        guard GitHubDeviceFlowResponsePolicy
+            .isValidOpaqueToken(refreshToken)
+        else {
+            throw GitHubDeviceFlowError.invalidResponse
+        }
 
         let endpoints = try GitHubEndpointResolver.resolve(
             deploymentKind: connection.deploymentKind,
