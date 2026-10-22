@@ -73,6 +73,10 @@ public actor GitHubConnectionSessionCoordinator {
         credential: GitHubCredential
     ) async throws -> GitHubConnectionSession {
         try Self.validateAccessTokenForGitHubIO(credential)
+        try validateCandidateCredentialEndpointBinding(
+            credential,
+            connection: connection
+        )
 
         let account: GitHubAuthenticatedAccount
         do {
@@ -136,6 +140,10 @@ public actor GitHubConnectionSessionCoordinator {
         credential: GitHubCredential
     ) async throws -> GitHubConnectionSession {
         try Self.validateAccessTokenForGitHubIO(credential)
+        try validateCandidateCredentialEndpointBinding(
+            credential,
+            connection: connection
+        )
 
         let account: GitHubAuthenticatedAccount
         do {
@@ -608,6 +616,19 @@ public actor GitHubConnectionSessionCoordinator {
             throw GitHubConnectionSessionError
                 .reauthenticationRequired
         }
+    }
+
+    private func validateCandidateCredentialEndpointBinding(
+        _ credential: GitHubCredential,
+        connection: GitHubConnection
+    ) throws {
+        guard credential.endpointIdentity != nil else {
+            return
+        }
+        try validateCredentialEndpointBinding(
+            credential,
+            connection: connection
+        )
     }
 
     private static func validateAccessTokenForGitHubIO(
