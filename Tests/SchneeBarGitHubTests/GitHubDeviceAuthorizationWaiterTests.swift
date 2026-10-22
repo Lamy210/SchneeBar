@@ -104,6 +104,48 @@ func waiterUsesServerSlowDownIntervalWhenItIsLonger() async throws {
 }
 
 @Test
+func waiterRejectsInvalidInitialPollIntervalBeforeSleep() async throws {
+    let invalidIntervals: [TimeInterval] = [
+        .nan,
+        .infinity,
+        0,
+        GitHubDeviceFlowTimingPolicy.maximumPollInterval + 1,
+    ]
+
+    for interval in invalidIntervals {
+        let transport = WaiterQueueTransport([])
+        let sleeps = SleepRecorder()
+        let waiter = GitHubDeviceAuthorizationWaiter(
+            client: GitHubDeviceFlowClient(
+                transport: transport,
+                now: { waiterNow }
+            ),
+            sleeper: { seconds in await sleeps.record(seconds) }
+        )
+        let session = GitHubDeviceAuthorizationSession(
+            deviceCode: "device",
+            userCode: "ABCD-EFGH",
+            verificationURI: try #require(
+                URL(string: "https://github.com/login/device")
+            ),
+            expiresAt: waiterNow.addingTimeInterval(900),
+            pollInterval: interval
+        )
+
+        await #expect(throws: GitHubDeviceFlowError.invalidResponse) {
+            try await waiter.waitForAuthorization(
+                connection: try waiterConnection(),
+                clientID: "Iv1.client",
+                session: session
+            )
+        }
+
+        #expect(await sleeps.recorded().isEmpty)
+        #expect(await transport.requests() == 0)
+    }
+}
+
+@Test
 func waiterMapsAccessDenied() async throws {
     let transport = WaiterQueueTransport([
         WaiterStubResponse(#"{"error":"access_denied"}"#)
