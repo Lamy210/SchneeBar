@@ -435,6 +435,7 @@ public actor GitHubConnectionSessionCoordinator {
                             refreshed,
                             connection: connection
                         )
+                        try Self.validateAccessTokenForGitHubIO(refreshed)
                         return refreshed
                     } catch {
                         markRefreshFlightFailureIfOwned(
@@ -511,6 +512,7 @@ public actor GitHubConnectionSessionCoordinator {
                         id: retryingFailedFlightID
                     )
                 }
+                try Self.validateAccessTokenForGitHubIO(credential)
                 return credential
             }
 
@@ -549,6 +551,7 @@ public actor GitHubConnectionSessionCoordinator {
                     refreshed,
                     endpointIdentity: endpointIdentity
                 )
+                try Self.validateAccessTokenForGitHubIO(persistedCredential)
                 try await credentialStore.save(
                     persistedCredential,
                     for: key
@@ -600,6 +603,16 @@ public actor GitHubConnectionSessionCoordinator {
         if connection.deploymentKind == .enterpriseServer {
             throw GitHubConnectionSessionError
                 .reauthenticationRequired
+        }
+    }
+
+    private static func validateAccessTokenForGitHubIO(
+        _ credential: GitHubCredential
+    ) throws {
+        guard GitHubDeviceFlowResponsePolicy.isValidOpaqueToken(
+            credential.accessToken
+        ) else {
+            throw GitHubConnectionSessionError.reauthenticationRequired
         }
     }
 
