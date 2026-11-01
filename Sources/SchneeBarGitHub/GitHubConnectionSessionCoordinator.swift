@@ -75,6 +75,11 @@ public actor GitHubConnectionSessionCoordinator {
         credential: GitHubCredential
     ) async throws -> GitHubConnectionSession {
         try Self.validateAccessTokenForGitHubIO(credential)
+        try validateCandidateCredentialEndpointBinding(
+            credential,
+            connection: connection
+        )
+        try validateCandidateAccessTokenLifetime(credential)
 
         let account: GitHubAuthenticatedAccount
         do {
@@ -138,6 +143,11 @@ public actor GitHubConnectionSessionCoordinator {
         credential: GitHubCredential
     ) async throws -> GitHubConnectionSession {
         try Self.validateAccessTokenForGitHubIO(credential)
+        try validateCandidateCredentialEndpointBinding(
+            credential,
+            connection: connection
+        )
+        try validateCandidateAccessTokenLifetime(credential)
 
         let account: GitHubAuthenticatedAccount
         do {
@@ -674,6 +684,68 @@ public actor GitHubConnectionSessionCoordinator {
                     GitHubDeviceFlowCredentialLifetimePolicy
                         .maximumRefreshTokenLifetime
                 )
+        else {
+            throw GitHubConnectionSessionError.reauthenticationRequired
+        }
+    }
+
+    private func validateCandidateCredentialEndpointBinding(
+        _ credential: GitHubCredential,
+        connection: GitHubConnection
+    ) throws {
+        guard credential.endpointIdentity != nil else {
+            return
+        }
+        try validateCredentialEndpointBinding(
+            credential,
+            connection: connection
+        )
+    }
+
+    private func validateCandidateAccessTokenLifetime(
+        _ credential: GitHubCredential
+    ) throws {
+        let referenceDate = now()
+
+        guard credential.refreshToken != nil
+            || credential.refreshTokenExpiresAt == nil
+        else {
+            throw GitHubConnectionSessionError.reauthenticationRequired
+        }
+
+        if let refreshToken = credential.refreshToken {
+            guard credential.accessTokenExpiresAt != nil,
+                  GitHubDeviceFlowResponsePolicy.isValidOpaqueToken(
+                      refreshToken
+                  ),
+                  let refreshExpiresAt = credential.refreshTokenExpiresAt
+            else {
+                throw GitHubConnectionSessionError.reauthenticationRequired
+            }
+
+            let refreshLifetime = refreshExpiresAt.timeIntervalSince(referenceDate)
+            guard refreshLifetime.isFinite,
+                  refreshLifetime > 0,
+                  refreshLifetime <= TimeInterval(
+                      GitHubDeviceFlowCredentialLifetimePolicy
+                          .maximumRefreshTokenLifetime
+                  )
+            else {
+                throw GitHubConnectionSessionError.reauthenticationRequired
+            }
+        }
+
+        guard let expiresAt = credential.accessTokenExpiresAt else {
+            return
+        }
+
+        let lifetime = expiresAt.timeIntervalSince(referenceDate)
+        guard lifetime.isFinite,
+              lifetime > 0,
+              lifetime <= TimeInterval(
+                  GitHubDeviceFlowCredentialLifetimePolicy
+                      .maximumAccessTokenLifetime
+              )
         else {
             throw GitHubConnectionSessionError.reauthenticationRequired
         }
