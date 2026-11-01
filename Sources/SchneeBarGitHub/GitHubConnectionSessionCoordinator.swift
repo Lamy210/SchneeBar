@@ -636,7 +636,7 @@ public actor GitHubConnectionSessionCoordinator {
         _ credential: GitHubCredential
     ) throws {
         guard let expiresAt = credential.refreshTokenExpiresAt else {
-            return
+            throw GitHubConnectionSessionError.reauthenticationRequired
         }
 
         let remaining = expiresAt.timeIntervalSince(now())

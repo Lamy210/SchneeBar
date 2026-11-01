@@ -118,3 +118,59 @@ func restoreRejectsStoredRefreshExpiryBeyondDefensiveLifetimeBeforeNetwork() asy
 
     #expect(await transport.requestCount() == 0)
 }
+
+@Test
+func restoreRejectsStoredRefreshTokenWithoutExpiryBeforeNetwork() async throws {
+    let now = Date(timeIntervalSince1970: 201_000)
+    let connection = GitHubConnection(
+        id: UUID(
+            uuidString: "00000000-0000-0000-0000-000000002710"
+        )!,
+        displayName: "GitHub.com",
+        deploymentKind: .githubDotCom,
+        webBaseURL: try #require(
+            URL(string: "https://github.com")
+        )
+    )
+    let identity = GitHubAccountIdentity(
+        id: "42",
+        login: "octocat"
+    )
+    let key = GitHubCredentialKey(
+        connectionID: connection.id,
+        accountID: identity.id
+    )
+    let credential = GitHubCredential(
+        accessToken: "stored_access",
+        refreshToken: "stored_refresh",
+        accessTokenExpiresAt: now.addingTimeInterval(30),
+        refreshTokenExpiresAt: nil,
+        endpointIdentity: "https://github.com"
+    )
+    let store = StoredRefreshLifetimeStore(
+        key: key,
+        credential: credential
+    )
+    let transport = StoredRefreshLifetimeTransport()
+    let coordinator = GitHubConnectionSessionCoordinator(
+        credentialStore: store,
+        accessClient: GitHubAccessClient(transport: transport),
+        deviceFlowClient: GitHubDeviceFlowClient(
+            transport: transport,
+            now: { now }
+        ),
+        now: { now }
+    )
+
+    await #expect(
+        throws: GitHubConnectionSessionError.reauthenticationRequired
+    ) {
+        try await coordinator.restore(
+            connection: connection,
+            identity: identity,
+            clientID: "Iv1.public-client-id"
+        )
+    }
+
+    #expect(await transport.requestCount() == 0)
+}
