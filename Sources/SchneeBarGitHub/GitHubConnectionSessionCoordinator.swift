@@ -517,6 +517,8 @@ public actor GitHubConnectionSessionCoordinator {
                 return credential
             }
 
+            try validateStoredRefreshTokenLifetime(credential)
+
             guard let clientID,
                   let refreshToken = credential.refreshToken,
                   !refreshToken.isEmpty,
@@ -620,6 +622,25 @@ public actor GitHubConnectionSessionCoordinator {
                 <= TimeInterval(
                     GitHubDeviceFlowCredentialLifetimePolicy
                         .maximumAccessTokenLifetime
+                )
+        else {
+            throw GitHubConnectionSessionError.reauthenticationRequired
+        }
+    }
+
+    private func validateStoredRefreshTokenLifetime(
+        _ credential: GitHubCredential
+    ) throws {
+        guard let expiresAt = credential.refreshTokenExpiresAt else {
+            return
+        }
+
+        let remaining = expiresAt.timeIntervalSince(now())
+        guard remaining.isFinite,
+              remaining
+                <= TimeInterval(
+                    GitHubDeviceFlowCredentialLifetimePolicy
+                        .maximumRefreshTokenLifetime
                 )
         else {
             throw GitHubConnectionSessionError.reauthenticationRequired
