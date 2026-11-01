@@ -612,7 +612,33 @@ public actor GitHubConnectionSessionCoordinator {
     private func validateStoredAccessTokenLifetime(
         _ credential: GitHubCredential
     ) throws {
+        if let refreshToken = credential.refreshToken,
+           refreshToken.isEmpty
+        {
+            throw GitHubConnectionSessionError.reauthenticationRequired
+        }
+
+        guard credential.refreshToken != nil
+                || credential.refreshTokenExpiresAt == nil
+        else {
+            throw GitHubConnectionSessionError
+                .reauthenticationRequired
+        }
+
+        guard credential.refreshToken == nil
+                || credential.refreshTokenExpiresAt != nil
+        else {
+            throw GitHubConnectionSessionError
+                .reauthenticationRequired
+        }
+
         guard let expiresAt = credential.accessTokenExpiresAt else {
+            let hasRefreshMetadata = credential.refreshToken != nil
+                || credential.refreshTokenExpiresAt != nil
+            guard !hasRefreshMetadata else {
+                throw GitHubConnectionSessionError
+                    .reauthenticationRequired
+            }
             return
         }
 
