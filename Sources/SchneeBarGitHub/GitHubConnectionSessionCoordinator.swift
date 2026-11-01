@@ -636,16 +636,30 @@ public actor GitHubConnectionSessionCoordinator {
     private func validateCandidateAccessTokenLifetime(
         _ credential: GitHubCredential
     ) throws {
-        if credential.refreshToken != nil,
-           credential.refreshTokenExpiresAt == nil
-        {
-            throw GitHubConnectionSessionError.reauthenticationRequired
+        let referenceDate = now()
+
+        if credential.refreshToken != nil {
+            guard let refreshExpiresAt = credential.refreshTokenExpiresAt else {
+                throw GitHubConnectionSessionError.reauthenticationRequired
+            }
+
+            let refreshLifetime = refreshExpiresAt.timeIntervalSince(referenceDate)
+            guard refreshLifetime.isFinite,
+                  refreshLifetime > 0,
+                  refreshLifetime <= TimeInterval(
+                      GitHubDeviceFlowCredentialLifetimePolicy
+                          .maximumRefreshTokenLifetime
+                  )
+            else {
+                throw GitHubConnectionSessionError.reauthenticationRequired
+            }
         }
 
         guard let expiresAt = credential.accessTokenExpiresAt else {
             return
         }
-        let lifetime = expiresAt.timeIntervalSince(now())
+
+        let lifetime = expiresAt.timeIntervalSince(referenceDate)
         guard lifetime.isFinite,
               lifetime > 0,
               lifetime <= TimeInterval(
@@ -653,16 +667,6 @@ public actor GitHubConnectionSessionCoordinator {
                       .maximumAccessTokenLifetime
               )
         else {
-            throw GitHubConnectionSessionError.reauthenticationRequired
-        }
-    }
-
-    private static func validateAccessTokenForGitHubIO(
-        _ credential: GitHubCredential
-    ) throws {
-        guard GitHubDeviceFlowResponsePolicy.isValidOpaqueToken(
-            credential.accessToken
-        ) else {
             throw GitHubConnectionSessionError.reauthenticationRequired
         }
     }
