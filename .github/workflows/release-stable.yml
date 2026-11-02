@@ -50,6 +50,19 @@ jobs:
     timeout-minutes: 30
 
     steps:
+      - name: Validate checkout-free GitHub CLI repository targeting
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Check explicit repository targeting outside any Git working tree.
+          cd "${RUNNER_TEMP}"
+          actual_repo="$(gh api "repos/${GITHUB_REPOSITORY}" --jq '.full_name')"
+          test "${actual_repo}" = "${GITHUB_REPOSITORY}"
+          # Exercise the same --repo contract used by the publisher (read only).
+          gh release list --repo "${GITHUB_REPOSITORY}" --limit 1 --json tagName >/dev/null
       - name: Checkout
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
@@ -1169,6 +1182,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
+    env:
+      # gh release create runs in a checkout-free publisher job.
+      GH_REPO: ${{ github.repository }}
     steps:
       - name: Download bounded stable payload
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
@@ -1340,4 +1356,5 @@ jobs:
             "$checksum" \
             --target "$GITHUB_SHA" \
             --title "SchneeBar $RELEASE_TAG" \
-            --notes-file "$notes"
+            --notes-file "$notes" \
+            --repo "$GITHUB_REPOSITORY"
