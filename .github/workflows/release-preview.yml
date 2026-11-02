@@ -232,10 +232,22 @@ jobs:
     if: github.event_name == 'pull_request'
     permissions:
       actions: read
+      contents: read
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
     steps:
+      - name: Validate checkout-free GitHub CLI repository targeting
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Test GH_REPO resolution without a local Git checkout.
+          cd "${RUNNER_TEMP}"
+          actual_repo="$(gh repo view --json nameWithOwner --jq '.nameWithOwner')"
+          test "${actual_repo}" = "${GITHUB_REPOSITORY}"
       - name: Download publisher validation payload
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
@@ -711,6 +723,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
+    env:
+      # gh release create runs in a checkout-free publisher job.
+      GH_REPO: ${{ github.repository }}
     steps:
       - name: Download bounded release payload
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
