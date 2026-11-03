@@ -497,6 +497,8 @@ public struct GitHubAccessClient: Sendable {
                         )
                     )
                 }
+            } catch is CancellationError {
+                throw CancellationError()
             } catch {
                 try Task.checkCancellation()
                 installationAccess.append(
