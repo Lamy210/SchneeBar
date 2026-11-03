@@ -743,6 +743,20 @@ final class GitHubConnectionsRuntimeModel {
             if hadInventory {
                 onActivitySourceChanged?()
             }
+        } catch GitHubAccessClientError.inventoryRequestBudgetExceeded,
+                GitHubAccessClientError.inventoryItemBudgetExceeded {
+            // A budget-limited discovery is not an authoritative permission
+            // snapshot. Drop stale runtime access, but preserve saved profile
+            // selection so that the user can retry after adjusting scope.
+            guard isCurrentOperationGeneration(generation, for: profileID) else { return }
+            let hadInventory = inventoryByConnectionID.removeValue(forKey: profileID) != nil
+            capabilitiesByConnectionID.removeValue(forKey: profileID)
+            await activityProvider.reset(connectionID: profileID)
+            guard isCurrentOperationGeneration(generation, for: profileID) else { return }
+            statusByConnectionID[profileID] = .unavailable
+            if hadInventory {
+                onActivitySourceChanged?()
+            }
         } catch let error where GitHubNetworkFailureClassifier.isUnavailable(error) {
             guard isCurrentOperationGeneration(generation, for: profileID) else { return }
             statusByConnectionID[profileID] = .networkUnavailable
@@ -1390,6 +1404,9 @@ final class GitHubConnectionsRuntimeModel {
             return hostedNetworkFailureMessage(for: kind)
         case GitHubConnectionSessionError.ssoRequired:
             return "GitHub requires an active SSO session for this organization. Sign in with SSO and try again."
+        case GitHubAccessClientError.inventoryRequestBudgetExceeded,
+             GitHubAccessClientError.inventoryItemBudgetExceeded:
+            return "GitHub repository discovery exceeded SchneeBar's safety limit. Reduce the connected GitHub App scope or contact the app maintainer before retrying."
         default:
             return "Could not connect to GitHub. Check the server, network, and GitHub App configuration."
         }
