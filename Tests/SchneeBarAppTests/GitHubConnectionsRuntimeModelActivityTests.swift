@@ -269,6 +269,51 @@ func activityRuntimeBoundsLargeRetainedActivitySnapshotWithoutDowngradingSource(
     )
 }
 
+@Test @MainActor
+func refreshBudgetExhaustionClearsCachedCapabilitiesButPreservesSavedSelection() async throws {
+    let healthy = try activityRuntimeFixture(
+        installationPermissions: ["actions": "read"],
+        workflowRuns: [],
+        reviewRequests: []
+    )
+    await healthy.model.refresh(profileID: healthy.profile.id)
+    let existingInventory = try #require(
+        healthy.model.inventoryByConnectionID[healthy.profile.id]
+    )
+    let existingCapabilities = try #require(
+        healthy.model.capabilitiesByConnectionID[healthy.profile.id]
+    )
+
+    // Both bounded HTTP requests and retained items must invalidate stale
+    // capabilities, without deleting a user's persisted repository selection.
+    let limits: [GitHubInventoryFetchLimits] = [
+        .init(maximumRequests: 1, maximumItems: 10),
+        .init(maximumRequests: 10, maximumItems: 0),
+    ]
+    for limit in limits {
+        let fixture = try activityRuntimeFixture(
+            installationPermissions: ["actions": "read"],
+            workflowRuns: [],
+            reviewRequests: [],
+            inventoryFetchLimits: limit
+        )
+        fixture.model.inventoryByConnectionID[fixture.profile.id] = existingInventory
+        fixture.model.capabilitiesByConnectionID[fixture.profile.id] = existingCapabilities
+        fixture.model.statusByConnectionID[fixture.profile.id] = .connected(repositoryCount: 1)
+
+        await fixture.model.refresh(profileID: fixture.profile.id)
+
+        #expect(fixture.model.inventoryByConnectionID[fixture.profile.id] == nil)
+        #expect(fixture.model.capabilitiesByConnectionID[fixture.profile.id] == nil)
+        #expect(fixture.model.statusByConnectionID[fixture.profile.id] == .unavailable)
+        let persisted = try #require(
+            await fixture.profileStore.load(id: fixture.profile.id)
+        )
+        #expect(persisted.repositorySelection == fixture.profile.repositorySelection)
+        #expect(persisted.isEnabled)
+    }
+}
+
 @MainActor
 private struct ActivityRuntimeFixture {
     let model: GitHubConnectionsRuntimeModel
@@ -281,7 +326,8 @@ private func activityRuntimeFixture(
     installationPermissions: [String: String],
     workflowRuns: [GitHubWorkflowRun],
     reviewRequests: [GitHubReviewRequest],
-    sessionLogin: String = "snow-user"
+    sessionLogin: String = "snow-user",
+    inventoryFetchLimits: GitHubInventoryFetchLimits = .init()
 ) throws -> ActivityRuntimeFixture {
     let profile = try activityRuntimeProfile()
     let profileStore = ActivityRuntimeProfileStore([profile])
@@ -294,7 +340,10 @@ private func activityRuntimeFixture(
     )
     let coordinator = GitHubConnectionSessionCoordinator(
         credentialStore: credentialStore,
-        accessClient: GitHubAccessClient(transport: transport)
+        accessClient: GitHubAccessClient(
+            transport: transport,
+            inventoryFetchLimits: inventoryFetchLimits
+        )
     )
     let provider = GitHubActivityProvider(
         workflowRunLoader: ActivityRuntimeWorkflowLoader(runs: workflowRuns),
