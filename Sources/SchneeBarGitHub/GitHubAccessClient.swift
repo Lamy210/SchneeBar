@@ -155,6 +155,8 @@ public enum GitHubAccessClientError: Error, Equatable, Sendable {
     case invalidResponse
     case invalidInstallationID
     case paginationLimitExceeded
+    case inventoryRequestBudgetExceeded
+    case inventoryItemBudgetExceeded
 
     public var statusCode: Int? {
         switch self {
@@ -165,9 +167,47 @@ public enum GitHubAccessClientError: Error, Equatable, Sendable {
         case .invalidCredential,
              .invalidResponse,
              .invalidInstallationID,
-             .paginationLimitExceeded:
+             .paginationLimitExceeded,
+             .inventoryRequestBudgetExceeded,
+             .inventoryItemBudgetExceeded:
             return nil
         }
+    }
+}
+
+/// Defensive, inventory-scoped bounds. Exceeding either bound fails closed
+/// rather than treating an incomplete inventory as a complete access snapshot.
+public struct GitHubInventoryFetchLimits: Equatable, Sendable {
+    public let maximumRequests: Int
+    public let maximumItems: Int
+
+    public init(maximumRequests: Int = 256, maximumItems: Int = 10_000) {
+        self.maximumRequests = max(1, maximumRequests)
+        self.maximumItems = max(1, maximumItems)
+    }
+}
+
+private actor GitHubInventoryFetchBudget {
+    private var remainingRequests: Int
+    private var remainingItems: Int
+
+    init(limits: GitHubInventoryFetchLimits) {
+        remainingRequests = limits.maximumRequests
+        remainingItems = limits.maximumItems
+    }
+
+    func chargeRequest() throws {
+        guard remainingRequests > 0 else {
+            throw GitHubAccessClientError.inventoryRequestBudgetExceeded
+        }
+        remainingRequests -= 1
+    }
+
+    func chargeItems(_ count: Int) throws {
+        guard count >= 0, count <= remainingItems else {
+            throw GitHubAccessClientError.inventoryItemBudgetExceeded
+        }
+        remainingItems -= count
     }
 }
 
@@ -176,14 +216,31 @@ public struct GitHubAccessClient: Sendable {
     private static let maximumSuccessfulResponseBytes = 8 * 1024 * 1024
 
     private let transport: any GitHubHTTPTransport
+    private let inventoryFetchLimits: GitHubInventoryFetchLimits
 
-    public init(transport: any GitHubHTTPTransport = URLSessionGitHubHTTPTransport()) {
+    public init(
+        transport: any GitHubHTTPTransport = URLSessionGitHubHTTPTransport(),
+        inventoryFetchLimits: GitHubInventoryFetchLimits = .init()
+    ) {
         self.transport = transport
+        self.inventoryFetchLimits = inventoryFetchLimits
     }
 
     public func authenticatedAccount(
         connection: GitHubConnection,
         credential: GitHubCredential
+    ) async throws -> GitHubAuthenticatedAccount {
+        try await authenticatedAccount(
+            connection: connection,
+            credential: credential,
+            budget: nil
+        )
+    }
+
+    private func authenticatedAccount(
+        connection: GitHubConnection,
+        credential: GitHubCredential,
+        budget: GitHubInventoryFetchBudget?
     ) async throws -> GitHubAuthenticatedAccount {
         let endpoints = try GitHubEndpointResolver.resolve(
             deploymentKind: connection.deploymentKind,
@@ -193,7 +250,8 @@ public struct GitHubAccessClient: Sendable {
         let payload: UserPayload = try await get(
             url: url,
             connection: connection,
-            credential: credential
+            credential: credential,
+            budget: budget
         )
 
         guard payload.id > 0,
@@ -215,6 +273,18 @@ public struct GitHubAccessClient: Sendable {
     public func installations(
         connection: GitHubConnection,
         credential: GitHubCredential
+    ) async throws -> [GitHubInstallation] {
+        try await installations(
+            connection: connection,
+            credential: credential,
+            budget: nil
+        )
+    }
+
+    private func installations(
+        connection: GitHubConnection,
+        credential: GitHubCredential,
+        budget: GitHubInventoryFetchBudget?
     ) async throws -> [GitHubInstallation] {
         let endpoints = try GitHubEndpointResolver.resolve(
             deploymentKind: connection.deploymentKind,
@@ -238,7 +308,8 @@ public struct GitHubAccessClient: Sendable {
             let payload: InstallationListPayload = try await get(
                 url: url,
                 connection: connection,
-                credential: credential
+                credential: credential,
+                budget: budget
             )
             expectedTotal = max(0, payload.totalCount)
 
@@ -252,6 +323,7 @@ public struct GitHubAccessClient: Sendable {
                 break
             }
 
+            try await budget?.chargeItems(newItems.count)
             installations.append(contentsOf: newItems)
             page += 1
         }
@@ -263,6 +335,20 @@ public struct GitHubAccessClient: Sendable {
         installationID: Int64,
         connection: GitHubConnection,
         credential: GitHubCredential
+    ) async throws -> [GitHubRepositoryAccess] {
+        try await repositories(
+            installationID: installationID,
+            connection: connection,
+            credential: credential,
+            budget: nil
+        )
+    }
+
+    private func repositories(
+        installationID: Int64,
+        connection: GitHubConnection,
+        credential: GitHubCredential,
+        budget: GitHubInventoryFetchBudget?
     ) async throws -> [GitHubRepositoryAccess] {
         guard installationID > 0 else {
             throw GitHubAccessClientError.invalidInstallationID
@@ -292,7 +378,8 @@ public struct GitHubAccessClient: Sendable {
             let payload: RepositoryListPayload = try await get(
                 url: url,
                 connection: connection,
-                credential: credential
+                credential: credential,
+                budget: budget
             )
             expectedTotal = max(0, payload.totalCount)
 
@@ -308,6 +395,7 @@ public struct GitHubAccessClient: Sendable {
                 break
             }
 
+            try await budget?.chargeItems(newItems.count)
             repositories.append(contentsOf: newItems)
             page += 1
         }
@@ -319,19 +407,23 @@ public struct GitHubAccessClient: Sendable {
         connection: GitHubConnection,
         credential: GitHubCredential
     ) async throws -> GitHubAccessInventory {
+        let budget = GitHubInventoryFetchBudget(limits: inventoryFetchLimits)
         let account = try await authenticatedAccount(
             connection: connection,
-            credential: credential
+            credential: credential,
+            budget: budget
         )
         let accessibleInstallations = try await installations(
             connection: connection,
-            credential: credential
+            credential: credential,
+            budget: budget
         )
 
         var installationAccess: [GitHubInstallationAccess] = []
         installationAccess.reserveCapacity(accessibleInstallations.count)
 
         for installation in accessibleInstallations {
+            try Task.checkCancellation()
             if installation.isSuspended {
                 installationAccess.append(
                     GitHubInstallationAccess(
@@ -347,7 +439,8 @@ public struct GitHubAccessClient: Sendable {
                 let accessibleRepositories = try await repositories(
                     installationID: installation.id,
                     connection: connection,
-                    credential: credential
+                    credential: credential,
+                    budget: budget
                 )
                 installationAccess.append(
                     GitHubInstallationAccess(
@@ -357,6 +450,13 @@ public struct GitHubAccessClient: Sendable {
                     )
                 )
             } catch let error as GitHubAccessClientError {
+                try Task.checkCancellation()
+                if error == .inventoryRequestBudgetExceeded
+                    || error == .inventoryItemBudgetExceeded
+                {
+                    // An incomplete result cannot be represented as an inventory.
+                    throw error
+                }
                 if error.statusCode == 401 {
                     throw error
                 }
@@ -398,6 +498,7 @@ public struct GitHubAccessClient: Sendable {
                     )
                 }
             } catch {
+                try Task.checkCancellation()
                 installationAccess.append(
                     GitHubInstallationAccess(
                         installation: installation,
@@ -417,7 +518,8 @@ public struct GitHubAccessClient: Sendable {
     private func get<Response: Decodable>(
         url: URL,
         connection: GitHubConnection,
-        credential: GitHubCredential
+        credential: GitHubCredential,
+        budget: GitHubInventoryFetchBudget? = nil
     ) async throws -> Response {
         let token = credential.accessToken.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !token.isEmpty else {
@@ -434,7 +536,10 @@ public struct GitHubAccessClient: Sendable {
             request.setValue(apiVersion, forHTTPHeaderField: "X-GitHub-Api-Version")
         }
 
+        try Task.checkCancellation()
+        try await budget?.chargeRequest()
         let (data, response) = try await transport.data(for: request)
+        try Task.checkCancellation()
         guard (200 ... 299).contains(response.statusCode) else {
             if let evidence = GitHubHTTPFailureEvidence.sanitized(
                 from: response
