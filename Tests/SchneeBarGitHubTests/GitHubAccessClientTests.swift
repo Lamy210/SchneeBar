@@ -375,6 +375,46 @@ private func inventoryBudgetRepositoryResponse(
 }
 
 @Test
+func inventoryZeroRequestBudgetPreventsAllNetworkIO() async throws {
+    let transport = AccessQueueTransport([
+        inventoryBudgetAccountResponse(),
+    ])
+    let client = GitHubAccessClient(
+        transport: transport,
+        inventoryFetchLimits: .init(maximumRequests: 0, maximumItems: 10)
+    )
+
+    await #expect(
+        throws: GitHubAccessClientError.inventoryRequestBudgetExceeded
+    ) {
+        try await client.inventory(
+            connection: try githubDotComAccessConnection(),
+            credential: GitHubCredential(accessToken: "ghu_access")
+        )
+    }
+    #expect(await transport.recordedRequests().isEmpty)
+}
+
+@Test
+func inventoryZeroItemBudgetAllowsOnlyEmptyInventories() async throws {
+    let transport = AccessQueueTransport([
+        inventoryBudgetAccountResponse(),
+        inventoryBudgetInstallationResponse([]),
+    ])
+    let client = GitHubAccessClient(
+        transport: transport,
+        inventoryFetchLimits: .init(maximumRequests: 2, maximumItems: 0)
+    )
+
+    let inventory = try await client.inventory(
+        connection: try githubDotComAccessConnection(),
+        credential: GitHubCredential(accessToken: "ghu_access")
+    )
+    #expect(inventory.installations.isEmpty)
+    #expect(await transport.recordedRequests().count == 2)
+}
+
+@Test
 func inventoryCompletesAtExactRequestAndItemBudgets() async throws {
     let transport = AccessQueueTransport([
         inventoryBudgetAccountResponse(),
