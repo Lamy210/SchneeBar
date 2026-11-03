@@ -346,6 +346,274 @@ func inventoryPropagatesRepository401AsConnectionAuthenticationFailure() async t
     }
 }
 
+private func inventoryBudgetAccountResponse() -> AccessStubResponse {
+    AccessStubResponse(
+        #"{"id":1,"login":"octocat","name":null,"avatar_url":null}"#
+    )
+}
+
+private func inventoryBudgetInstallationResponse(
+    _ ids: [Int64]
+) -> AccessStubResponse {
+    let objects = ids.map { id in
+        #"{"id":\#(id),"account":{"id":10,"login":"octocat","type":"User"},"repository_selection":"selected","permissions":{"actions":"read"},"suspended_at":null}"#
+    }.joined(separator: ",")
+    return AccessStubResponse(
+        #"{"total_count":\#(ids.count),"installations":[\#(objects)]}"#
+    )
+}
+
+private func inventoryBudgetRepositoryResponse(
+    _ ids: [Int64]
+) -> AccessStubResponse {
+    let objects = ids.map { id in
+        #"{"id":\#(id),"name":"project-\#(id)","full_name":"octocat/project-\#(id)","private":false,"owner":{"id":10,"login":"octocat","type":"User"},"permissions":{"admin":false,"maintain":false,"push":false,"triage":false,"pull":true}}"#
+    }.joined(separator: ",")
+    return AccessStubResponse(
+        #"{"total_count":\#(ids.count),"repositories":[\#(objects)]}"#
+    )
+}
+
+@Test
+func inventoryZeroRequestBudgetPreventsAllNetworkIO() async throws {
+    let transport = AccessQueueTransport([
+        inventoryBudgetAccountResponse(),
+    ])
+    let client = GitHubAccessClient(
+        transport: transport,
+        inventoryFetchLimits: .init(maximumRequests: 0, maximumItems: 10)
+    )
+
+    await #expect(
+        throws: GitHubAccessClientError.inventoryRequestBudgetExceeded
+    ) {
+        try await client.inventory(
+            connection: try githubDotComAccessConnection(),
+            credential: GitHubCredential(accessToken: "ghu_access")
+        )
+    }
+    #expect(await transport.recordedRequests().isEmpty)
+}
+
+@Test
+func inventoryZeroItemBudgetAllowsOnlyEmptyInventories() async throws {
+    let transport = AccessQueueTransport([
+        inventoryBudgetAccountResponse(),
+        inventoryBudgetInstallationResponse([]),
+    ])
+    let client = GitHubAccessClient(
+        transport: transport,
+        inventoryFetchLimits: .init(maximumRequests: 2, maximumItems: 0)
+    )
+
+    let inventory = try await client.inventory(
+        connection: try githubDotComAccessConnection(),
+        credential: GitHubCredential(accessToken: "ghu_access")
+    )
+    #expect(inventory.installations.isEmpty)
+    #expect(await transport.recordedRequests().count == 2)
+}
+
+@Test
+func inventoryCompletesAtExactRequestAndItemBudgets() async throws {
+    let transport = AccessQueueTransport([
+        inventoryBudgetAccountResponse(),
+        inventoryBudgetInstallationResponse([5]),
+        inventoryBudgetRepositoryResponse([77]),
+    ])
+    let client = GitHubAccessClient(
+        transport: transport,
+        inventoryFetchLimits: .init(maximumRequests: 3, maximumItems: 2)
+    )
+
+    let inventory = try await client.inventory(
+        connection: try githubDotComAccessConnection(),
+        credential: GitHubCredential(accessToken: "ghu_access")
+    )
+
+    #expect(inventory.installations.count == 1)
+    #expect(inventory.installations[0].status == .available)
+    #expect(inventory.installations[0].repositories.map(\.id) == [77])
+    #expect(await transport.recordedRequests().count == 3)
+}
+
+@Test
+func ghesInventoryRequestBudgetStopsBeforeRepositoryDiscovery() async throws {
+    let transport = AccessQueueTransport([
+        inventoryBudgetAccountResponse(),
+        inventoryBudgetInstallationResponse([5]),
+    ])
+    let client = GitHubAccessClient(
+        transport: transport,
+        inventoryFetchLimits: .init(maximumRequests: 2, maximumItems: 10)
+    )
+    let connection = GitHubConnection(
+        displayName: "Internal GitHub",
+        deploymentKind: .enterpriseServer,
+        webBaseURL: try #require(
+            URL(string: "https://github.internal.example:8443")
+        )
+    )
+
+    await #expect(
+        throws: GitHubAccessClientError.inventoryRequestBudgetExceeded
+    ) {
+        try await client.inventory(
+            connection: connection,
+            credential: GitHubCredential(accessToken: "ghu_enterprise")
+        )
+    }
+
+    let requests = await transport.recordedRequests()
+    #expect(requests.count == 2)
+    #expect(requests[0].url?.path == "/api/v3/user")
+    #expect(requests[1].url?.path == "/api/v3/user/installations")
+    #expect(requests.allSatisfy { $0.url?.port == 8443 })
+}
+
+@Test
+func inventoryRequestBudgetFailsClosedBeforeExtraRepositoryRequest() async throws {
+    let transport = AccessQueueTransport([
+        inventoryBudgetAccountResponse(),
+        inventoryBudgetInstallationResponse([5, 6]),
+        inventoryBudgetRepositoryResponse([]),
+    ])
+    let client = GitHubAccessClient(
+        transport: transport,
+        inventoryFetchLimits: .init(maximumRequests: 3, maximumItems: 10)
+    )
+
+    await #expect(
+        throws: GitHubAccessClientError.inventoryRequestBudgetExceeded
+    ) {
+        try await client.inventory(
+            connection: try githubDotComAccessConnection(),
+            credential: GitHubCredential(accessToken: "ghu_access")
+        )
+    }
+
+    // User + installations + first installation: no fourth HTTP request.
+    #expect(await transport.recordedRequests().count == 3)
+}
+
+@Test
+func inventoryItemBudgetFailsClosedAtInstallationPageBoundary() async throws {
+    let transport = AccessQueueTransport([
+        inventoryBudgetAccountResponse(),
+        inventoryBudgetInstallationResponse([5, 6]),
+    ])
+    let client = GitHubAccessClient(
+        transport: transport,
+        inventoryFetchLimits: .init(maximumRequests: 10, maximumItems: 1)
+    )
+
+    await #expect(
+        throws: GitHubAccessClientError.inventoryItemBudgetExceeded
+    ) {
+        try await client.inventory(
+            connection: try githubDotComAccessConnection(),
+            credential: GitHubCredential(accessToken: "ghu_access")
+        )
+    }
+    #expect(await transport.recordedRequests().count == 2)
+}
+
+@Test
+func inventoryItemBudgetIncludesRepositoriesAcrossInstallations() async throws {
+    let transport = AccessQueueTransport([
+        inventoryBudgetAccountResponse(),
+        inventoryBudgetInstallationResponse([5, 6]),
+        inventoryBudgetRepositoryResponse([77]),
+        inventoryBudgetRepositoryResponse([88]),
+    ])
+    let client = GitHubAccessClient(
+        transport: transport,
+        inventoryFetchLimits: .init(maximumRequests: 10, maximumItems: 3)
+    )
+
+    await #expect(
+        throws: GitHubAccessClientError.inventoryItemBudgetExceeded
+    ) {
+        try await client.inventory(
+            connection: try githubDotComAccessConnection(),
+            credential: GitHubCredential(accessToken: "ghu_access")
+        )
+    }
+
+    // Two installation records plus the first repository consume all items.
+    #expect(await transport.recordedRequests().count == 4)
+}
+
+@Test
+func inventoryFailedRequestsCountTowardsGlobalRequestBudget() async throws {
+    let transport = AccessQueueTransport([
+        inventoryBudgetAccountResponse(),
+        inventoryBudgetInstallationResponse([5, 6]),
+        AccessStubResponse(#"{"message":"Forbidden"}"#, statusCode: 403),
+    ])
+    let client = GitHubAccessClient(
+        transport: transport,
+        inventoryFetchLimits: .init(maximumRequests: 3, maximumItems: 10)
+    )
+
+    await #expect(
+        throws: GitHubAccessClientError.inventoryRequestBudgetExceeded
+    ) {
+        try await client.inventory(
+            connection: try githubDotComAccessConnection(),
+            credential: GitHubCredential(accessToken: "ghu_access")
+        )
+    }
+
+    // A 403 consumes its request; the next installation must not be fetched.
+    #expect(await transport.recordedRequests().count == 3)
+}
+
+private actor InventoryCancellationTransport: GitHubHTTPTransport {
+    private var requestCount = 0
+
+    func data(for request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+        requestCount += 1
+        if requestCount == 3 {
+            throw CancellationError()
+        }
+        let response = requestCount == 1
+            ? inventoryBudgetAccountResponse()
+            : inventoryBudgetInstallationResponse([5, 6])
+        let httpResponse = try #require(
+            HTTPURLResponse(
+                url: request.url!,
+                statusCode: response.statusCode,
+                httpVersion: "HTTP/1.1",
+                headerFields: response.headers
+            )
+        )
+        return (Data(response.json.utf8), httpResponse)
+    }
+
+    func count() -> Int {
+        requestCount
+    }
+}
+
+@Test
+func inventoryTransportCancellationDoesNotBecomeUnavailableStatus() async throws {
+    let transport = InventoryCancellationTransport()
+    let client = GitHubAccessClient(
+        transport: transport,
+        inventoryFetchLimits: .init(maximumRequests: 10, maximumItems: 10)
+    )
+
+    await #expect(throws: CancellationError.self) {
+        try await client.inventory(
+            connection: try githubDotComAccessConnection(),
+            credential: GitHubCredential(accessToken: "ghu_access")
+        )
+    }
+
+    #expect(await transport.count() == 3)
+}
+
 @Test
 func emptyAccessTokenStopsBeforeNetworkRequest() async throws {
     let transport = AccessQueueTransport([])

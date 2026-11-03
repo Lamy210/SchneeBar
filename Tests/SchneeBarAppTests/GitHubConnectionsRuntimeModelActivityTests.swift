@@ -269,6 +269,65 @@ func activityRuntimeBoundsLargeRetainedActivitySnapshotWithoutDowngradingSource(
     )
 }
 
+@Test @MainActor
+func refreshBudgetExhaustionClearsCachedCapabilitiesButPreservesSavedSelection() async throws {
+    // A fresh successful restore populates the runtime cache through the
+    // normal public behavior. Its second restore must fail the inventory
+    // budget without using test-only access to private implementation state.
+    let initial = activityRuntimeSessionResponses(
+        installationPermissions: ["actions": "read"],
+        login: "snow-user"
+    )
+    let expandedInstallations = ActivityRuntimeHTTPResponse(
+        #"{"total_count":2,"installations":[{"id":10,"account":{"id":100,"login":"snow","type":"Organization"},"repository_selection":"all","permissions":{"actions":"read"},"suspended_at":null},{"id":11,"account":{"id":100,"login":"snow","type":"Organization"},"repository_selection":"all","permissions":{"actions":"read"},"suspended_at":null}]}"#
+    )
+    let expanded = [
+        initial[0],
+        initial[1],
+        expandedInstallations,
+        initial[3],
+    ]
+
+    // One loop verifies the request limit, the other the aggregate item limit.
+    for limits in [
+        GitHubInventoryFetchLimits(maximumRequests: 3, maximumItems: 10),
+        GitHubInventoryFetchLimits(maximumRequests: 10, maximumItems: 2),
+    ] {
+        let fixture = try activityRuntimeFixture(
+            installationPermissions: ["actions": "read"],
+            workflowRuns: [],
+            reviewRequests: [],
+            inventoryFetchLimits: limits,
+            sessionResponses: initial + expanded,
+            selectedRepositoryIDs: [1]
+        )
+
+        await fixture.model.refresh(profileID: fixture.profile.id)
+        let before = try #require(
+            fixture.model.managementModel(profileID: fixture.profile.id)
+        )
+        #expect(before.repositories.map(\.id) == [1])
+        #expect(
+            fixture.model.statusByConnectionID[fixture.profile.id]
+                == .connected(repositoryCount: 1)
+        )
+
+        await fixture.model.refresh(profileID: fixture.profile.id)
+
+        let after = try #require(
+            fixture.model.managementModel(profileID: fixture.profile.id)
+        )
+        #expect(after.repositories.isEmpty)
+        #expect(fixture.model.statusByConnectionID[fixture.profile.id] == .unavailable)
+        #expect(fixture.model.selectedRepositoryIDs(profileID: fixture.profile.id) == [1])
+        let persisted = try #require(
+            await fixture.profileStore.load(id: fixture.profile.id)
+        )
+        #expect(persisted.repositorySelection == .selected([1]))
+        #expect(persisted.isEnabled)
+    }
+}
+
 @MainActor
 private struct ActivityRuntimeFixture {
     let model: GitHubConnectionsRuntimeModel
@@ -281,20 +340,29 @@ private func activityRuntimeFixture(
     installationPermissions: [String: String],
     workflowRuns: [GitHubWorkflowRun],
     reviewRequests: [GitHubReviewRequest],
-    sessionLogin: String = "snow-user"
+    sessionLogin: String = "snow-user",
+    inventoryFetchLimits: GitHubInventoryFetchLimits = .init(),
+    sessionResponses: [ActivityRuntimeHTTPResponse]? = nil,
+    selectedRepositoryIDs: Set<Int64>? = nil
 ) throws -> ActivityRuntimeFixture {
-    let profile = try activityRuntimeProfile()
+    var profile = try activityRuntimeProfile()
+    if let selectedRepositoryIDs {
+        profile.repositorySelection = .selected(selectedRepositoryIDs)
+    }
     let profileStore = ActivityRuntimeProfileStore([profile])
     let credentialStore = ActivityRuntimeCredentialStore(profile: profile)
     let transport = ActivityRuntimeTransport(
-        activityRuntimeSessionResponses(
+        sessionResponses ?? activityRuntimeSessionResponses(
             installationPermissions: installationPermissions,
             login: sessionLogin
         )
     )
     let coordinator = GitHubConnectionSessionCoordinator(
         credentialStore: credentialStore,
-        accessClient: GitHubAccessClient(transport: transport)
+        accessClient: GitHubAccessClient(
+            transport: transport,
+            inventoryFetchLimits: inventoryFetchLimits
+        )
     )
     let provider = GitHubActivityProvider(
         workflowRunLoader: ActivityRuntimeWorkflowLoader(runs: workflowRuns),
