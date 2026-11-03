@@ -182,8 +182,10 @@ public struct GitHubInventoryFetchLimits: Equatable, Sendable {
     public let maximumItems: Int
 
     public init(maximumRequests: Int = 256, maximumItems: Int = 10_000) {
-        self.maximumRequests = max(1, maximumRequests)
-        self.maximumItems = max(1, maximumItems)
+        // Zero is an intentional fail-closed configuration: it must not
+        // authorize an otherwise forbidden network request or retained item.
+        self.maximumRequests = max(0, maximumRequests)
+        self.maximumItems = max(0, maximumItems)
     }
 }
 
