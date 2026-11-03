@@ -375,6 +375,63 @@ private func inventoryBudgetRepositoryResponse(
 }
 
 @Test
+func inventoryCompletesAtExactRequestAndItemBudgets() async throws {
+    let transport = AccessQueueTransport([
+        inventoryBudgetAccountResponse(),
+        inventoryBudgetInstallationResponse([5]),
+        inventoryBudgetRepositoryResponse([77]),
+    ])
+    let client = GitHubAccessClient(
+        transport: transport,
+        inventoryFetchLimits: .init(maximumRequests: 3, maximumItems: 2)
+    )
+
+    let inventory = try await client.inventory(
+        connection: try githubDotComAccessConnection(),
+        credential: GitHubCredential(accessToken: "ghu_access")
+    )
+
+    #expect(inventory.installations.count == 1)
+    #expect(inventory.installations[0].status == .available)
+    #expect(inventory.installations[0].repositories.map(\.id) == [77])
+    #expect(await transport.recordedRequests().count == 3)
+}
+
+@Test
+func ghesInventoryRequestBudgetStopsBeforeRepositoryDiscovery() async throws {
+    let transport = AccessQueueTransport([
+        inventoryBudgetAccountResponse(),
+        inventoryBudgetInstallationResponse([5]),
+    ])
+    let client = GitHubAccessClient(
+        transport: transport,
+        inventoryFetchLimits: .init(maximumRequests: 2, maximumItems: 10)
+    )
+    let connection = GitHubConnection(
+        displayName: "Internal GitHub",
+        deploymentKind: .enterpriseServer,
+        webBaseURL: try #require(
+            URL(string: "https://github.internal.example:8443")
+        )
+    )
+
+    await #expect(
+        throws: GitHubAccessClientError.inventoryRequestBudgetExceeded
+    ) {
+        try await client.inventory(
+            connection: connection,
+            credential: GitHubCredential(accessToken: "ghu_enterprise")
+        )
+    }
+
+    let requests = await transport.recordedRequests()
+    #expect(requests.count == 2)
+    #expect(requests[0].url?.path == "/api/v3/user")
+    #expect(requests[1].url?.path == "/api/v3/user/installations")
+    #expect(requests.allSatisfy { $0.url?.port == 8443 })
+}
+
+@Test
 func inventoryRequestBudgetFailsClosedBeforeExtraRepositoryRequest() async throws {
     let transport = AccessQueueTransport([
         inventoryBudgetAccountResponse(),
