@@ -1,0 +1,109 @@
+# One-shot release launcher for v0.1.0-alpha.1.
+# This file is intentionally limited to a single protected-main push path.
+# It dispatches the existing fail-closed release-preview.yml workflow;
+# it does NOT build, sign, package, tag, or publish artifacts itself.
+name: Dispatch initial SchneeBar alpha preview (one-shot)
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/dispatch-alpha-preview-once.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  dispatch-alpha-preview:
+    name: Dispatch v0.1.0-alpha.1 after exact-main gates
+    if: github.repository == 'Lamy210/SchneeBar' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 65
+    permissions:
+      actions: write
+      contents: read
+    env:
+      GH_REPO: ${{ github.repository }}
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_TAG: v0.1.0-alpha.1
+    steps:
+      - name: Verify main and wait for exact-commit CI and CodeQL
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ "${GITHUB_REPOSITORY}" != "Lamy210/SchneeBar" || "${GITHUB_REF}" != "refs/heads/main" ]]; then
+            echo "Refusing to dispatch outside the reviewed repository and main branch." >&2
+            exit 1
+          fi
+
+          # The alpha tag must be absent. It will be created only by the
+          # existing release-preview publisher, not by this launcher.
+          for attempt in {1..116}; do
+            current_main="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/main" --jq '.object.sha')"
+            if [[ "${current_main}" != "${GITHUB_SHA}" ]]; then
+              echo "Main moved after this launcher's push: refusing stale release." >&2
+              exit 1
+            fi
+
+            if gh release view "${RELEASE_TAG}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+              echo "Release already exists: ${RELEASE_TAG}; refusing duplicate dispatch." >&2
+              exit 1
+            fi
+
+            # Fail closed if this tag is already present independently
+            # of the GitHub Release record.
+            tag_status="$(gh api -i "repos/${GITHUB_REPOSITORY}/git/ref/tags/${RELEASE_TAG}" 2>/dev/null | head -n 1 || true)"
+            if [[ "${tag_status}" == *"200"* ]]; then
+              echo "Git tag already exists: ${RELEASE_TAG}" >&2
+              exit 1
+            fi
+            if [[ -n "${tag_status}" && "${tag_status}" != *"404"* ]]; then
+              echo "Cannot establish absence of the release tag: ${tag_status}" >&2
+              exit 1
+            fi
+
+            all_success=true
+            for workflow in ci.yml codeql.yml; do
+              result="$(gh run list \
+                --repo "${GITHUB_REPOSITORY}" \
+                --workflow "${workflow}" \
+                --event push \
+                --branch main \
+                --commit "${GITHUB_SHA}" \
+                --limit 1 \
+                --json headSha,status,conclusion)"
+
+              if jq -e --arg sha "${GITHUB_SHA}" \
+                'length == 1 and .[0].headSha == $sha and .[0].status == "completed" and .[0].conclusion == "success"' \
+                <<<"${result}" >/dev/null; then
+                echo "Verified exact-commit ${workflow} successful."
+              elif jq -e --arg sha "${GITHUB_SHA}" \
+                'length == 1 and .[0].headSha == $sha and .[0].status == "completed" and .[0].conclusion != "success"' \
+                <<<"${result}" >/dev/null; then
+                echo "Exact-commit ${workflow} did not pass: ${result}" >&2
+                exit 1
+              else
+                all_success=false
+                echo "Waiting for exact-commit ${workflow} (attempt ${attempt}/116)."
+              fi
+            done
+
+            if [[ "${all_success}" == true ]]; then
+              # Re-check HEAD immediately before dispatch to prevent
+              # scheduling the preview for a stale commit.
+              test "$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/main" --jq '.object.sha')" = "${GITHUB_SHA}"
+              gh workflow run release-preview.yml \
+                --repo "${GITHUB_REPOSITORY}" \
+                --ref main \
+                --field tag="${RELEASE_TAG}" \
+                --field expected_sha="${GITHUB_SHA}"
+              echo "Dispatched existing Release Preview with exact reviewed main SHA ${GITHUB_SHA}."
+              exit 0
+            fi
+            sleep 30
+          done
+
+          echo "Timed out waiting for exact-commit CI and CodeQL. No release dispatched." >&2
+          exit 1
