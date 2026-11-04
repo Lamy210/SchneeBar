@@ -62,6 +62,34 @@ jobs:
       - name: Generate project
         run: tuist generate
 
+      - name: Prepare isolated external widget smoke fixture
+        if: runner.environment == 'github-hosted'
+        run: bash Scripts/external_widget_smoke_fixture.sh setup
+
+      - name: Test release validation path
+        run: tuist test -- -skipMacroValidation CODE_SIGNING_ALLOWED=NO
+
+      - name: Clean isolated external widget smoke fixture
+        if: always() && runner.environment == 'github-hosted'
+        run: bash Scripts/external_widget_smoke_fixture.sh cleanup
+
+      - name: Restore full project graph after Tuist tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          tuist generate
+          xcodebuild -list -workspace SchneeBar.xcworkspace | tee "${RUNNER_TEMP}/release-schemes.txt"
+          grep -Fx '        SchneeBarVisualSnapshotCLI' "${RUNNER_TEMP}/release-schemes.txt"
+
+      - name: Render and validate deterministic release smoke
+        shell: bash
+        run: |
+          set -euo pipefail
+          output="${RUNNER_TEMP}/release-visual-smoke"
+          tuist run SchneeBarVisualSnapshotCLI -- --output "${output}"
+          test -d "${output}"
+          find "${output}" -type f -name '*.png' -size +0c -print -quit | grep -q .
+
       - name: Build release configuration
         shell: bash
         run: |
@@ -490,11 +518,33 @@ jobs:
       - name: Generate project
         run: tuist generate
 
+      - name: Prepare isolated external widget smoke fixture
+        if: runner.environment == 'github-hosted'
+        run: bash Scripts/external_widget_smoke_fixture.sh setup
+
       - name: Test release candidate
         run: tuist test -- -skipMacroValidation CODE_SIGNING_ALLOWED=NO
 
-      - name: Render deterministic release smoke
-        run: tuist run SchneeBarVisualSnapshotCLI -- --output "${RUNNER_TEMP}/release-visual-smoke"
+      - name: Clean isolated external widget smoke fixture
+        if: always() && runner.environment == 'github-hosted'
+        run: bash Scripts/external_widget_smoke_fixture.sh cleanup
+
+      - name: Restore full project graph after Tuist tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          tuist generate
+          xcodebuild -list -workspace SchneeBar.xcworkspace | tee "${RUNNER_TEMP}/release-schemes.txt"
+          grep -Fx '        SchneeBarVisualSnapshotCLI' "${RUNNER_TEMP}/release-schemes.txt"
+
+      - name: Render and validate deterministic release smoke
+        shell: bash
+        run: |
+          set -euo pipefail
+          output="${RUNNER_TEMP}/release-visual-smoke"
+          tuist run SchneeBarVisualSnapshotCLI -- --output "${output}"
+          test -d "${output}"
+          find "${output}" -type f -name '*.png' -size +0c -print -quit | grep -q .
 
       - name: Build release app
         env:
