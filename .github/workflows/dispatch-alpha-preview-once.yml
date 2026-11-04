@@ -1,4 +1,6 @@
 # One-shot release launcher for v0.1.0-alpha.1.
+# Re-armed once on 2026-11-05 for the post-#362 Release Preview smoke fix;
+# the earlier dispatch failed closed before publishing any tag or Release.
 # This file is intentionally limited to a single protected-main push path.
 # It dispatches the existing fail-closed release-preview.yml workflow;
 # it does NOT build, sign, package, tag, or publish artifacts itself.
