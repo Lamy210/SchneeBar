@@ -74,8 +74,8 @@ public actor CPUWidgetProvider: WidgetProvider {
         now = { ContinuousClock.now }
     }
 
-    /// Internal injection seams let tests verify exact deltas and overlapping
-    /// initial snapshots without depending on the host's current CPU load.
+    /// Internal injection seams allow deterministic counter and sampling-gap
+    /// tests without depending on the host's current CPU load.
     init(
         readCounters: @escaping @Sendable () throws -> CPUCounters,
         bootstrapDelay: @escaping @Sendable () async throws -> Void,
@@ -178,6 +178,14 @@ struct CPUCounters: Sendable, Equatable {
         let niceDelta = UInt64(nice &- previous.nice)
         let idleDelta = UInt64(idle &- previous.idle)
 
+        // A true 32-bit wrap over an ordinary five-second window produces
+        // a small modular delta. A huge modular delta is far more likely to
+        // be a reset/discontinuity, so fail rather than invent CPU load.
+        let largestDelta = max(userDelta, systemDelta, niceDelta, idleDelta)
+        guard largestDelta <= UInt64(UInt32.max / 2) else {
+            throw CPUWidgetError.implausibleCounterDelta
+        }
+
         let activeDelta = userDelta + systemDelta + niceDelta
         let totalDelta = activeDelta + idleDelta
         guard totalDelta > 0 else {
@@ -191,6 +199,7 @@ struct CPUCounters: Sendable, Equatable {
 enum CPUWidgetError: Error, Equatable {
     case hostStatistics(kern_return_t)
     case noCounterProgress
+    case implausibleCounterDelta
 }
 
 private func readCPUCounters() throws -> CPUCounters {
