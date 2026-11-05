@@ -13,6 +13,7 @@ public enum GitHubConnectionPresentationStatus: Equatable, Sendable {
     case networkUnavailable
     case suspended
     case untestedServer(version: String)
+    case inventoryLimitReached
     case unavailable
 
     public var label: String {
@@ -41,6 +42,8 @@ public enum GitHubConnectionPresentationStatus: Equatable, Sendable {
             return "Installation suspended"
         case let .untestedServer(version):
             return "GHES \(version) · Untested"
+        case .inventoryLimitReached:
+            return "Repository discovery limit reached"
         case .unavailable:
             return "Unavailable"
         }
@@ -64,6 +67,8 @@ public enum GitHubConnectionPresentationStatus: Equatable, Sendable {
             return "pause.circle.fill"
         case .untestedServer:
             return "exclamationmark.triangle.fill"
+        case .inventoryLimitReached:
+            return "exclamationmark.triangle.fill"
         case .unavailable:
             return "xmark.circle.fill"
         }
@@ -81,7 +86,7 @@ public enum GitHubConnectionPresentationStatus: Equatable, Sendable {
             return .secondary
         case .authenticationRequired, .ssoRequired, .untestedServer:
             return .orange
-        case .networkUnavailable, .suspended, .unavailable:
+        case .networkUnavailable, .suspended, .inventoryLimitReached, .unavailable:
             return .red
         }
     }
@@ -205,6 +210,8 @@ public struct GitHubConnectionsView: View {
                     )
                 )
                 .labelsHidden()
+                .accessibilityLabel("Monitor \(connection.displayName)")
+                .accessibilityIdentifier("connection-monitor-\(connection.id.uuidString)")
                 .help(connection.isEnabled ? "Disable monitoring" : "Enable monitoring")
             }
 
@@ -220,6 +227,16 @@ public struct GitHubConnectionsView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
+            }
+
+            if case .inventoryLimitReached = connection.status {
+                Text(
+                    "Repository discovery reached SchneeBar's safety limit. Review the GitHub App's installation access or contact the app maintainer, then Refresh. Saved repository selections are preserved."
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityIdentifier("inventory-limit-guidance-\(connection.id.uuidString)")
             }
 
             HStack(spacing: 6) {
