@@ -71,6 +71,15 @@ func cpuCounterWrapUsesPerStateModuloBeforeAggregation() throws {
 }
 
 @Test
+func cpuCounterResetDoesNotMasqueradeAsFullCPUUsage() {
+    #expect(throws: CPUWidgetError.implausibleCounterDelta) {
+        try cpuCounters(user: 5, idle: 5).usagePercentage(
+            since: cpuCounters(user: 1_000, idle: 1_000)
+        )
+    }
+}
+
+@Test
 func cpuCounterStallDoesNotMasqueradeAsZeroUsage() {
     let baseline = cpuCounters(user: 100, idle: 400)
     #expect(throws: CPUWidgetError.noCounterProgress) {
