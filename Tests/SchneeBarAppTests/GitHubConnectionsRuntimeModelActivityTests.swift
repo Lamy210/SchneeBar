@@ -318,7 +318,7 @@ func refreshBudgetExhaustionClearsCachedCapabilitiesButPreservesSavedSelection()
             fixture.model.managementModel(profileID: fixture.profile.id)
         )
         #expect(after.repositories.isEmpty)
-        #expect(fixture.model.statusByConnectionID[fixture.profile.id] == .unavailable)
+        #expect(fixture.model.statusByConnectionID[fixture.profile.id] == .inventoryLimitReached)
         #expect(fixture.model.selectedRepositoryIDs(profileID: fixture.profile.id) == [1])
         let persisted = try #require(
             await fixture.profileStore.load(id: fixture.profile.id)
