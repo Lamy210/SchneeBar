@@ -5,15 +5,18 @@ import SwiftUI
 public struct WidgetOverviewView: View {
     private let snapshots: [WidgetSnapshot]
     private let diagnosticsByWidgetID: [WidgetID: WidgetRuntimeDiagnostic]
+    private let emptyState: WidgetEmptyDisplayReason
     private let surfaceStyle: SchneeSurfaceStyle
 
     public init(
         snapshots: [WidgetSnapshot],
         diagnosticsByWidgetID: [WidgetID: WidgetRuntimeDiagnostic] = [:],
+        emptyState: WidgetEmptyDisplayReason = .hiddenByPolicy,
         surfaceStyle: SchneeSurfaceStyle = .adaptive
     ) {
         self.snapshots = snapshots
         self.diagnosticsByWidgetID = diagnosticsByWidgetID
+        self.emptyState = emptyState
         self.surfaceStyle = surfaceStyle
     }
 
@@ -32,6 +35,43 @@ public struct WidgetOverviewView: View {
             }
     }
 
+    private var emptyTitle: String {
+        switch emptyState {
+        case .awaitingWidgets:
+            "Loading widgets"
+        case .allDisabled:
+            "All widgets disabled"
+        case .awaitingFirstReading:
+            "Waiting for readings"
+        case .hiddenByPolicy:
+            "No visible widgets"
+        }
+    }
+
+    private var emptyDescription: String {
+        switch emptyState {
+        case .awaitingWidgets:
+            "Widgets are loading. Open Settings if this persists."
+        case .allDisabled:
+            "Enable a widget in Settings to see its status."
+        case .awaitingFirstReading:
+            "Enabled widgets are waiting for their first readings."
+        case .hiddenByPolicy:
+            "Widgets hidden by policy will appear when they need attention."
+        }
+    }
+
+    private var emptySystemImage: String {
+        switch emptyState {
+        case .awaitingWidgets, .awaitingFirstReading:
+            "hourglass"
+        case .allDisabled:
+            "eye.slash"
+        case .hiddenByPolicy:
+            "rectangle.topthird.inset.filled"
+        }
+    }
+
     public var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Widgets")
@@ -39,10 +79,11 @@ public struct WidgetOverviewView: View {
 
             if snapshots.isEmpty && unavailableDiagnostics.isEmpty {
                 ContentUnavailableView(
-                    "No visible widgets",
-                    systemImage: "rectangle.topthird.inset.filled",
-                    description: Text("Widgets hidden by policy will appear when they need attention.")
+                    emptyTitle,
+                    systemImage: emptySystemImage,
+                    description: Text(emptyDescription)
                 )
+                .accessibilityIdentifier("widget-empty-\(emptyState.rawValue)")
             } else {
                 ForEach(snapshots, id: \.descriptor.id) { snapshot in
                     WidgetRow(
