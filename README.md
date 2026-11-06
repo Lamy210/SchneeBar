@@ -73,6 +73,21 @@ Render deterministic visual scenarios used by CI:
 mise exec -- tuist run SchneeBarVisualSnapshotCLI -- --output .visual/current
 ```
 
+## CPU widget semantics
+
+The **Total CPU** widget shows the *whole machine's* busy CPU time, with a
+nominal five-second refresh interval. A sustained reading of 100% means all
+host CPU capacity was busy during the sample period. This is not the same
+metric as Activity Monitor's per-process `% CPU`, where 100% represents
+approximately one CPU core's capacity and a process can exceed 100%.
+To compare whole-machine percentages, use Activity Monitor's **CPU** tab
+bottom panel **System + User**, allowing for different sampling windows.
+
+Following the first reading or an extended sleep/suspension, SchneeBar
+re-establishes its CPU baseline before showing a new measurement.
+Counter stalls or discontinuities are treated as measurement failures, not
+as a genuine 0% reading.
+
 ## Developer preview GitHub setup
 
 The current preview build does **not** bundle a project-owned GitHub App client ID. To use GitHub-backed features, provide the client ID of a GitHub App that has Device Flow enabled. The onboarding UI accepts that public client ID directly; do not enter a client secret or private key.
