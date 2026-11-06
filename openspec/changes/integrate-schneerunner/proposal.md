@@ -1,34 +1,44 @@
-# Proposal: Integrate SchneeRunner into SchneeBar
+# Proposal: Integrate SchneeRunner capabilities into SchneeBar
 
 ## Why
 
-The native SchneeBar UI and GitHub activity foundation and SchneeRunner's character/productivity features currently require separate running applications. They duplicate menu-bar lifecycle, CPU measurement, scheduling and user settings. Users need an optional one-app experience without weakening GitHub security or losing local data.
+SchneeBar offers a coherent native menu-bar UI and GitHub integration; SchneeRunner provides richer character animation, local events and productivity functions. Running both separately duplicates lifecycle, CPU sampling and notification ownership and fragments settings.
 
-## What changes
+## What Changes
 
-- Add independently toggleable Companion and Productivity modules inside the SchneeBar app, preserving SchneeBar Design System.
-- Adapt SchneeRunner's reusable core models, asset guards and deadline-based state reconciliation rather than copying its AppKit application lifecycle.
-- Introduce single-owner system metrics, notifications and login-item coordination.
-- Add bounded credential-free Developer Activity signals for character reactions, never GitHub commands.
-- Add a versioned, idempotent, copy-only migration from local SchneeRunner state.
-- Maintain existing Developer Activity and all current SchneeBar widget behavior.
+- Add optional Character and Focus surfaces under SchneeBar's current SwiftUI/AppKit composition root.
+- Reuse compatible SchneeRunnerCore domain behavior and asset validation, not its AppDelegate or second status item.
+- Share host metrics and platform scheduling with existing widgets.
+- Project sanitized, read-only GitHub activity into character reactions without giving character code GitHub credentials or mutation privileges.
+- Provide settings, accessibility and local-only functionality independent of GitHub sign-in.
+- Provide copy-only opt-in migration with explicit reminder ownership cutover and non-destructive rollback.
+- Preserve SchneeBar developer features and current macOS 15+ minimum.
 
-## In scope
+## Capabilities
 
-Architecture and UI contract, adapter boundaries, migration safeguards, initial integration test gates and phased implementation. macOS 15+ for initial integration.
+### New Capabilities
 
-## Out of scope
+- `companion`: Opt-in character display, asset safety, animation reactions and accessibility.
+- `productivity`: Timers, Pomodoro, recurring reminders, notification ownership and durable state.
+- `integration-boundaries`: Shared metrics and strictly separated GitHub-to-Companion data signals.
+- `integration-settings`: Unified feature configuration, connection-aware presentation and accessibility.
 
-Immediate code migration in this proposal; archiving SchneeRunner; changing GitHub authentication ADR-0002; macOS 14 support; requiring cloud infrastructure; importing unverified third-party character assets; merging or enabling write permissions.
+### Modified Capabilities
 
-## Dependencies
+- None. No canonical `openspec/specs/` baseline has been established for these features yet; this change introduces capabilities without claiming existing ones are already implemented.
 
-`harden-github-connections` is a prerequisite to exposing new GitHub-to-Companion activity integration; local-only CompanionCore work can proceed independently.
+## Impact
 
-## Impacted components
+- App modules: SchneeBarApp, SchneeBarCore, SchneeBarDesignSystem, SchneeBarSystemProvider, SchneeBarGitHubActivityProvider; new Companion/Productivity/metrics/migration adapters.
+- Source reference: `Lamy210/SchneeRunner` and its SwiftPM Core tests.
+- Platform: Swift 6, Tuist, AppKit, SwiftUI, macOS 15+; no new mandatory server.
+- Dependencies: GitHub-origin character events are gated on the independent `harden-github-connections` change (issues #368 and #369). Local-only Companion extraction (issue #370) can proceed in parallel.
+- Release: no bundled artwork until rights/provenance is confirmed; no Runner archival until migration and feature parity pass.
 
-SchneeBarApp, SchneeBarCore, SchneeBarDesignSystem, SchneeBarSystemProvider, SchneeBarGitHubActivityProvider, new Companion/Productivity modules, notification/migration adapters, visual harness and tests. Source reference: `Lamy210/SchneeRunner` main.
+## Non-Goals
 
-## Acceptance for this change
+No one-shot merge, no implicit migration, no macOS 14 guarantee, no changes to accepted ADR-0002, no new GitHub write commands from character events, and no instant signed stable release.
 
-Specification and design review first; tasks remain unchecked until implementation and real-Mac evidence exist. See [ADR-0004](../../../docs/decisions/0004-schneerunner-integration-boundaries.md).
+## Validation / rollback
+
+Review ADR-0004, verify contracts and task checklist with OpenSpec, preserve old data, and make each new module disableable independently. Disable or roll back a failing module without modifying existing SchneeBar GitHub credentials.

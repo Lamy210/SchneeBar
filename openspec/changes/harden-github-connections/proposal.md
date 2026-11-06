@@ -1,30 +1,41 @@
-# Proposal: Harden local-first GitHub connections before companion integration
+# Proposal: Harden SchneeBar's local-first GitHub connections
 
 ## Why
 
-SchneeBar already supports multi-account GitHub Device Flow, Keychain credentials, refresh rotation and workflow mutations. Static review found security-hardening questions around macOS Data Protection Keychain selection, optional non-expiring token responses, unexpected HTTP redirects, read/write privilege separation and cleanup errors. The new Companion integration must not inherit or widen these risks.
+Existing GitHub account sessions, Keychain tokens and optional write actions form a security boundary that Companion integration must not weaken. Static review found missing protection verification and incomplete tests for token expiry, redirects, permission scope and disconnect cleanup. These are unverified exploit risks, not known compromises.
 
-## What changes
+## What Changes
 
-- Verify actual macOS Keychain accessibility and implement non-destructive legacy → Data Protection Keychain migration.
-- Make newly issued user credentials expiry-aware with verified GitHub App behavior; preserve refresh race correctness.
-- Reject unexpected redirects for secret-bearing authenticated/OAuth requests.
-- Design a separate write-authorization boundary for optional workflow actions.
-- Clearly distinguish local disconnect, partial local cleanup and remote GitHub authorization revocation.
-- Protect against arbitrary preview Client ID consent confusion and prohibit local events from invoking GitHub mutations.
+- Verify macOS Data Protection Keychain behavior and migrate legacy secrets without destructive first steps.
+- Require expiry-aware issuance for verified supported GitHub App deployments; preserve safe legacy/enterprise recovery.
+- Prohibit secret-bearing redirects to unauthorized origins.
+- Require independent, explicit authorization for write operations and fail closed when capability is unknown.
+- Separate local disconnection, remaining GitHub authorization and incomplete cleanup states.
+- Make onboarding and account recovery understandable without falsely asserting the GitHub App publisher or account security state.
+- Prevent untrusted local/character events from triggering GitHub mutations.
 
-## In scope
+## Capabilities
 
-Security design/tests and subsequent isolated implementation on the existing local-first architecture, including GitHub.com/GHE.com and evidence-backed GHES compatibility.
+### New Capabilities
 
-## Out of scope
+- `github-credential-security`: Secret storage, expiry, endpoint binding, permission enforcement, redirect protection and truthful disconnect semantics.
+- `github-connection-security-ui`: User-facing account/App identity evidence, safe authorization flow, connection health and incident-recovery guidance.
 
-A mandatory broker, Client Secret in app, remote password/2FA handling, full security certification, and immediate Companion rendering changes. ADR-0002 remains accepted.
+### Modified Capabilities
 
-## Prerequisites
+- None. The existing GitHub implementation predates the OpenSpec canonical spec baseline; this is a behavioral hardening proposal, not proof that safeguards are currently absent everywhere.
 
-Real Mac tests for Keychain behavior; mock HTTP/OAuth tests; no real GitHub credentials in fixtures.
+## Impact
 
-## Completion criteria
+- `SchneeBarGitHubKeychain`, `SchneeBarGitHub`, `SchneeBarGitHubFeature`, GitHub runtime model, mock transports and security tests.
+- GitHub.com, GHE.com and version-supported GHES require separate compatibility evidence.
+- Preserve accepted ADR-0002: the default stays local-first GitHub App Device Flow; hosted Authorization Code + PKCE broker is out of scope without a new ADR.
+- Tracking: issues #368/#369; integration depends on these gates before enabling GitHub-to-Companion events.
 
-Do not mark completed until tests demonstrate no secret-bearing cross-origin traffic, safe migration, zero unauthorized workflow writes, correct reconnect/rotation, and accurate disconnect state.
+## Non-Goals
+
+No mandatory backend, no Client Secret in the macOS app, no GitHub account password/2FA collection, no assertion of penetration-test completion and no unreviewed remote revocation automation.
+
+## Validation / rollback
+
+Test in synthetic OAuth/HTTP/Keychain fixtures plus a signed real Mac. Keep legacy credentials recoverable through partial failures. Feature-gate migrations and preserve reauthentication paths. Never equate deleting a local token with revoking a GitHub-side grant.
