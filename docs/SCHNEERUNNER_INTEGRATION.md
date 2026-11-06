@@ -18,7 +18,7 @@ Verified baseline in main:
 | --- | --- | --- | --- |
 | Menu bar, popover, settings, widgets | SchneeBar App/Core/DesignSystem | Preserve current lifecycle | Visual/perf regression |
 | GitHub connections, account switching, GHE.com/GHES | SchneeBarGitHub + Keychain | Preserve privileged boundary | Security change first |
-| Workflow rerun/cancel | SchneeBar mutation service | Explicit, capability-checked UI only | No event-triggered writes |
+| Workflow rerun/cancel | SchneeBar mutation service | Requires separate verified Write App upon strictWriteGrantV2 rollout | User-visible breaking change; read monitoring unaffected |
 | Character animation policy, state precedence, clips | SchneeRunnerCore | CompanionCore adapter | Original tests ported |
 | PNG/GIF/APNG/WebP/sprites/sequence/pack handling | SchneeRunnerCore | Safe asset module | File budgets, symlinks, format tests |
 | Menu-bar and desktop character renderer | SchneeRunnerApp | New SchneeBar-owned renderers/coordinator | One status item; window lifecycle |
@@ -55,7 +55,7 @@ Verified baseline in main:
 - Version the importer (`migrationVersion`, source app id, source schema version and target scope). Stable item IDs for idempotency; avoid cross-app status collisions.
 - Snapshot and validate old character library, preferences, timer/reminder records, history; parse using legacy decoders and defensive file size constraints.
 - Stage destination copy with safe filesystem permissions and non-symlinked paths, validate full roundtrip, atomically commit and record completion.
-- Separate migration of notification schedules from state copy. Register only new owned notifications after source application reminders are intentionally disabled; show clear coexistence guidance.
+- Separate migration of notification schedules from state copy. **For the first integrated release, imported Runner reminder/timer/Pomodoro schedules remain inactive**; current Runner stop/ACK proof is not yet supported, and a user merely quitting Runner cannot satisfy it. New Bar-native schedules continue normally. Any later notification handoff needs a separate accepted protocol, implementation and migration test.
 - On failure: original app untouched, no partial new schedule, visible retry and diagnostics. On rollback: keep original intact; remove only new migration-owned resources.
 
 ## Proposed performance and SLO *targets* (not measured facts)
@@ -88,7 +88,9 @@ Links: [Architecture](ARCHITECTURE.md), [GitHub integration](GITHUB_INTEGRATION.
 The detailed implementation contracts live at:
 
 - `openspec/changes/integrate-schneerunner/runner-data-migration-contract.md`: includes Runner UserDefaults and bundle/sandbox constraints, explicit old→new ID mapping and visible partial import.
-- `openspec/changes/integrate-schneerunner/notification-handoff-contract.md`: source-owned disable/ack before Bar scheduling; without an authenticated supported protocol the app performs **data-only** import and keeps copied reminders inactive.
+- `openspec/changes/integrate-schneerunner/notification-handoff-contract.md`: initial release **always data-only for imported notifications**; future source-owned disable/ack and Bar scheduling are gated on a separately approved authenticated/replay-resistant source protocol.
 - `openspec/changes/integrate-schneerunner/local-events-and-time-contract.md`: raw input budgets, trusted renderer errors versus fatal process crash, Runner-compatible floating local time and DST handling.
 
 None of these contracts creates a runtime protocol or changes installed Runner releases. A real-Mac source-app handoff smoke, permissions tests and source preference inventory remain required for release.
+
+**Updated release scope:** The target preserves GitHub developer **read monitoring** across feature integration. An optional strict-write authorization security release may require re-enrollment for rerun/cancel and must disclose the breaking change. The first integrated build does not promise source Runner reminder notification cutover, even if the source application is stopped; only a future verified protocol can grant that capability. Local event budgets reserve clear/cancel capacity and fail closed on overflow rather than leaving stale Companion reactions.

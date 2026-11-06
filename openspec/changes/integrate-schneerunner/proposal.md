@@ -11,8 +11,8 @@ SchneeBar offers a coherent native menu-bar UI and GitHub integration; SchneeRun
 - Share host metrics and platform scheduling with existing widgets.
 - Project sanitized, read-only GitHub activity into character reactions without giving character code GitHub credentials or mutation privileges.
 - Provide settings, accessibility and local-only functionality independent of GitHub sign-in.
-- Provide copy-only opt-in migration with explicit reminder ownership cutover and non-destructive rollback.
-- Preserve SchneeBar developer features and current macOS 15+ minimum.
+- Provide copy-only opt-in migration; **imported Runner notifications remain inactive in the first integrated release**. A future source-authenticated reminder ownership cutover requires separate approval and implementation; rollback remains non-destructive.
+- Preserve SchneeBar read-only developer monitoring and current macOS 15+ minimum. Under a separately approved strictWriteGrantV2 security cutover, workflow rerun/cancel requires new verified write authorization and may be unavailable until re-enrollment; no silent promise of uninterrupted write actions.
 
 ## Capabilities
 
@@ -42,3 +42,9 @@ No one-shot merge, no implicit migration, no macOS 14 guarantee, no changes to a
 ## Validation / rollback
 
 Review ADR-0004, verify contracts and task checklist with OpenSpec, preserve old data, and make each new module disableable independently. Disable or roll back a failing module without modifying existing SchneeBar GitHub credentials.
+
+## Phase-0 acceptance boundaries
+
+This proposal DOES NOT provide a working app-to-app reminder stop/ACK transport and SHALL NOT activate any imported Runner-owned reminder, timer completion or Pomodoro notification in the first integration release. Newly created SchneeBar schedules are independent. Any future cutover protocol requires a separate accepted security/spec decision with source application identity, nonce/revision/replay and crash recovery evidence.
+
+GitHub workflow write actions are a distinct security rollout under `harden-github-connections/write-authorization-contract.md`: read monitoring survives strict cutover, but legacy write operations can become explicitly unavailable until separate authorization; this is an intentional breaking change needing release messaging, not silently preserved functionality.

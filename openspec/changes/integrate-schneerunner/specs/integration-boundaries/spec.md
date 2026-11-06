@@ -71,9 +71,21 @@ The app SHALL treat Distributed Notifications as untrusted, SHALL check raw UTF-
 - **WHEN** a local event exceeds 4096 UTF-8 bytes before decoding
 - **THEN** the adapter SHALL reject it without allocating an unbounded JSON model or changing character state.
 
-#### Scenario: Event storm exceeds rate cap
-- **WHEN** the seventeenth event arrives within a rolling one-second window or the sixty-fifth channel would be active
-- **THEN** the adapter SHALL drop the excess event, maintain bounded accounting and SHALL NOT invoke any GitHub mutation.
+#### Scenario: Event storm exceeds update rate cap
+- **WHEN** the thirteenth set/update arrives within a rolling one-second window or the sixty-fifth local channel would be active
+- **THEN** the adapter SHALL reject the excess update, preserve terminal-event capacity, maintain bounded accounting and SHALL NOT invoke any GitHub mutation.
+
+#### Scenario: Clear after a full set-event window
+- **WHEN** a clear arrives for an active local channel after all 12 update slots are consumed but fewer than four termination slots are used
+- **THEN** the adapter SHALL process the clear immediately without treating the update-rate limit as authorization to retain stale display state.
+
+#### Scenario: Clear flood exceeds terminal reserve
+- **WHEN** a fifth valid clear/cancel exceeds the reserved terminal slots in a rolling second
+- **THEN** the adapter SHALL remove all untrusted local volatile triggers, quarantine further local events until the window resets, and SHALL NOT affect GitHub/Focus state.
+
+#### Scenario: Raw local event storm exceeds ingress limit
+- **WHEN** 129 or more local payload callbacks arrive within one rolling second
+- **THEN** the adapter SHALL apply constant-work fail-closed quarantine before further JSON decoding, SHALL clear only untrusted local volatile reactions, and SHALL NOT retain an unbounded queue.
 
 #### Scenario: Build-start event never receives terminal state
 - **WHEN** a local build started state remains unrenewed beyond 1800 seconds

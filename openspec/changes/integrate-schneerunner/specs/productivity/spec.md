@@ -57,7 +57,7 @@ The app SHALL preserve timers and reminders even when the user denies, withdraws
 
 ### Requirement: Migration cutover requires explicit confirmation
 
-The app SHALL show which existing Runner data can be imported and require confirmation before activating migrated notification schedules.
+The app SHALL show which existing Runner data can be imported and SHALL keep **all imported notification-bearing items inactive for the first integration release**. A future cutover SHALL require an independently approved and implemented source-authenticated handoff protocol plus explicit user confirmation; no user-only confirmation can activate migrated notification schedules in the initial release.
 
 #### Scenario: User imports character and timer data without reminder cutover
 - **WHEN** import succeeds but the user has not authorized reminder cutover
@@ -65,15 +65,19 @@ The app SHALL show which existing Runner data can be imported and require confir
 
 ### Requirement: Migrated reminders require source-owner acknowledgement
 
-The app SHALL preserve migrated reminder definitions as inactive until it has validated durable evidence that SchneeRunner has disabled its owned pending reminders and disabled future rescheduling on relaunch; it SHALL not assume another application's pending notifications can be removed.
+The app SHALL preserve imported reminder/timer/Pomodoro **notification schedules** as inactive in the initial integration release, regardless of source-app version or user acknowledgement. A later separately approved implementation MAY activate only after verified durable evidence that SchneeRunner disabled its own pending requests and future rescheduling; it SHALL not assume another application's pending notifications can be removed.
 
 #### Scenario: Old Runner does not support handoff
 - **WHEN** a user imports reminders from a Runner version without a trustworthy stop-and-acknowledge protocol
 - **THEN** the imported definitions SHALL remain inactive, the UI SHALL explain data-only import, and the app SHALL NOT schedule migrated reminders.
 
-#### Scenario: Runner stops and acknowledges ownership
-- **WHEN** the source app durably disables its scheduling and pending requests and provides a verified acknowledgement for the current source revision
-- **THEN** SchneeBar MAY activate only its own namespaced notification requests and SHALL durably verify the new owned schedule before marking the handoff complete.
+#### Scenario: Unapproved handoff evidence cannot authorize scheduling
+- **WHEN** a source app or user presents a purported stop acknowledgement while no separately reviewed source-authentication protocol is enabled
+- **THEN** the migrated notification schedule SHALL remain inactive and no `runnerDisabledVerified` or `barActive` marker SHALL be written.
+
+#### Scenario: Future verified handoff after separate approval
+- **WHEN** a later version has an explicitly approved, enabled and verified source peer protocol with fresh source revision, nonce and authenticated source stop proof
+- **THEN** SchneeBar MAY activate only its own namespaced migrated notification requests after user consent and durable evidence, and SHALL verify destination ownership before marking cutover complete.
 
 #### Scenario: Source app crashes before acknowledgement
 - **WHEN** a cutover is requested but Runner crashes before confirmed disablement
@@ -106,3 +110,19 @@ The app SHALL inventory and migrate versioned character/productivity preferences
 #### Scenario: Source preference domain inaccessible
 - **WHEN** the old app's UserDefaults are inaccessible because of bundle or sandbox restrictions
 - **THEN** SchneeBar SHALL offer an authorized export/import path or visible omission, SHALL preserve the old app's data, and SHALL NOT silently reset user preferences.
+
+### Requirement: First-release Runner notification import is data-only
+
+In the initial integrated release the application SHALL import supported Runner notification-bearing definitions solely as inactive data, SHALL provide no user-visible or hidden bypass to activate them, and SHALL retain normal notification behavior for new items created in SchneeBar.
+
+#### Scenario: Imported reminder is manually enabled
+- **WHEN** a user imports a Runner reminder and attempts to enable delivery without an approved handoff protocol
+- **THEN** the app SHALL refuse imported notification scheduling, keep the copied definition visible, and show an explanation that old Runner notifications may still be active.
+
+#### Scenario: Imported timer completion is resumed
+- **WHEN** an imported running timer or Pomodoro session is restored on first integration release
+- **THEN** its imported completion notification SHALL stay inactive even if its domain countdown is shown, and no duplicate old-app notification SHALL be registered.
+
+#### Scenario: New native reminder is created
+- **WHEN** a user creates a brand-new reminder inside SchneeBar rather than importing a Runner schedule
+- **THEN** normal SchneeBar-owned notification scheduling SHALL remain available subject to OS authorization and app-local reconciliation.

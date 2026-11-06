@@ -55,9 +55,16 @@
 
 - [ ] 7.1 Inventory Runner Application Support and all UserDefaults keys/bundle domains, including character selection and desktop visibility; verify source-to-target map and accessible/export-only fallback on signed Mac.
 - [ ] 7.2 Implement versioned copy-only migration marker and old-to-new asset UUID remapping; verify source storage is unmodified and partial preference omissions are visible.
-- [ ] 7.3 Define and implement Runner-owned durable disable-and-acknowledge notification handoff, or disable reminder activation for unsupported Runner versions; verify two-app restart/crash fixtures prevent duplicate schedules.
+- [ ] 7.3 Enforce first-release imported notification data-only state across all Runner versions; verify no imported timer/reminder/Pomodoro notification can activate via UI/restart/event while new Bar-native reminders remain functional. Implement future stop/ACK only in separately approved change.
 - [ ] 7.4 Test migration while notification permission is denied or source app cannot communicate; verify destination reminders remain inactive and no false completion is shown.
 - [ ] 7.5 Preserve floating system-local recurrence using Calendar matchingPolicy nextTime and repeatedTimePolicy first; verify Tokyo/New York DST, travel, manual clock changes and stable occurrence dedup.
-- [ ] 7.6 Implement raw local-event 4096-byte ceiling, 16 accepted events/second, 64 active-channel cap and 1800-second fallback lease; verify threshold, expiration, storm and malicious-command fixtures.
+- [ ] 7.6 Implement raw local-event 4096-byte ceiling, 12 set + 4 reserved terminal events/second, 128 ingress-attempt ceiling, 64 active-channel cap and 1800-second fallback lease; verify threshold, clearance on reserve overflow, storm quarantine and zero GitHub mutation fixtures.
 - [ ] 7.7 Differentiate recoverable render failures from fatal app crashes in UI and recovery flow; verify safe-mode relaunch behavior and no claim of in-process crash isolation.
 - [ ] 7.8 Review newly proposed numeric event budgets on a real Mac with synthetic load; verify the final performance numbers before enabling Companion event bridging.
+
+## 8. Re-review closure: handoff scope and local-event termination
+
+- [ ] 8.1 Make imported Runner reminder/timer/Pomodoro notifications inactive by default and unenableable in initial integrated release; verify old Runner pending schedules remain untouched, two-app restarts never register a duplicate and new Bar-created notifications remain usable.
+- [ ] 8.2 Define user-facing data-only limitation and future protocol requirements (signed/authenticated peer identity, source revision, nonce/replay, durable stop evidence); verify raw distributed notifications and user-confirm-only flags never set `runnerDisabledVerified`.
+- [ ] 8.3 Implement 12 update + 4 reserved clear/cancel budget and a fail-closed volatile-state clear on terminal overflow; verify valid clear after update saturation, 5th terminal clear and 129th raw ingress attempt cannot leave a stale local trigger.
+- [ ] 8.4 Measure the initial bounded event ingress and fail-safe rendering on a Mac; verify privacy-safe diagnostics and ensure GitHub/Focus aren't canceled by a local event storm.
