@@ -26,7 +26,7 @@ Verified baseline in main:
 | Local build/character distributed events | SchneeRunnerApp | Display-only untrusted event adapter | No credential or write path |
 | Timers, Pomodoro, reminders, history | SchneeRunnerCore + App | ProductivityCore + notification adapter | Deadline/restart/idempotency tests |
 | Launch at login | Both app lifecycles | SchneeBar-only ownership | Old login item handled explicitly |
-| Historical Runner state and character library | SchneeRunner Application Support | Versioned copy-only importer | Atomic, reloaded, rollback |
+| Historical Runner state, character library and preferences | Runner Application Support **plus UserDefaults domain** | Versioned copy-only importer + authorized source export fallback | Atomic, reloaded, omissions visible |
 | Localization | SchneeRunner ja/en; SchneeBar features | Design System-driven UI language audit | ja/en parity |
 | Release assets/signing | Both release policies | SchneeBar release pipeline | Provenance, sign, notarize |
 
@@ -82,3 +82,13 @@ Measure on a fixed Mac device and build configuration; establish pre-integration
 - Actual performance/CPU usage before assigning binding SLOs.
 
 Links: [Architecture](ARCHITECTURE.md), [GitHub integration](GITHUB_INTEGRATION.md), [Release](RELEASE.md), [Security plan](SECURITY_HARDENING_PLAN.md), [ADR-0004](decisions/0004-schneerunner-integration-boundaries.md).
+
+## Review closure: migration and local event guarantees (2026-11-07)
+
+The detailed implementation contracts live at:
+
+- `openspec/changes/integrate-schneerunner/runner-data-migration-contract.md`: includes Runner UserDefaults and bundle/sandbox constraints, explicit old→new ID mapping and visible partial import.
+- `openspec/changes/integrate-schneerunner/notification-handoff-contract.md`: source-owned disable/ack before Bar scheduling; without an authenticated supported protocol the app performs **data-only** import and keeps copied reminders inactive.
+- `openspec/changes/integrate-schneerunner/local-events-and-time-contract.md`: raw input budgets, trusted renderer errors versus fatal process crash, Runner-compatible floating local time and DST handling.
+
+None of these contracts creates a runtime protocol or changes installed Runner releases. A real-Mac source-app handoff smoke, permissions tests and source preference inventory remain required for release.

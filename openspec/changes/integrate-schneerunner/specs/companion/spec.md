@@ -58,3 +58,15 @@ The app SHALL allow users to disable developer-triggered character reactions ind
 #### Scenario: Developer reactions disabled
 - **WHEN** a workflow failure is received while developer reactions are disabled
 - **THEN** the character SHALL not change because of that workflow and GitHub monitoring SHALL continue independently.
+
+### Requirement: Fatal crashes are not mislabeled as isolated renderer failures
+
+The app SHALL recover safely from handled renderer/asset failures but SHALL NOT guarantee that unrelated UI remains live during an unhandled fatal process crash in the same process.
+
+#### Scenario: Renderer returns an invalid frame
+- **WHEN** a Companion renderer rejects a frame with a recoverable error
+- **THEN** the app SHALL stop that animation and SHALL retain the main menu-bar UI.
+
+#### Scenario: Safe recovery after process restart
+- **WHEN** the user relaunches after an application crash correlated with Companion playback
+- **THEN** the app SHALL provide a safe option to keep Companion disabled while retaining settings and GitHub connection state.

@@ -49,7 +49,7 @@ Use existing SchneeBar typography/material/spacing and visual harness. Home / De
 
 ## Data migration
 
-Copy-only opt-in migration from `Application Support/SchneeRunner`: validate regular files, canonical owned paths, resource budgets, schema versions, recurrence rules and package assets. Stage write; reload; commit; record migration marker. Old app state/notifications untouched until user explicitly authorizes cutover; schedule only one app's reminders. Failures preserve original and expose retry. Test both unsigned-preview and signed-app runtime differences.
+Copy-only opt-in migration from Runner-owned Application Support **and explicitly inventoried UserDefaults domains**: validate accessible per-bundle preference keys, regular files, canonical owned paths, resource budgets, schema versions, recurrence rules and package assets. When cross-app preferences are inaccessible, require an explicit Runner export or user-selected source; do not assume the new app's defaults see the old ones. Stage write; reload; commit; record migration marker. Old app state/notifications untouched until user explicitly authorizes cutover; schedule only one app's reminders. Failures preserve original and expose retry. Test both unsigned-preview and signed-app runtime differences.
 
 ## Security, performance and observability
 
@@ -80,16 +80,16 @@ Each module behind a feature flag, disabled by default initially. Migration does
 
 **Activity event**: typed allowlist of event kinds, source connection UUID, stable repository ID, observed timestamp, generation and bounded severity/context. Cache dedup key uses connection + repository + event/run ID + state, not raw UI text. Drop expired, too-old and inactive-generation events. No token, raw source URL, runner executable command or mutation callback.
 
-**Notifications**: namespace IDs to SchneeBar bundle identity and migration source; preserve Runner-owned pending requests until user cutover is confirmed. Reconcile persisted deadline/recurrence state before installing any new request. A repeated startup must not emit duplicate completion.
+**Notifications**: namespace IDs to SchneeBar bundle identity and migration source. Because one app cannot cancel another app's pending requests, require durable Runner stop/disable acknowledgement before new app schedule; without a supported protocol, migrate data only with notifications inactive. Reconcile persisted deadline/recurrence state before installing any new request. A repeated startup must not emit duplicate completion.
 
-**Asset and data migration**: staging directory must not follow symlinks or accept path traversal; validate copy and fully reload before atomic swap. Retry tracks migration version/source provenance and never deletes original. Persist pending-cutover state separately from committed data.
+**Asset and data migration**: staging directory must not follow symlinks or accept path traversal; validate copy and fully reload before atomic swap. Inventory both Application Support files and separate Runner UserDefaults domain; explicit user export fallback when cross-app access is unavailable. Retry tracks migration version/source provenance and old→new IDs, never deletes original, and exposes partial success. Persist pending-cutover state separately from committed data.
 
 ## Risks / Trade-offs
 
 - User's Mac supports only macOS 14 → retain SchneeRunner; target does not promise backwards compatibility.
 - Unsigned preview cannot deliver some notification behaviors → explicitly communicate capability state and test signed build.
 - Third-party fan artwork rights uncertain → no bundled redistribution before permission/license review; generic default placeholder.
-- Duplicate running apps → do not auto-register migrated reminders until explicit cutover; guide manual old-app disablement.
+- Duplicate running apps → a click alone is not verification: require durable source disable acknowledgement or hold migrated reminders inactive; do not access the other app's notification center.
 - Shared sampler semantic regression → preserve original CPU widget test fixtures and profile across fan-out.
 - Performance regression → optional flags, real-device profiling, rollback modules independently.
 
@@ -101,3 +101,11 @@ Each module behind a feature flag, disabled by default initially. Migration does
 4. Add copy-only staged import, opt-in notification ownership and diagnostic markers.
 5. Perform real-device regression, migration/retry and dual-app tests before enabling new defaults.
 6. On failure disable feature flags, roll back the SchneeBar change and keep Runner source state and previous GitHub credentials untouched.
+
+## Review closure: executable contracts
+
+- [Runner data & preference migration](runner-data-migration-contract.md): separately inventories Application Support + UserDefaults/bundle domain and guarantees copy-only atomic/idempotent promotion, partial import reporting and verified old→new UUID mapping.
+- [Notification handoff](notification-handoff-contract.md): `copiedInactive → awaitingRunnerStop → runnerDisabledVerified → barActive` state machine with no automatic cross-app notification cancellation. Unsupported old Runner means **data-only** migration and no active reminders.
+- [Local events, renderer and reminder calendar](local-events-and-time-contract.md): pre-decode 4 KiB byte limit, rate/channel/TTL caps, recoverable renderer errors rather than impossible process-crash survival, and Runner-compatible floating local-time DST policy.
+
+**Evidence status:** contracts are proposed; source-app handoff support and complete preference-domain inventory are not yet implemented. The new application's Source→Destination `Application Support` and UserDefaults migrations must pass real-macOS compatibility and sandbox tests before opt-in activation.

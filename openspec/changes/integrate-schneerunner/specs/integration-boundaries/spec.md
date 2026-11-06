@@ -31,9 +31,13 @@ Optional features SHALL have independent lifecycle and observable failure state.
 - **WHEN** a connected GitHub token becomes unusable
 - **THEN** GitHub surfaces SHALL request reauthentication and Companion/Productivity SHALL remain operational.
 
-#### Scenario: Character renderer crashes or fails to load asset
-- **WHEN** a character asset cannot load
-- **THEN** the app SHALL fall back to a safe icon/hidden renderer without losing the main menu-bar interface.
+#### Scenario: Recoverable renderer or asset error
+- **WHEN** a character asset fails to decode or a renderer reports a recoverable error
+- **THEN** the app SHALL stop only the affected Companion playback and SHALL fall back to a safe icon or hidden renderer without losing the main menu-bar interface.
+
+#### Scenario: Fatal application process crash
+- **WHEN** the whole application terminates from an unhandled fatal error
+- **THEN** the app SHALL NOT claim in-process crash isolation; on subsequent launch it SHALL permit disabling the failing Companion feature without changing saved GitHub credentials.
 
 ### Requirement: GitHub activity signals are bounded and private
 
@@ -58,3 +62,23 @@ The app SHALL distinguish host-wide raw CPU usage, smoothed host CPU usage and p
 #### Scenario: Activity Monitor comparison
 - **WHEN** a user compares system CPU widget values with Activity Monitor process CPU
 - **THEN** the app SHALL label the differing measurement scope rather than imply that these percentages should match.
+
+### Requirement: Local event ingress is bounded before decoding
+
+The app SHALL treat Distributed Notifications as untrusted, SHALL check raw UTF-8 size before JSON materialization, SHALL limit aggregate accepted event rate and active channels, and SHALL expire state without granting API-write authority.
+
+#### Scenario: Raw payload exceeds byte cap
+- **WHEN** a local event exceeds 4096 UTF-8 bytes before decoding
+- **THEN** the adapter SHALL reject it without allocating an unbounded JSON model or changing character state.
+
+#### Scenario: Event storm exceeds rate cap
+- **WHEN** the seventeenth event arrives within a rolling one-second window or the sixty-fifth channel would be active
+- **THEN** the adapter SHALL drop the excess event, maintain bounded accounting and SHALL NOT invoke any GitHub mutation.
+
+#### Scenario: Build-start event never receives terminal state
+- **WHEN** a local build started state remains unrenewed beyond 1800 seconds
+- **THEN** the trigger SHALL expire rather than continue indefinitely.
+
+#### Scenario: Untrusted event attempts notification handoff
+- **WHEN** a distributed notification claims that the source Runner disabled its reminder schedule
+- **THEN** the app SHALL NOT treat this unverified message as an authorized migration acknowledgement.

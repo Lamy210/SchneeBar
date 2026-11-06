@@ -50,3 +50,14 @@
 - [ ] 6.5 Benchmark real-Mac idle CPU/memory/wakeups across feature flag combinations; verify documented measured numbers and revised budgets.
 - [ ] 6.6 Review distribution terms, universal binary, artwork provenance, signing/notarization and release gates; verify checklists before publishing.
 - [ ] 6.7 Review Runner-to-Bar feature parity, user migration and rollback; verify explicit approval before any announcement of Runner end-of-life.
+
+## 7. Review closure acceptance tasks (not implemented)
+
+- [ ] 7.1 Inventory Runner Application Support and all UserDefaults keys/bundle domains, including character selection and desktop visibility; verify source-to-target map and accessible/export-only fallback on signed Mac.
+- [ ] 7.2 Implement versioned copy-only migration marker and old-to-new asset UUID remapping; verify source storage is unmodified and partial preference omissions are visible.
+- [ ] 7.3 Define and implement Runner-owned durable disable-and-acknowledge notification handoff, or disable reminder activation for unsupported Runner versions; verify two-app restart/crash fixtures prevent duplicate schedules.
+- [ ] 7.4 Test migration while notification permission is denied or source app cannot communicate; verify destination reminders remain inactive and no false completion is shown.
+- [ ] 7.5 Preserve floating system-local recurrence using Calendar matchingPolicy nextTime and repeatedTimePolicy first; verify Tokyo/New York DST, travel, manual clock changes and stable occurrence dedup.
+- [ ] 7.6 Implement raw local-event 4096-byte ceiling, 16 accepted events/second, 64 active-channel cap and 1800-second fallback lease; verify threshold, expiration, storm and malicious-command fixtures.
+- [ ] 7.7 Differentiate recoverable render failures from fatal app crashes in UI and recovery flow; verify safe-mode relaunch behavior and no claim of in-process crash isolation.
+- [ ] 7.8 Review newly proposed numeric event budgets on a real Mac with synthetic load; verify the final performance numbers before enabling Companion event bridging.
