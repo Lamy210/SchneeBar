@@ -4,13 +4,16 @@ import SwiftUI
 
 public struct WidgetOverviewView: View {
     private let snapshots: [WidgetSnapshot]
+    private let diagnosticsByWidgetID: [WidgetID: WidgetRuntimeDiagnostic]
     private let surfaceStyle: SchneeSurfaceStyle
 
     public init(
         snapshots: [WidgetSnapshot],
+        diagnosticsByWidgetID: [WidgetID: WidgetRuntimeDiagnostic] = [:],
         surfaceStyle: SchneeSurfaceStyle = .adaptive
     ) {
         self.snapshots = snapshots
+        self.diagnosticsByWidgetID = diagnosticsByWidgetID
         self.surfaceStyle = surfaceStyle
     }
 
@@ -27,7 +30,10 @@ public struct WidgetOverviewView: View {
                 )
             } else {
                 ForEach(snapshots, id: \.descriptor.id) { snapshot in
-                    WidgetRow(snapshot: snapshot)
+                    WidgetRow(
+                        snapshot: snapshot,
+                        diagnostic: diagnosticsByWidgetID[snapshot.descriptor.id]
+                    )
                 }
             }
         }
@@ -40,25 +46,51 @@ public struct WidgetOverviewView: View {
 
 private struct WidgetRow: View {
     let snapshot: WidgetSnapshot
+    let diagnostic: WidgetRuntimeDiagnostic?
+
+    private var isStale: Bool {
+        diagnostic?.indicatesStaleReading(for: snapshot) == true
+    }
+
+    private var lastUpdatedDescription: String {
+        guard let lastSucceededAt = diagnostic?.lastSucceededAt else {
+            return "Update failed · last reading"
+        }
+        return "Update failed · last updated \(lastSucceededAt.formatted(date: .abbreviated, time: .shortened))"
+    }
 
     var body: some View {
-        HStack(spacing: 10) {
-            Image(systemName: snapshot.content().systemImage ?? "circle.fill")
-                .foregroundStyle(tint)
-                .frame(width: 18)
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 10) {
+                Image(systemName: snapshot.content().systemImage ?? "circle.fill")
+                    .foregroundStyle(isStale ? .orange : tint)
+                    .frame(width: 18)
 
-            Text(snapshot.descriptor.displayName)
-                .lineLimit(1)
+                Text(snapshot.descriptor.displayName)
+                    .lineLimit(1)
 
-            Spacer(minLength: 12)
+                Spacer(minLength: 12)
 
-            Text(snapshot.content().text)
-                .foregroundStyle(.secondary)
-                .monospacedDigit()
-                .lineLimit(1)
+                Text(snapshot.content().text)
+                    .foregroundStyle(isStale ? .orange : .secondary)
+                    .monospacedDigit()
+                    .lineLimit(1)
+            }
+
+            if isStale {
+                Label(lastUpdatedDescription, systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption2)
+                    .foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("widget-stale-\(snapshot.descriptor.id.rawValue)")
+            }
         }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(snapshot.content().accessibilityLabel)
+        .accessibilityLabel(
+            isStale
+                ? "\(snapshot.content().accessibilityLabel). Stale reading. \(lastUpdatedDescription)"
+                : snapshot.content().accessibilityLabel
+        )
     }
 
     private var tint: Color {
