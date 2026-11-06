@@ -208,7 +208,6 @@ func cpuProviderReportsStalledCounterReadingsAsErrorsAndCanRecover() async throw
     #expect(samples.callCount() == 3)
 }
 
-
 /// Explicit handshake keeps concurrent CPU tests independent of CI scheduling.
 private actor CPUAsyncGate {
     private var parked = false
@@ -293,7 +292,8 @@ func cpuProviderCoalescesOverlappingInitialSnapshots() async throws {
     let firstSnapshot = try await first.value
     let secondSnapshot = try await second.value
     #expect(firstSnapshot.content(for: .normal).text == "Total CPU 30%")
-    #expect(secondSnapshot == firstSnapshot)
+    // Independently created snapshots have different generatedAt timestamps.
+    #expect(secondSnapshot.content(for: .normal) == firstSnapshot.content(for: .normal))
     #expect(reader.callCount() == 2)
 
     // Once the shared flight completes, the next refresh must read again.
