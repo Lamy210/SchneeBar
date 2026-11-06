@@ -134,7 +134,10 @@ func refreshReportsRequestInventoryLimitWithoutDeletingSavedSelection() async th
     #expect(card.status == .inventoryLimitReached)
     #expect(card.status.label == "Repository discovery limit reached")
     #expect(model.profiles.first?.repositorySelection == profile.repositorySelection)
-    #expect(model.managementModel(profileID: profile.id) == nil)
+    // Management remains accessible for recovery, but incomplete inventory
+    // must never be surfaced as current repository access.
+    let management = try #require(model.managementModel(profileID: profile.id))
+    #expect(management.repositories.isEmpty)
 }
 
 @Test @MainActor
