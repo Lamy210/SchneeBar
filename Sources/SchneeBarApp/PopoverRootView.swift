@@ -14,7 +14,12 @@ struct PopoverRootView: View {
         VStack(spacing: 8) {
             WidgetOverviewView(
                 snapshots: model.snapshots,
-                diagnosticsByWidgetID: model.diagnosticsByWidgetID
+                diagnosticsByWidgetID: model.diagnosticsByWidgetID,
+                emptyState: WidgetEmptyDisplayReason.resolve(
+                    descriptors: model.descriptors,
+                    configuration: model.configuration,
+                    diagnosticsByWidgetID: model.diagnosticsByWidgetID
+                )
             )
 
             if activityIsEnabled {
