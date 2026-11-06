@@ -55,3 +55,13 @@ Status: Proposed, 2026-11-06. Scope: SchneeBar GitHub access plus future credent
 ADR-0002 remains **Accepted**: local-first Device Flow and no mandatory auth broker. Switching to hosted authorization-code/PKCE is a **separate future decision** with backend threat model, secret custody, GHES compatibility, SLO/cost analysis. This proposal does not introduce a hosted backend.
 
 Implementation to be tracked by `openspec/changes/harden-github-connections/`; do not mark SEC items complete before tests.
+
+## Review closure (P0/P1, 2026-11-07)
+
+The OpenSpec now defines three explicit implementation contracts; these are **unimplemented** and must be reviewed/tested before enabling GitHub-triggered integrations:
+
+1. `openspec/changes/harden-github-connections/credential-lifecycle-contract.md` — per-identity epoch, durable state transitions, migration/refresh/disconnect fencing and reauthentication after provider-side rotation crash.
+2. `openspec/changes/harden-github-connections/write-authorization-contract.md` — separate read/write App authorization, current server capability evidence and single-use user intent; existing broad read tokens do not authorize writes by default.
+3. `openspec/changes/harden-github-connections/cleanup-ledger-contract.md` — profile-independent step journal, partial deletion retry and global UI state across restarts.
+
+Acceptance requires synthetic race/crash/error injection and real-Mac signed Keychain tests. A passed OpenSpec CLI validation is **not** proof of these runtime guarantees.

@@ -43,3 +43,12 @@
 - [ ] 6.1 Run focused Swift security tests and existing SchneeBar regression/visual suites; verify checks green on exact commit.
 - [ ] 6.2 Run signed real-Mac Keychain/device-auth/redirect smoke with synthetic credentials; verify recorded reproducible test evidence.
 - [ ] 6.3 Review rollback and restore of legacy credentials, logging and remaining risks; verify maintainer acceptance before enabling GitHub-triggered Companion events.
+
+## 7. P0/P1 review closure contracts (implementation remains pending)
+
+- [ ] 7.1 Implement per-credential durable migration epoch/tombstone and exclusive update coordination; verify refresh-vs-migration-vs-disconnect concurrency, reboot and stale-write fixtures from credential-lifecycle-contract.md.
+- [ ] 7.2 Verify refresh-token rotation crash window requires reauthentication rather than unsafe rollback; record mock/provider-backed behavior and no invalid credential reuse.
+- [ ] 7.3 Implement independently enrolled read/write App credential namespaces and one-shot confirmed intent; verify account/host/repository mismatch and legacy broad-scope read token produce zero unauthorized writes.
+- [ ] 7.4 Implement a durable profile-independent CleanupLedger and global retry UI; verify history-delete failure after profile deletion survives relaunch and never restores credentials.
+- [ ] 7.5 Audit durability/storage-protection of lifecycle journal, credential metadata and cleanup records; verify no tokens are written outside Keychain.
+- [ ] 7.6 Review GHES write-permission evidence and owned-App expiry compatibility against real deployment matrix; verify unknown cases remain disabled rather than inferred.

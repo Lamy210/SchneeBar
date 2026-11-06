@@ -57,3 +57,15 @@ The interface SHALL distinguish verified connection status, unverified account-s
 #### Scenario: GitHub account security cannot be inspected
 - **WHEN** GitHub API evidence does not establish whether passkeys or 2FA are active
 - **THEN** the UI SHALL report the setting as not verified rather than marking it secure.
+
+### Requirement: Cleanup is visible without the deleted profile
+
+The app SHALL display unfinished local cleanup in a global Security/Cleanup location, independently of whether the old connection profile still exists.
+
+#### Scenario: Profile is already removed
+- **WHEN** a user opens Security/Cleanup after a failed history deletion and the original connection row is gone
+- **THEN** the pending operation SHALL remain visible with its safe retry action and a truthful local-versus-remote authorization explanation.
+
+#### Scenario: Ledger retry succeeds
+- **WHEN** a pending historical cleanup is retried after a restart and all remaining steps succeed
+- **THEN** the UI SHALL show local cleanup complete while SHALL NOT claim remote GitHub App authorization was revoked.

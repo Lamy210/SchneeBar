@@ -15,7 +15,7 @@
 2. Read new DPK item using `kSecUseDataProtectionKeychain=true`. If absent, attempt exact legacy lookup without DPK flag.
 3. Validate decoded credential shape, canonical endpoint binding/account identity and lifetime rules appropriate to its legacy status; ambiguous credentials require reauthentication.
 4. Write a **new** DPK item with `kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly` for background read-only monitoring and non-synchronizing behavior. Preserve service/account identity mapping unless migration requires namespacing.
-5. Read back and compare credential metadata and secret equality in memory; only then delete the expected legacy entry. All error paths preserve the source and surface retry.
+5. Read back and compare credential metadata and secret equality in memory; commit the durable promotion for the still-current epoch; only then delete the expected legacy entry. Concurrent refresh/recovery/disconnect operations are serialized or fenced by the per-credential coordinator. Preserve the source until promotion and surface retry on local failures; provider-side token rotation may require reauthentication.
 6. Test both success and crash windows and ensure disconnected credentials are not resurrected.
 7. Consider separate `WhenUnlockedThisDeviceOnly` storage for write credentials **only after** signed-app UX/integration tests; no silent change to existing background refresh behavior.
 
@@ -34,14 +34,14 @@
 
 ## Permissions and app scopes
 
-- Keep read-only connection usable without Actions(write). Separate write-capable GitHub App/credential is preferred over a mere local toggle.
+- Keep read-only connection usable without Actions(write). Require a separately enrolled, verified write grant bound to account/origin/App/repository and distinct Keychain namespace; legacy Actions(write) visibility does not automatically authorize a mutation.
 - Authoritative per-repository write check at the mutation service, in addition to existing UI check and confirmation; reject unknown/capability unavailable.
 - A local build event, distributed notification, character pack or external widget must not be able to reach a write API by graph construction.
 - GitHub user access token scopes are limited by GitHub App configuration **and** user repository permission. Distinguish that from a UX-level visibility filter.
 
 ## Disconnect and incident recovery
 
-- Token deletion, connection profile removal and local history deletion produce separately observed results. Mark cleanup pending on failure; never hide with `try?` or claim full cleanup.
+- Token deletion, connection profile removal and local history deletion produce separately observed results. **Persist a profile-independent CleanupLedger before normal deletion**; mark cleanup pending on failure, including after relaunch. Never hide with `try?` or claim full cleanup.
 - Remote GitHub App authorization revocation is not the same operation. Provide official GitHub Applications link where no verified revocation API is usable without a backend/client secret.
 - Token suspected stolen: stop local polling, delete local item, guide user to GitHub-side revocation and audit of installed Apps, PATs, SSH keys and sessions.
 
@@ -87,3 +87,11 @@ Cleanup health states: `localRemoved`, `localCleanupPending`, `localCleanupFaile
 5. Gate mutating operations behind separately scoped authority and user confirmation.
 6. Roll back to previously stored validated credentials when safe, or require reauthentication rather than reusing ambiguous or leaked tokens.
 7. Do not enable GitHub→Companion event routing until all relevant P0 evidence and security reviews are complete.
+
+## Normative lifecycle and authority contracts
+
+- [Credential lifecycle, generation fencing and DPK migration](credential-lifecycle-contract.md): establishes the **state machine**, durable disconnect tombstone, single-writer lease, crash windows and limits of refresh-token rollback. In particular, `read-back` alone is not enough to stop concurrent credential resurrection.
+- [GitHub write authorization](write-authorization-contract.md): selects a **separate read/write GitHub App authorization** with dedicated stored credential namespace, verifiable provider evidence and single-use confirmed write intent. Existing read profiles stay usable; writes remain disabled pending enrollment. A UI toggle alone is not authorization.
+- [Profile-independent CleanupLedger](cleanup-ledger-contract.md): stepwise local deletion outcome, durable error retention and retry after profile removal, with remote revocation explicitly `unknown` unless proven.
+
+These contracts are proposals requiring target macOS/GitHub compatibility tests, not claims that existing implementation has these safety properties.
