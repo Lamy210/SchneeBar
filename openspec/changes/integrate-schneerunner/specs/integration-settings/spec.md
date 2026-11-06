@@ -24,7 +24,7 @@ The app SHALL offer Minimal, Dashboard and Companion presentation presets withou
 
 #### Scenario: User switches to Companion mode
 - **WHEN** the user selects the Companion preset
-- **THEN** visual composition MAY change but GitHub connection permissions and write authorization SHALL remain unchanged.
+- **THEN** visual composition SHALL follow the selected preset while GitHub connection permissions and write authorization SHALL remain unchanged.
 
 ### Requirement: Preferences have explainable states
 
