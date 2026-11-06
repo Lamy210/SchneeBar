@@ -54,4 +54,14 @@ public extension WidgetRuntimeDiagnostic {
             && isServingLastKnownGood
             && lastSucceededAt != nil
     }
+
+    /// A first failed attempt has no last-known-good reading to show.
+    /// This is distinct from an unattempted, disabled or hidden widget.
+    var indicatesUnavailableReading: Bool {
+        health == .unavailable
+            && lastAttemptedAt != nil
+            && lastSucceededAt == nil
+            && consecutiveFailureCount > 0
+            && !isServingLastKnownGood
+    }
 }

@@ -270,7 +270,9 @@ final class MenuBarController: NSObject {
         let presentation = await engine.currentPresentation()
         guard isCurrentRuntime(generation) else { return }
         let diagnostics = Dictionary(
-            presentation.diagnostics.map { ($0.descriptor.id, $0) },
+            presentation.diagnostics
+                .filter { runtimeModel.configuration.isEnabled($0.descriptor) }
+                .map { ($0.descriptor.id, $0) },
             uniquingKeysWith: { _, latest in latest }
         )
         apply(snapshots: presentation.snapshots, diagnostics: diagnostics)
@@ -284,13 +286,29 @@ final class MenuBarController: NSObject {
         runtimeModel.diagnosticsByWidgetID = diagnostics
 
         guard let button = statusItem.button else { return }
-        let labels = snapshots.prefix(3).map { snapshot in
+        let displayedIDs = Set(snapshots.map(\.descriptor.id))
+        let unavailableLabels = diagnostics.values
+            .filter {
+                $0.indicatesUnavailableReading
+                    && !displayedIDs.contains($0.descriptor.id)
+            }
+            .sorted {
+                if $0.descriptor.defaultOrder != $1.descriptor.defaultOrder {
+                    return $0.descriptor.defaultOrder < $1.descriptor.defaultOrder
+                }
+                return $0.descriptor.id.rawValue < $1.descriptor.id.rawValue
+            }
+            .map { "\($0.descriptor.displayName) unavailable" }
+        let snapshotLabels = snapshots.map { snapshot in
             let representation = runtimeModel.configuration.representation(for: snapshot)
             let text = snapshot.content(for: representation).text
             let isStale = diagnostics[snapshot.descriptor.id]?
                 .indicatesStaleReading(for: snapshot) == true
             return isStale ? "\(text) (stale)" : text
         }
+        // Errors must be visible even when other widgets occupy the three
+        // available status-bar positions.
+        let labels = Array((unavailableLabels + snapshotLabels).prefix(3))
 
         button.title = labels.isEmpty ? "" : " " + labels.joined(separator: "  ")
         button.imagePosition = labels.isEmpty ? .imageOnly : .imageLeading

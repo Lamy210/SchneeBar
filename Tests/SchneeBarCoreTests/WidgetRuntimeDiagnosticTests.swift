@@ -209,3 +209,30 @@ func widgetPresentationDoesNotMarkAnUnrelatedSnapshotAsStale() async throws {
     #expect(diagnostic.isServingLastKnownGood)
     #expect(!diagnostic.indicatesStaleReading(for: unrelatedSnapshot))
 }
+
+@Test
+func initialProviderFailureProducesExplicitUnavailableReadingAndThenRecovers() async throws {
+    let provider = DiagnosticSequenceProvider(outcomes: [false, false, true])
+    let engine = WidgetEngine(providers: [provider])
+
+    let initial = await engine.currentPresentation()
+    let notLoaded = try #require(initial.diagnostics.first)
+    #expect(initial.snapshots.isEmpty)
+    #expect(!notLoaded.indicatesUnavailableReading)
+
+    _ = await engine.refresh(id: "diagnostic-sequence")
+    _ = await engine.refresh(id: "diagnostic-sequence")
+    let failed = await engine.currentPresentation()
+    #expect(failed.snapshots.isEmpty)
+    let unavailable = try #require(failed.diagnostics.first)
+    #expect(unavailable.health == .unavailable)
+    #expect(unavailable.consecutiveFailureCount == 2)
+    #expect(unavailable.indicatesUnavailableReading)
+
+    _ = await engine.refresh(id: "diagnostic-sequence")
+    let recovered = await engine.currentPresentation()
+    #expect(recovered.snapshots.count == 1)
+    let healthy = try #require(recovered.diagnostics.first)
+    #expect(healthy.health == .healthy)
+    #expect(!healthy.indicatesUnavailableReading)
+}

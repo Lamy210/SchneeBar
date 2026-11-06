@@ -17,12 +17,27 @@ public struct WidgetOverviewView: View {
         self.surfaceStyle = surfaceStyle
     }
 
+    private var unavailableDiagnostics: [WidgetRuntimeDiagnostic] {
+        let displayedIDs = Set(snapshots.map(\.descriptor.id))
+        return diagnosticsByWidgetID.values
+            .filter {
+                $0.indicatesUnavailableReading
+                    && !displayedIDs.contains($0.descriptor.id)
+            }
+            .sorted {
+                if $0.descriptor.defaultOrder != $1.descriptor.defaultOrder {
+                    return $0.descriptor.defaultOrder < $1.descriptor.defaultOrder
+                }
+                return $0.descriptor.id.rawValue < $1.descriptor.id.rawValue
+            }
+    }
+
     public var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Widgets")
                 .font(.headline)
 
-            if snapshots.isEmpty {
+            if snapshots.isEmpty && unavailableDiagnostics.isEmpty {
                 ContentUnavailableView(
                     "No visible widgets",
                     systemImage: "rectangle.topthird.inset.filled",
@@ -34,6 +49,9 @@ public struct WidgetOverviewView: View {
                         snapshot: snapshot,
                         diagnostic: diagnosticsByWidgetID[snapshot.descriptor.id]
                     )
+                }
+                ForEach(unavailableDiagnostics, id: \.descriptor.id) { diagnostic in
+                    UnavailableWidgetRow(diagnostic: diagnostic)
                 }
             }
         }
@@ -107,5 +125,38 @@ private struct WidgetRow: View {
         case .unavailable:
             .gray
         }
+    }
+}
+
+private struct UnavailableWidgetRow: View {
+    let diagnostic: WidgetRuntimeDiagnostic
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 10) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.orange)
+                    .frame(width: 18)
+
+                Text(diagnostic.descriptor.displayName)
+                    .lineLimit(1)
+
+                Spacer(minLength: 12)
+
+                Text("Unavailable")
+                    .foregroundStyle(.orange)
+            }
+
+            Text("Measurement failed. SchneeBar will retry automatically.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(
+            "\(diagnostic.descriptor.displayName) unavailable. Measurement failed. Will retry."
+        )
+        .accessibilityIdentifier("widget-unavailable-\(diagnostic.descriptor.id.rawValue)")
     }
 }
