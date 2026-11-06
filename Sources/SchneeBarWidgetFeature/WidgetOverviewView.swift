@@ -63,7 +63,7 @@ private struct WidgetRow: View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 10) {
                 Image(systemName: snapshot.content().systemImage ?? "circle.fill")
-                    .foregroundStyle(isStale ? .orange : tint)
+                    .foregroundStyle(isStale ? Color.orange : tint)
                     .frame(width: 18)
 
                 Text(snapshot.descriptor.displayName)
@@ -72,7 +72,7 @@ private struct WidgetRow: View {
                 Spacer(minLength: 12)
 
                 Text(snapshot.content().text)
-                    .foregroundStyle(isStale ? .orange : .secondary)
+                    .foregroundStyle(isStale ? Color.orange : Color.secondary)
                     .monospacedDigit()
                     .lineLimit(1)
             }
@@ -85,6 +85,7 @@ private struct WidgetRow: View {
                     .accessibilityIdentifier("widget-stale-\(snapshot.descriptor.id.rawValue)")
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(
             isStale
