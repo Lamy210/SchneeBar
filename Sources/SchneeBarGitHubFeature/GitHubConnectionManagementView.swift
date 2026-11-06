@@ -342,7 +342,7 @@ public struct GitHubConnectionManagementView: View {
         HStack(spacing: 10) {
             if selectionMode == .selected {
                 Toggle(
-                    "",
+                    "Monitor \(repository.fullName)",
                     isOn: Binding(
                         get: { selectedRepositoryIDs.contains(repository.id) },
                         set: { newValue in
@@ -355,6 +355,9 @@ public struct GitHubConnectionManagementView: View {
                     )
                 )
                 .labelsHidden()
+                .accessibilityLabel("Monitor \(repository.fullName)")
+                .accessibilityHint("Include this repository in developer activity monitoring")
+                .accessibilityIdentifier("repository-monitor-\(repository.id)")
             } else {
                 Image(systemName: "checkmark.circle.fill")
                     .foregroundStyle(.secondary)
