@@ -1,3 +1,6 @@
+## Purpose
+The companion capability gives users safe, optional animated characters in the menu bar or on the desktop, reacting to validated local and developer events without gaining access to GitHub credentials or write operations.
+
 ## ADDED Requirements
 
 ### Requirement: Optional companion presentation without duplicate app lifecycle
@@ -39,3 +42,19 @@ The companion SHALL honor Reduce Motion, user opt-out and background suspension;
 #### Scenario: Reduce Motion enabled
 - **WHEN** the system Reduce Motion preference becomes active
 - **THEN** character playback SHALL reduce or freeze animation without hiding critical textual status.
+
+### Requirement: Character rendering remains usable when assets are unavailable
+
+The app SHALL preserve the core menu-bar interface if a character file is unavailable, malformed, or removed after import.
+
+#### Scenario: Selected asset no longer exists
+- **WHEN** the selected character's source file is missing during startup
+- **THEN** the app SHALL display a safe fallback state and SHALL keep the dashboard, timers and account connections functional.
+
+### Requirement: Reactions honor user privacy preferences
+
+The app SHALL allow users to disable developer-triggered character reactions independently of GitHub activity monitoring.
+
+#### Scenario: Developer reactions disabled
+- **WHEN** a workflow failure is received while developer reactions are disabled
+- **THEN** the character SHALL not change because of that workflow and GitHub monitoring SHALL continue independently.

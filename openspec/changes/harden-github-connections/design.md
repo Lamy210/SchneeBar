@@ -48,3 +48,42 @@
 ## Security invariants
 
 No client secret/private key in repo or binary; TLS validation enforced; bounded input and output; no credentials in UI/domain/companion event objects; no accidental privilege change from an integration feature. Keep ADR-0002 unless explicitly replaced after separately reviewed broker threat model.
+
+## Security model and decisions
+
+Trust boundaries: User ⇄ trusted external browser GitHub authorization; GitHub REST/OAuth HTTPS origin ⇄ network transport; app-owned connection profile ⇄ Keychain stored secret; explicitly confirmed UI mutation ⇄ write-capable GitHub API. Local Distributed Notifications, character packs and external widgets are untrusted data and never cross into the mutation authorization boundary.
+
+Decisions:
+- Keep ADR-0002 Device Flow without mandatory broker; improving phishing guidance is a mitigation, not an elimination of Device Flow's inherent remote-phishing weakness.
+- Use exact origin-account-bound Keychain record lookup. Legacy migration must be **recoverable**, not a cleanup step before validated reauthentication.
+- Separate read-only GitHub App authority from opt-in write-capable authority; a settings toggle cannot reduce an already-issued token's server-granted permissions.
+- Use request-layer redirect protection for both OAuth body parameters and bearer headers. Maintain HTTPS certificate verification; avoid unsupported certificate-bypass switches for GHES.
+- Do not infer GitHub account passkey/2FA state, App publisher, or remote grant revocation from insufficient API evidence.
+
+## Data, state and error contracts
+
+Connection identity key: deployment kind, canonical HTTPS origin and stable numeric GitHub account ID. Connection IDs are app-local UUIDs and cannot substitute for account identity. Treat any mismatch at credential reload/recovery as reauthentication required with no token traffic to newly supplied origin.
+
+Credential health states: `usable`, `refreshRequired`, `reauthenticationRequired`, `unsupportedEnterpriseBehavior`, `connectionDisabled`. Store must never expose `accessToken`/ `refreshToken` to generic UI and must serialize rotated credential updates.
+
+Cleanup health states: `localRemoved`, `localCleanupPending`, `localCleanupFailed`, `remoteRevocationUnknown`; do not conflate them. Disconnect UI distinguishes local removal from the actual GitHub App authorization state.
+
+**Failure handling**: 401 → reauthentication state; explicit SSO evidence → SSO state; ambiguous 403/404 → insufficient evidence rather than claiming SSO; expired/invalid refresh → no repeated polling; network/429 → bounded backoff; user cancel → stop polling and discard candidate credential. Security failures use bounded redacted diagnostics.
+
+## Risks / Trade-offs
+
+- Keychain protection type migration can change background availability → prove DPK and existing OS behavior on a signed Mac; keep legacy fallback only while migration is pending.
+- GHES versions may not honor hosted token expiry contract → verify supported matrix and choose explicit compatibility/reauthentication state, not fabricated metadata.
+- Device Flow phishing persists → only trusted initiation, host display and strong anti-phishing guidance; reconsider with a separate broker ADR if supported.
+- Write App provisioning may be less convenient → default read-only; offer explicit step-up workflow rather than hidden broad access.
+- Remote grant cannot be revoked safely by a secretless local public client in all cases → link GitHub's authoritative management UI.
+
+## Migration Plan and rollback
+
+1. Add deterministic no-secret characterization fixtures; ensure existing tests pass.
+2. Implement DPK read/write as a separate store strategy behind an enablement gate.
+3. Verify migrated item read-back and exact endpoint/account identity before legacy deletion; test power loss/retry windows.
+4. Enable expiring-token policy only with per-deployment evidence; allow explicit legacy recovery.
+5. Gate mutating operations behind separately scoped authority and user confirmation.
+6. Roll back to previously stored validated credentials when safe, or require reauthentication rather than reusing ambiguous or leaked tokens.
+7. Do not enable GitHub→Companion event routing until all relevant P0 evidence and security reviews are complete.

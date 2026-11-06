@@ -64,3 +64,40 @@ One-shot app merge (lifecycle duplication and unreviewed data moves); permanent 
 ## Rollback
 
 Each module behind a feature flag, disabled by default initially. Migration does not destroy old app data. Revert new modules without changing `SchneeBarGitHub` persisted credentials. Avoid changing bundle ID or Keychain service in the integration PR.
+
+## Decisions and evidence gates
+
+| Decision | Rationale | Counterexample / rejection criterion |
+| --- | --- | --- |
+| Reuse RunnerCore behavior in SchneeBar targets | Keeps one process and predictable UI | Dependency/licensing review rejects copying or runtime costs regress |
+| Preserve current Device Flow ADR-0002 | No mandatory authentication server | New authoritative GitHub App requirement makes this untenable; open a separate ADR |
+| Expose Companion only as credential-free consumer | Prevents local events reaching mutating GitHub API | A new feature requires explicit user-initiated action and a separate capability review |
+| Copy-only migration first | Source data survives release rollback | Real users require live two-way sync; separately threat-model before considering it |
+
+## Contracts and error-handling details
+
+**Metrics**: use monotonic sample generation and host CPU counters; represent absent/invalid sample explicitly. Widget may consume raw CPU percentage and Companion may consume smoothing, but neither presents process CPU equivalence. Disabled consumer removes its subscription and stops work when none remain.
+
+**Activity event**: typed allowlist of event kinds, source connection UUID, stable repository ID, observed timestamp, generation and bounded severity/context. Cache dedup key uses connection + repository + event/run ID + state, not raw UI text. Drop expired, too-old and inactive-generation events. No token, raw source URL, runner executable command or mutation callback.
+
+**Notifications**: namespace IDs to SchneeBar bundle identity and migration source; preserve Runner-owned pending requests until user cutover is confirmed. Reconcile persisted deadline/recurrence state before installing any new request. A repeated startup must not emit duplicate completion.
+
+**Asset and data migration**: staging directory must not follow symlinks or accept path traversal; validate copy and fully reload before atomic swap. Retry tracks migration version/source provenance and never deletes original. Persist pending-cutover state separately from committed data.
+
+## Risks / Trade-offs
+
+- User's Mac supports only macOS 14 → retain SchneeRunner; target does not promise backwards compatibility.
+- Unsigned preview cannot deliver some notification behaviors → explicitly communicate capability state and test signed build.
+- Third-party fan artwork rights uncertain → no bundled redistribution before permission/license review; generic default placeholder.
+- Duplicate running apps → do not auto-register migrated reminders until explicit cutover; guide manual old-app disablement.
+- Shared sampler semantic regression → preserve original CPU widget test fixtures and profile across fan-out.
+- Performance regression → optional flags, real-device profiling, rollback modules independently.
+
+## Migration Plan
+
+1. Record baseline and artifact provenance; independently review ADR-0004.
+2. Land focused security prerequisite and pure Core tests in separate PRs.
+3. Introduce disabled-by-default feature flags with no persistent format migration.
+4. Add copy-only staged import, opt-in notification ownership and diagnostic markers.
+5. Perform real-device regression, migration/retry and dual-app tests before enabling new defaults.
+6. On failure disable feature flags, roll back the SchneeBar change and keep Runner source state and previous GitHub credentials untouched.

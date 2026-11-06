@@ -1,3 +1,6 @@
+## Purpose
+The productivity capability provides network-independent countdowns, Pomodoro sessions, scheduled reminders and history with durable deadline semantics, duplicate-safe notification delivery and recoverable migration from SchneeRunner.
+
 ## ADDED Requirements
 
 ### Requirement: Deadline-based productivity state
@@ -35,3 +38,27 @@ Migration SHALL copy validated legacy data into newly owned storage, record a sc
 #### Scenario: Migration is repeated
 - **WHEN** the same source snapshot is migrated again
 - **THEN** no duplicate timers, reminder schedules or history entries SHALL be created.
+
+### Requirement: Reminder recurrence is deterministic across clock changes
+
+The app SHALL calculate recurring reminders using the user's configured calendar and time zone rather than depending on a fixed interval since the previous delivery.
+
+#### Scenario: Daylight saving time transition
+- **WHEN** a weekday or daily reminder crosses a daylight saving time boundary
+- **THEN** the next scheduled occurrence SHALL follow a documented calendar policy without duplicate reminders for the same occurrence.
+
+### Requirement: Notification authorization failure does not corrupt productivity state
+
+The app SHALL preserve timers and reminders even when the user denies, withdraws or cannot obtain operating-system notification permission.
+
+#### Scenario: Notification permission denied
+- **WHEN** the user denies notification authorization
+- **THEN** the app SHALL retain durable timer/reminder data, show a permission-limited state, and SHALL NOT claim a system notification was delivered.
+
+### Requirement: Migration cutover requires explicit confirmation
+
+The app SHALL show which existing Runner data can be imported and require confirmation before activating migrated notification schedules.
+
+#### Scenario: User imports character and timer data without reminder cutover
+- **WHEN** import succeeds but the user has not authorized reminder cutover
+- **THEN** migrated reminder definitions SHALL remain inactive in SchneeBar and original Runner data SHALL remain unchanged.

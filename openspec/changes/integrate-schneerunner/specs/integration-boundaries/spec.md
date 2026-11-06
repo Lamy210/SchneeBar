@@ -1,3 +1,6 @@
+## Purpose
+The integration boundary capability provides stable, credential-free signals and shared macOS services so existing SchneeBar system widgets, GitHub activity, optional Companion and Focus features can coexist without privilege or polling duplication.
+
 ## ADDED Requirements
 
 ### Requirement: Shared system metrics have a single platform owner
@@ -31,3 +34,27 @@ Optional features SHALL have independent lifecycle and observable failure state.
 #### Scenario: Character renderer crashes or fails to load asset
 - **WHEN** a character asset cannot load
 - **THEN** the app SHALL fall back to a safe icon/hidden renderer without losing the main menu-bar interface.
+
+### Requirement: GitHub activity signals are bounded and private
+
+The app SHALL project developer events into character status using only allowlisted event kinds, bounded identifiers and timestamps; raw credentials, arbitrary URLs and private repository payloads SHALL not be exposed.
+
+#### Scenario: Provider sends malformed activity
+- **WHEN** the provider emits an oversized identifier, unsupported signal kind or missing trusted connection identity
+- **THEN** the projection SHALL reject the signal and SHALL NOT start character or GitHub write actions.
+
+### Requirement: Stale or canceled activity cannot change current character state
+
+The app SHALL scope asynchronous developer activity projections to the current connection generation and discard stale results after reconnection or disablement.
+
+#### Scenario: Connection disabled during load
+- **WHEN** a GitHub request completes after its connection was disabled
+- **THEN** the result SHALL not produce a new developer reaction or restore a removed connection.
+
+### Requirement: Core system metrics have explicit units
+
+The app SHALL distinguish host-wide raw CPU usage, smoothed host CPU usage and per-process CPU statistics in any display or diagnostic contract.
+
+#### Scenario: Activity Monitor comparison
+- **WHEN** a user compares system CPU widget values with Activity Monitor process CPU
+- **THEN** the app SHALL label the differing measurement scope rather than imply that these percentages should match.
