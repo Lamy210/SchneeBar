@@ -67,11 +67,14 @@ public actor CPUWidgetProvider: WidgetProvider {
     private let readCounters: @Sendable () throws -> CPUCounters
     private let bootstrapDelay: @Sendable () async throws -> Void
     private let now: @Sendable () -> ContinuousClock.Instant
+    // Internal test hook; production does not observe/coalesce callbacks.
+    private let onJoinInFlight: (@Sendable () -> Void)?
 
     public init() {
         readCounters = readCPUCounters
         bootstrapDelay = { try await Task.sleep(for: .milliseconds(500)) }
         now = { ContinuousClock.now }
+        onJoinInFlight = nil
     }
 
     /// Internal injection seams allow deterministic counter and sampling-gap
@@ -79,11 +82,13 @@ public actor CPUWidgetProvider: WidgetProvider {
     init(
         readCounters: @escaping @Sendable () throws -> CPUCounters,
         bootstrapDelay: @escaping @Sendable () async throws -> Void,
-        now: @escaping @Sendable () -> ContinuousClock.Instant
+        now: @escaping @Sendable () -> ContinuousClock.Instant,
+        onJoinInFlight: (@Sendable () -> Void)? = nil
     ) {
         self.readCounters = readCounters
         self.bootstrapDelay = bootstrapDelay
         self.now = now
+        self.onJoinInFlight = onJoinInFlight
     }
 
     public func snapshot() async throws -> WidgetSnapshot {
@@ -91,6 +96,7 @@ public actor CPUWidgetProvider: WidgetProvider {
         // sleep is suspended. Share that measurement instead of racing baselines.
         let percentage: Double
         if let inFlight {
+            onJoinInFlight?()
             percentage = try await inFlight.value
         } else {
             let task = Task { try await measurePercentage() }

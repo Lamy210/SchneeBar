@@ -207,3 +207,127 @@ func cpuProviderReportsStalledCounterReadingsAsErrorsAndCanRecover() async throw
     #expect(recovered.content(for: .normal).text == "Total CPU 20%")
     #expect(samples.callCount() == 3)
 }
+
+/// Explicit handshake keeps concurrent CPU tests independent of CI scheduling.
+private actor CPUAsyncGate {
+    private var parked = false
+    private var parkedWaiter: CheckedContinuation<Void, Never>?
+    private var releaseWaiter: CheckedContinuation<Void, Never>?
+
+    func park() async {
+        parked = true
+        parkedWaiter?.resume()
+        parkedWaiter = nil
+        await withCheckedContinuation { continuation in
+            releaseWaiter = continuation
+        }
+    }
+
+    func waitUntilParked() async {
+        if parked { return }
+        await withCheckedContinuation { continuation in
+            parkedWaiter = continuation
+        }
+    }
+
+    func release() {
+        releaseWaiter?.resume()
+        releaseWaiter = nil
+    }
+}
+
+private final class CPUJoinProbe: @unchecked Sendable {
+    private let lock = NSLock()
+    private var joined = false
+    private var waiter: CheckedContinuation<Void, Never>?
+
+    func joinedInFlight() {
+        lock.lock()
+        joined = true
+        let oldWaiter = waiter
+        waiter = nil
+        lock.unlock()
+        oldWaiter?.resume()
+    }
+
+    func waitUntilJoined() async {
+        await withCheckedContinuation { continuation in
+            lock.lock()
+            if joined {
+                lock.unlock()
+                continuation.resume()
+            } else {
+                waiter = continuation
+                lock.unlock()
+            }
+        }
+    }
+}
+
+@Test
+func cpuProviderCoalescesOverlappingInitialSnapshots() async throws {
+    let reader = ScriptedCPUReader([
+        cpuCounters(),
+        cpuCounters(user: 30, idle: 70),
+        cpuCounters(user: 45, idle: 155),
+    ])
+    let clock = ScriptedCPUClock()
+    let gate = CPUAsyncGate()
+    let probe = CPUJoinProbe()
+    let provider = CPUWidgetProvider(
+        readCounters: { try reader.next() },
+        bootstrapDelay: { await gate.park() },
+        now: { clock.now() },
+        onJoinInFlight: { probe.joinedInFlight() }
+    )
+
+    let first = Task { try await provider.snapshot() }
+    await gate.waitUntilParked()
+    #expect(reader.callCount() == 1)
+
+    let second = Task { try await provider.snapshot() }
+    await probe.waitUntilJoined()
+    await gate.release()
+
+    let firstSnapshot = try await first.value
+    let secondSnapshot = try await second.value
+    #expect(firstSnapshot.content(for: .normal).text == "Total CPU 30%")
+    // Independently created snapshots have different generatedAt timestamps.
+    #expect(secondSnapshot.content(for: .normal) == firstSnapshot.content(for: .normal))
+    #expect(reader.callCount() == 2)
+
+    // Once the shared flight completes, the next refresh must read again.
+    clock.advance(by: .seconds(5))
+    let followUp = try await provider.snapshot()
+    #expect(followUp.content(for: .normal).text == "Total CPU 15%")
+    #expect(reader.callCount() == 3)
+}
+
+@Test
+func cpuCancelledWaiterDoesNotInterruptOtherInFlightReader() async throws {
+    let reader = ScriptedCPUReader([
+        cpuCounters(),
+        cpuCounters(user: 20, idle: 80),
+    ])
+    let clock = ScriptedCPUClock()
+    let gate = CPUAsyncGate()
+    let probe = CPUJoinProbe()
+    let provider = CPUWidgetProvider(
+        readCounters: { try reader.next() },
+        bootstrapDelay: { await gate.park() },
+        now: { clock.now() },
+        onJoinInFlight: { probe.joinedInFlight() }
+    )
+
+    let active = Task { try await provider.snapshot() }
+    await gate.waitUntilParked()
+    let cancelled = Task { try await provider.snapshot() }
+    await probe.waitUntilJoined()
+    cancelled.cancel()
+    await gate.release()
+
+    let activeSnapshot = try await active.value
+    _ = await cancelled.result
+    #expect(activeSnapshot.content(for: .normal).text == "Total CPU 20%")
+    #expect(reader.callCount() == 2)
+}
