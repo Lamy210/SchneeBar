@@ -41,3 +41,15 @@ The app SHALL provide keyboard-accessible controls, VoiceOver descriptions and r
 #### Scenario: User enables Reduce Motion
 - **WHEN** macOS Reduce Motion is enabled while Companion is active
 - **THEN** animated motion SHALL be reduced without hiding essential status information or controls.
+
+### Requirement: Imported notification restrictions are visible and non-bypassable
+
+The interface SHALL distinguish imported Runner reminder/timer/Pomodoro definitions from newly created SchneeBar schedules and SHALL explain when imported notification delivery is unavailable because no authenticated source stop protocol has been approved.
+
+#### Scenario: Imported schedule activation is requested
+- **WHEN** a user attempts to enable imported Runner notification delivery on the first integrated release
+- **THEN** the control SHALL refuse activation, SHALL show the data-only migration explanation, and SHALL NOT alter existing Runner or new Bar-created notifications.
+
+#### Scenario: User creates a native reminder
+- **WHEN** a user creates a new SchneeBar-owned reminder while imported Runner schedules are inactive
+- **THEN** the interface SHALL permit ordinary notification configuration subject to operating-system authorization.

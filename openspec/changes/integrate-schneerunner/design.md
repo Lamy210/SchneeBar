@@ -49,7 +49,7 @@ Use existing SchneeBar typography/material/spacing and visual harness. Home / De
 
 ## Data migration
 
-Copy-only opt-in migration from Runner-owned Application Support **and explicitly inventoried UserDefaults domains**: validate accessible per-bundle preference keys, regular files, canonical owned paths, resource budgets, schema versions, recurrence rules and package assets. When cross-app preferences are inaccessible, require an explicit Runner export or user-selected source; do not assume the new app's defaults see the old ones. Stage write; reload; commit; record migration marker. Old app state/notifications untouched until user explicitly authorizes cutover; schedule only one app's reminders. Failures preserve original and expose retry. Test both unsigned-preview and signed-app runtime differences.
+Copy-only opt-in migration from Runner-owned Application Support **and explicitly inventoried UserDefaults domains**: validate accessible per-bundle preference keys, regular files, canonical owned paths, resource budgets, schema versions, recurrence rules and package assets. When cross-app preferences are inaccessible, require an explicit Runner export or user-selected source; do not assume the new app's defaults see the old ones. Stage write; reload; commit; record migration marker. Old app state/notifications remain untouched; the first integrated release **does not support imported notification cutover**, regardless of user clicks. Imported notification-bearing definitions remain inactive; newly authored Bar reminders work separately. Failures preserve original and expose retry. Test both unsigned-preview and signed-app runtime differences.
 
 ## Security, performance and observability
 
@@ -98,7 +98,7 @@ Each module behind a feature flag, disabled by default initially. Migration does
 1. Record baseline and artifact provenance; independently review ADR-0004.
 2. Land focused security prerequisite and pure Core tests in separate PRs.
 3. Introduce disabled-by-default feature flags with no persistent format migration.
-4. Add copy-only staged import, opt-in notification ownership and diagnostic markers.
+4. Add copy-only staged import with **inactive imported notification schedules**, explicit unavailable state and diagnostic markers; future trusted ownership cutover is a separate approved change.
 5. Perform real-device regression, migration/retry and dual-app tests before enabling new defaults.
 6. On failure disable feature flags, roll back the SchneeBar change and keep Runner source state and previous GitHub credentials untouched.
 

@@ -33,3 +33,10 @@ The pinned Ubuntu workflow `.github/workflows/openspec.yml` runs the strict vali
 5. Archive the change **only after** implementation and acceptance, allowing its delta specs to become canonical. Do not archive at the Phase 0 docs PR stage.
 
 ADR-0001 and ADR-0002 remain accepted. Switching to a mandatory PKCE broker requires a separate security/design decision.
+
+## Current design gates
+
+- The initial SchneeBar integration release imports Runner reminder/timer/Pomodoro notification-bearing data **without activating imported schedules**; an authenticated source stop/acknowledge protocol is a separately reviewed future capability, not provided by this change.
+- Under an explicitly approved future `strictWriteGrantV2` GitHub security cutover, existing workflow rerun/cancel actions may require separate write App authorization; the prior shipping release and this documentation-only PR do not silently change permissions.
+- Disconnect/reconnect uses per-enrollment credential records and a durable cleanup ledger; P0/P1 contract completion is **not runtime verification**. OpenSpec validation only proves specification structure.
+- CI transitive dependency lockfile integrity is tracked in issue #373 and remains open separately.

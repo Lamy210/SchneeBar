@@ -45,7 +45,7 @@ Verified baseline in main:
 2. Only GitHub integration retrieves/uses tokens. Convert provider events to a small bounded, redacted `DeveloperActivitySignal` (source ID, repo ID, event kind, timestamp, severity, expiry), and pass it one-way to companion.
 3. External Widget documents and local Distributed Notifications are **not authenticated commands**. They may change visual state after validation; they cannot rerun workflows or change accounts.
 4. Single shared CPU sample timestamp/host ticks, calibrated refresh policy and optional EMA smoothing; domain consumers do not independently query Mach counters. Host CPU percentages are not per-process Activity Monitor CPU percentages.
-5. Only the active app owns notification category identifiers and `SMAppService` registration. During parallel installation, prevent duplicate reminders by opt-in cutover and explicit cleanup.
+5. Each installed app owns only its own namespaced notifications and login-item registration. During parallel installation, prevent duplicate reminders by keeping imported Runner notification-bearing schedules **inactive** in the first integration release; there is no trusted source stop/ACK yet.
 6. No direct SwiftUI/Keychain or SwiftUI/URLSession dependency. App delegate and menu item lifecycle remain in SchneeBar.
 7. Character asset files are data, never executable code. Retain existing decompression limits, canonicalization, symlink defenses and staged import/reload.
 
