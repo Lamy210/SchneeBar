@@ -109,9 +109,7 @@ final class MenuBarController: NSObject {
             _ = await engine.refresh(id: Self.activityWidgetID)
             guard isCurrentRuntime(generation) else { return }
 
-            let snapshots = await engine.orderedVisibleSnapshots()
-            guard isCurrentRuntime(generation) else { return }
-            apply(snapshots: snapshots)
+            await applyCurrentPresentation(from: engine, generation: generation)
         }
     }
 
@@ -231,25 +229,22 @@ final class MenuBarController: NSObject {
                     await engine.setConfiguration(configuration)
                     guard isCurrentRuntime(generation) else { return }
 
-                    let snapshots = await engine.refreshDue()
-                    guard isCurrentRuntime(generation) else { return }
-                    apply(snapshots: snapshots)
+                    _ = await engine.refreshDue()
+                    await applyCurrentPresentation(from: engine, generation: generation)
                 }
             }
 
             if forceRefreshOnStart {
                 activityRefreshIsPending = false
-                let snapshots = await engine.refreshAll()
-                guard isCurrentRuntime(generation) else { return }
-                apply(snapshots: snapshots)
+                _ = await engine.refreshAll()
+                await applyCurrentPresentation(from: engine, generation: generation)
             } else if activityRefreshIsPending {
                 refreshActivityNow()
             }
 
             while !Task.isCancelled, isCurrentRuntime(generation) {
-                let snapshots = await engine.refreshDue()
-                guard isCurrentRuntime(generation) else { return }
-                apply(snapshots: snapshots)
+                _ = await engine.refreshDue()
+                await applyCurrentPresentation(from: engine, generation: generation)
 
                 let delay = await engine.secondsUntilNextRefresh(maximum: 30)
                 guard isCurrentRuntime(generation) else { return }
@@ -268,17 +263,38 @@ final class MenuBarController: NSObject {
         activeRuntimeGeneration == generation && runtimeLifecycle.isCurrent(generation)
     }
 
-    private func apply(snapshots: [WidgetSnapshot]) {
+    private func applyCurrentPresentation(
+        from engine: WidgetEngine,
+        generation: WidgetRuntimeLifecycle.Generation
+    ) async {
+        let presentation = await engine.currentPresentation()
+        guard isCurrentRuntime(generation) else { return }
+        let diagnostics = Dictionary(
+            presentation.diagnostics.map { ($0.descriptor.id, $0) },
+            uniquingKeysWith: { _, latest in latest }
+        )
+        apply(snapshots: presentation.snapshots, diagnostics: diagnostics)
+    }
+
+    private func apply(
+        snapshots: [WidgetSnapshot],
+        diagnostics: [WidgetID: WidgetRuntimeDiagnostic]
+    ) {
         runtimeModel.snapshots = snapshots
+        runtimeModel.diagnosticsByWidgetID = diagnostics
 
         guard let button = statusItem.button else { return }
         let labels = snapshots.prefix(3).map { snapshot in
             let representation = runtimeModel.configuration.representation(for: snapshot)
-            return snapshot.content(for: representation).text
+            let text = snapshot.content(for: representation).text
+            let isStale = diagnostics[snapshot.descriptor.id]?
+                .indicatesStaleReading(for: snapshot) == true
+            return isStale ? "\(text) (stale)" : text
         }
 
         button.title = labels.isEmpty ? "" : " " + labels.joined(separator: "  ")
         button.imagePosition = labels.isEmpty ? .imageOnly : .imageLeading
+        button.toolTip = labels.isEmpty ? "SchneeBar" : labels.joined(separator: ", ")
         button.setAccessibilityLabel(
             labels.isEmpty
                 ? "SchneeBar"

@@ -12,7 +12,10 @@ struct PopoverRootView: View {
 
     var body: some View {
         VStack(spacing: 8) {
-            WidgetOverviewView(snapshots: model.snapshots)
+            WidgetOverviewView(
+                snapshots: model.snapshots,
+                diagnosticsByWidgetID: model.diagnosticsByWidgetID
+            )
 
             if activityIsEnabled {
                 Divider()

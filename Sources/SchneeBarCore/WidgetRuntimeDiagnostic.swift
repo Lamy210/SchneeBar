@@ -42,3 +42,16 @@ public struct WidgetRuntimeDiagnostic: Equatable, Sendable {
         self.snapshotGeneratedAt = snapshotGeneratedAt
     }
 }
+
+public extension WidgetRuntimeDiagnostic {
+    /// Only label a *matching* successfully rendered reading as stale.
+    /// A failed attempt without an earlier successful value is unavailable,
+    /// not a stale reading, and stale state must not leak to a replacement
+    /// provider that happens to reuse an ID.
+    func indicatesStaleReading(for snapshot: WidgetSnapshot) -> Bool {
+        descriptor == snapshot.descriptor
+            && health == .degraded
+            && isServingLastKnownGood
+            && lastSucceededAt != nil
+    }
+}

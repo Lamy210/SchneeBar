@@ -399,6 +399,16 @@ public actor WidgetEngine {
             }
     }
 
+    /// Capture rendered values and provider-neutral health in one actor turn.
+    /// This prevents UI from pairing a new failure with an earlier snapshot
+    /// list acquired in a separate actor call.
+    public func currentPresentation() -> (
+        snapshots: [WidgetSnapshot],
+        diagnostics: [WidgetRuntimeDiagnostic]
+    ) {
+        (orderedVisibleSnapshots(), diagnostics())
+    }
+
     public func orderedVisibleSnapshots() -> [WidgetSnapshot] {
         snapshots.values
             .filter { snapshot in

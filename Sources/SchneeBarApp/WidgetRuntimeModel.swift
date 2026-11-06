@@ -5,6 +5,7 @@ import SchneeBarCore
 @Observable
 final class WidgetRuntimeModel {
     var snapshots: [WidgetSnapshot] = []
+    var diagnosticsByWidgetID: [WidgetID: WidgetRuntimeDiagnostic] = [:]
     var descriptors: [WidgetDescriptor] = []
     var configuration = WidgetConfiguration()
     var externalWidgetStartupHealth: ExternalWidgetStartupHealth = .notAttempted
