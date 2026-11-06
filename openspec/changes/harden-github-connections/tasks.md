@@ -52,3 +52,12 @@
 - [ ] 7.4 Implement a durable profile-independent CleanupLedger and global retry UI; verify history-delete failure after profile deletion survives relaunch and never restores credentials.
 - [ ] 7.5 Audit durability/storage-protection of lifecycle journal, credential metadata and cleanup records; verify no tokens are written outside Keychain.
 - [ ] 7.6 Review GHES write-permission evidence and owned-App expiry compatibility against real deployment matrix; verify unknown cases remain disabled rather than inferred.
+
+## 8. Re-review closure: enrollment identity, write migration, corrupted history
+
+- [ ] 8.1 Implement immutable enrollmentID-specific V2 Keychain namespaces distinct from existing `connectionID+accountID` legacy storage; verify A disconnect → B reconnect same identity → A cleanup cannot remove B.
+- [ ] 8.2 Implement physical legacy-item reservation and owner/epoch fencing for v1→v2 migration; verify concurrent refresh/reconnect/disconnect and exact-key-only cleanup across restart.
+- [ ] 8.3 Record reviewed write-App deployment matrix, explicit strictWriteGrantV2 release gate, user-visible breaking-change messaging and non-escalating rollback; verify legacy wide-scope token cannot issue writes after strict cutover.
+- [ ] 8.4 Implement onboarding/recovery for distinct write App while preserving independent read connection and documented unsupported GHES state; verify full rerun/cancel UX and no silent token reuse.
+- [ ] 8.5 Add shared-history corrupt JSON, unsupported schema and unsafe-path blocked cleanup; verify no broad file removal, persistent global error state and preservation of unrelated scopes.
+- [ ] 8.6 Add explicit-consent whole-history purge flow and backup-copy accounting; verify denial leaves all bytes untouched and accepted deletion is restricted to safe app-owned paths.

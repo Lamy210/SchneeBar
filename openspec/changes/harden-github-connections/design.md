@@ -95,3 +95,9 @@ Cleanup health states: `localRemoved`, `localCleanupPending`, `localCleanupFaile
 - [Profile-independent CleanupLedger](cleanup-ledger-contract.md): stepwise local deletion outcome, durable error retention and retry after profile removal, with remote revocation explicitly `unknown` unless proven.
 
 These contracts are proposals requiring target macOS/GitHub compatibility tests, not claims that existing implementation has these safety properties.
+
+## Post-review cross-contract constraints (2026-11-07)
+
+- **Unique enrollment namespace**: provider principal is not a unique credential lifecycle. Each new consent (including reconnect to the same App/account) gets an immutable enrollmentID and V2 Keychain record; old ledger cleanup is address-bound, never principal-wide. See [credential lifecycle](credential-lifecycle-contract.md).
+- **Workflow write compatibility**: strictWriteGrantV2 is an explicitly approved, user-visible breaking authorization cutover; Phase 0 is docs-only, and no old broad credential gains V2 authority. See [write rollout](write-authorization-contract.md). “Preserve developer features” does **not** promise uninterrupted write actions without new enrollment.
+- **Corrupted shared-history recovery**: distinguish retryable failure from blocked unreadable aggregate file. Do not delete all accounts' history as a silent alternative to per-source cleanup. See [CleanupLedger recovery](cleanup-ledger-contract.md).

@@ -146,3 +146,39 @@ The app SHALL persist profile-independent nonsecret step outcomes for local toke
 #### Scenario: Cleanup ledger cannot be saved
 - **WHEN** the app cannot durably record the normal disconnect intent
 - **THEN** it SHALL NOT report that a recoverable full cleanup has started; an explicitly warned emergency local token deletion MAY remain available.
+
+### Requirement: Reconnection allocates a distinct immutable credential enrollment
+
+The app SHALL allocate a new immutable enrollmentID and separate V2 Keychain record for every explicit new authorization, SHALL bind each cleanup and migration operation to exact enrollment and storage record identity, and SHALL forbid old cleanup from deleting a newer enrollment with the same provider principal, clientID or purpose.
+
+#### Scenario: Disconnect then reconnect same account and App
+- **WHEN** enrollment A is disconnected and the same account, origin and GitHub App are authorized again as enrollment B before A's cleanup completes
+- **THEN** the V2 Keychain addresses SHALL differ and deferred cleanup A SHALL NOT delete, invalidate or read B's credential.
+
+#### Scenario: Legacy migration races a new enrollment
+- **WHEN** an old `GitHubCredentialKey(connectionID, accountID)` migration resumes after a new V2 authorization
+- **THEN** legacy cleanup SHALL use only the reserved exact legacy record and SHALL fail closed on an ownership mismatch without touching the new enrollment.
+
+### Requirement: Strict write authorization rollout is explicit and recoverable
+
+Before enabling strictWriteGrantV2 the app SHALL present the impact on existing GitHub workflow rerun/cancel actions, SHALL require a verified separate write grant for new-policy mutation, and SHALL preserve read-only activity when writes are unavailable; it SHALL NOT silently revert to a broad read token after strict activation.
+
+#### Scenario: Existing write-capable connection at strict-policy cutover
+- **WHEN** a user previously relied on Actions write in a read connection but has not enrolled a separate write App
+- **THEN** workflow rerun/cancel SHALL be visibly unavailable, activity reads SHALL continue, and zero mutation requests SHALL be sent until explicit write enrollment.
+
+#### Scenario: Approved policy rollback
+- **WHEN** strict-write rollout must be suspended due to an incompatibility or security fault
+- **THEN** the app SHALL preserve read activity and SHALL keep workflow writes disabled unless an independently verified strict write grant remains valid; legacy broad-token writes SHALL NOT reactivate silently.
+
+### Requirement: Corrupt shared history blocks targeted deletion safely
+
+The app SHALL never represent a failed target-scoped history deletion as complete if a shared history file cannot be safely parsed, SHALL preserve unrelated history without implicit whole-file deletion, and SHALL expose the blocked state with an informed optional full-history purge.
+
+#### Scenario: Shared history schema cannot be parsed
+- **WHEN** a disconnected account's shared history file is corrupt or has an unsupported schema
+- **THEN** the cleanup ledger SHALL show blocked/incomplete status across restart, the file SHALL remain unchanged, and no other account's history SHALL be silently removed.
+
+#### Scenario: User approves complete local-history purge
+- **WHEN** the user is explicitly warned about all-account history loss and confirms a safe app-owned whole-file purge
+- **THEN** the app SHALL delete only the verified owned backing copies, SHALL report any retained backups or unknown erasure scope, and SHALL NOT claim full cleanup until all known copies are accounted for.

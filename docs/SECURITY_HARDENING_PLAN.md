@@ -65,3 +65,11 @@ The OpenSpec now defines three explicit implementation contracts; these are **un
 3. `openspec/changes/harden-github-connections/cleanup-ledger-contract.md` — profile-independent step journal, partial deletion retry and global UI state across restarts.
 
 Acceptance requires synthetic race/crash/error injection and real-Mac signed Keychain tests. A passed OpenSpec CLI validation is **not** proof of these runtime guarantees.
+
+## Implementation readiness addendum (2026-11-07)
+
+- The original `GitHubCredentialKey(connectionID, accountID)` is a **legacy** record lookup, not a sufficient V2 authorization enrollment. A new consent requires a fresh immutable enrollmentID and separate read/write Keychain address; delayed old-account cleanup is never principal-wide.
+- The strict V2 write authorization model is a **breaking workflow action permission change**. Before release, provision/verify the corresponding write App, support explicit re-enrollment, explain disabled rerun/cancel while maintaining developer reads, and require reviewed rollout/rollback behavior. Nothing in this docs PR changes deployed authorization.
+- The existing delivery-history store uses one JSON file for multiple profiles. Malformed/unreadable/unsupported payload is a durable `blocked` cleanup outcome, not an automatic full-file-delete instruction. Preserve other profiles; all-account erasure requires an explicit warning and user approval, and retained backups prevent claims of total cleanup.
+
+Proof: synthetic reconnect+delayed cleanup, strict-policy regression and history-file corruption/symlink fault-injection suites, then signed real-macOS credential tests. All remain unchecked until implemented.

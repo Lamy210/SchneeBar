@@ -9,7 +9,7 @@ Existing GitHub account sessions, Keychain tokens and optional write actions for
 - Verify macOS Data Protection Keychain behavior and migrate legacy secrets without destructive first steps.
 - Require expiry-aware issuance for verified supported GitHub App deployments; preserve safe legacy/enterprise recovery.
 - Prohibit secret-bearing redirects to unauthorized origins.
-- Require independent, explicit authorization for write operations and fail closed when capability is unknown.
+- Require independent, explicit authorization for write operations and fail closed when capability is unknown; **strict cutover is an acknowledged breaking change** for users of legacy Workflow rerun/cancel until new write authorization is enrolled.
 - Separate local disconnection, remaining GitHub authorization and incomplete cleanup states.
 - Make onboarding and account recovery understandable without falsely asserting the GitHub App publisher or account security state.
 - Prevent untrusted local/character events from triggering GitHub mutations.
@@ -39,3 +39,9 @@ No mandatory backend, no Client Secret in the macOS app, no GitHub account passw
 ## Validation / rollback
 
 Test in synthetic OAuth/HTTP/Keychain fixtures plus a signed real Mac. Keep legacy credentials recoverable through partial failures. Feature-gate migrations and preserve reauthentication paths. Never equate deleting a local token with revoking a GitHub-side grant.
+
+## Rollout compatibility and review blockers
+
+Phase 0 (this PR) is specification-only and preserves the running product unchanged. A future strictWriteGrantV2 release must verify provisioned read/write GitHub Apps, host compatibility and reauthorization UI **before** its explicit approval. When strict policy is enabled, legacy read credentials must no longer perform writes, even if server-side permission exists; read monitoring continues. Users without verified write enrollment receive a clear temporarily unavailable mutation state. Rollback never silently restores broad-token writes.
+
+Reconnections use immutable per-enrollment identifiers and distinct Keychain namespaces. Corrupt shared history remains blocked without cross-account data loss. Detailed contracts: `credential-lifecycle-contract.md`, `write-authorization-contract.md`, `cleanup-ledger-contract.md`.

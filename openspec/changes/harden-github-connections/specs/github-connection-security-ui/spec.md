@@ -69,3 +69,23 @@ The app SHALL display unfinished local cleanup in a global Security/Cleanup loca
 #### Scenario: Ledger retry succeeds
 - **WHEN** a pending historical cleanup is retried after a restart and all remaining steps succeed
 - **THEN** the UI SHALL show local cleanup complete while SHALL NOT claim remote GitHub App authorization was revoked.
+
+### Requirement: Permission migration impact is visible before strict write cutover
+
+The interface SHALL distinguish previously allowed workflow mutations from new separately authorized write operations, explain how to enroll a write App where verified support exists, and SHALL NOT present unsupported GitHub hosts as automatically recoverable.
+
+#### Scenario: Existing user lacks a write App
+- **WHEN** strictWriteGrantV2 is enabled for a previously write-capable user's read connection
+- **THEN** the UI SHALL clearly explain why rerun/cancel is unavailable and SHALL leave activity monitoring usable.
+
+### Requirement: History cleanup reports irrecoverable parsing failures
+
+The Security/Cleanup interface SHALL distinguish retryable local history cleanup from a blocked unsafe/corrupted shared store and SHALL never offer destructive all-account purge without explicit informed user consent.
+
+#### Scenario: Corrupt shared history blocks cleanup
+- **WHEN** a history cleanup fails repeatedly because the shared JSON cannot be safely loaded
+- **THEN** the UI SHALL show a persistent blocked state, SHALL not claim complete deletion, and SHALL offer non-destructive recovery guidance.
+
+#### Scenario: User declines deleting all account histories
+- **WHEN** the user declines an explicit destructive whole-history purge
+- **THEN** the app SHALL keep the file unchanged and SHALL leave the cleanup ledger incomplete and visible.
