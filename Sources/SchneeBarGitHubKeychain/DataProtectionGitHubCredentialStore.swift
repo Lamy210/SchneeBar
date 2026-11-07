@@ -2,6 +2,32 @@ import Foundation
 import SchneeBarGitHub
 import Security
 
+public enum DataProtectionGitHubCredentialStoreError: Error, Equatable, Sendable {
+    case invalidEnrollmentPhase
+    case invalidCredentialBinding
+}
+
+/// The binding check is pure so CI exercises it even without a signed,
+/// interactive macOS Keychain. It is a necessary precondition, not proof that
+/// the GitHub account, App installation or journal generation is current.
+enum DataProtectionGitHubCredentialInsertPolicy {
+    static func validate(
+        credential: GitHubCredential,
+        enrollment: GitHubCredentialEnrollmentLifecycle
+    ) throws {
+        guard enrollment.phase == .prepared || enrollment.phase == .migrationPrepared else {
+            throw DataProtectionGitHubCredentialStoreError.invalidEnrollmentPhase
+        }
+        guard enrollment.generation > 0,
+              credential.endpointIdentity == enrollment.canonicalWebOrigin,
+              GitHubDeviceFlowResponsePolicy.isValidOpaqueToken(credential.accessToken),
+              credential.refreshToken.map(GitHubDeviceFlowResponsePolicy.isValidOpaqueToken) ?? true
+        else {
+            throw DataProtectionGitHubCredentialStoreError.invalidCredentialBinding
+        }
+    }
+}
+
 /// A separate, opt-in storage boundary for credentials enrolled by a future
 /// V2 authorization flow. This type is intentionally NOT a GitHubCredentialStore:
 /// existing sessions continue using the unchanged legacy Keychain store.
@@ -47,12 +73,20 @@ public actor DataProtectionGitHubCredentialStore {
     /// any token rotation must go through a separately reviewed coordinator.
     public func insert(
         _ credential: GitHubCredential,
-        for key: GitHubCredentialEnrollmentKey
+        for enrollment: GitHubCredentialEnrollmentLifecycle
     ) async throws {
+        // Never expose a raw-key insertion that could accidentally stage a
+        // GitHub.com token into another enrollment's endpoint or purpose.
+        // A future coordinator MUST additionally validate persisted journal
+        // generation and the provider's numeric account identity before I/O.
+        try DataProtectionGitHubCredentialInsertPolicy.validate(
+            credential: credential,
+            enrollment: enrollment
+        )
         let data = try JSONEncoder().encode(credential)
         var query = DataProtectionGitHubCredentialQuery.baseQuery(
             service: service,
-            key: key
+            key: enrollment.key
         )
         query[kSecValueData] = data
         query[kSecAttrAccessible] =
