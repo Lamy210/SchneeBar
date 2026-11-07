@@ -16,3 +16,9 @@ This prevents lost JOURNAL updates across compliant processes, not arbitrary Key
 ## Test plan
 
 Two journal actors sharing one directory and stale CAS; re-open and readback; same-account disconnect/reconnect isolation; corrupt data, unknown schema, unsafe permissions and symlink rejection; no rewrite of corrupted backing file. Actual abrupt process termination and true multi-process stress must be separately exercised before enabling real token migration.
+
+## Defensive write invariant
+
+The file adapter does not expose an unrestricted snapshot-replace operation. After verifying the expected file snapshot, it additionally requires **all existing enrollment IDs to remain present**, exactly unchanged immutable principal/App/purpose fields, and each modified record to be the result of one valid generation-incrementing state transition. A disconnected tombstone cannot be removed or reset into a new active authorization. New IDs must start at generation 1 in prepared/verified-legacy state. Tests attempt both removal/resurrection and identity reassignment.
+
+This protects against accidental direct use of the persistence adapter outside the journal actor, but does not change the need for a properly authenticated and fenced Keychain mutation coordinator.
