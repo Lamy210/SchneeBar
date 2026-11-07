@@ -94,3 +94,34 @@ public protocol GitHubCredentialStore: Sendable {
     func save(_ credential: GitHubCredential, for key: GitHubCredentialKey) async throws
     func delete(for key: GitHubCredentialKey) async throws
 }
+
+ 
+/// V2 authorization purpose. A purpose is never inferred from the token's
+/// current GitHub server-side permissions.
+public enum GitHubCredentialAuthorizationPurpose: String, Codable, Hashable, Sendable {
+    case read
+    case write
+}
+
+/// The exact storage address for one explicit authorization enrollment.
+///
+/// This is deliberately distinct from GitHubCredentialKey's legacy
+/// connectionID/accountID address. Caller-owned identity, endpoint and
+/// GitHub App binding must be validated by the future enrollment journal.
+/// Do not reuse enrollmentID when an account disconnects and reconnects.
+public struct GitHubCredentialEnrollmentKey: Hashable, Sendable {
+    public let enrollmentID: UUID
+    public let purpose: GitHubCredentialAuthorizationPurpose
+
+    public init(
+        enrollmentID: UUID,
+        purpose: GitHubCredentialAuthorizationPurpose
+    ) {
+        self.enrollmentID = enrollmentID
+        self.purpose = purpose
+    }
+
+    public var storageAccount: String {
+        "v2:\(purpose.rawValue):\(enrollmentID.uuidString.lowercased())"
+    }
+}
