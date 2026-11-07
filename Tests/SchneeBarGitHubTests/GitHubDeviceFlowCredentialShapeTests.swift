@@ -98,14 +98,14 @@ func refreshAcceptsCompleteRotatedCredentialShape() async throws {
 }
 
 @Test
-func refreshAcceptsDocumentedNonExpiringCredentialShape() async throws {
+func legacyGHESRefreshAcceptsDocumentedNonExpiringCredentialShape() async throws {
     let transport = CredentialShapeTransport([
         #"{"access_token":"ghu_nonexpiring","token_type":"bearer"}"#,
     ])
     let client = credentialShapeClient(transport: transport)
 
     let credential = try await client.refresh(
-        connection: try credentialShapeConnection(),
+        connection: try credentialShapeEnterpriseConnection(),
         clientID: "Iv1.client",
         credential: GitHubCredential(
             accessToken: "ghu_old",
@@ -178,5 +178,27 @@ private func credentialShapeConnection() throws -> GitHubConnection {
         displayName: "GitHub.com",
         deploymentKind: .githubDotCom,
         webBaseURL: try #require(URL(string: "https://github.com"))
+    )
+}
+
+@Test
+func hostedGitHubPollRejectsNewNonExpiringCredentialShape() async throws {
+    try await expectShapePollFailure(
+        #"{"access_token":"ghu_nonexpiring","token_type":"bearer"}"#
+    )
+}
+
+@Test
+func hostedGitHubRefreshRejectsNonExpiringRotation() async throws {
+    try await expectShapeRefreshFailure(
+        #"{"access_token":"ghu_nonexpiring","token_type":"bearer"}"#
+    )
+}
+
+private func credentialShapeEnterpriseConnection() throws -> GitHubConnection {
+    GitHubConnection(
+        displayName: "Legacy GitHub Enterprise Server",
+        deploymentKind: .enterpriseServer,
+        webBaseURL: try #require(URL(string: "https://github.internal.example"))
     )
 }
