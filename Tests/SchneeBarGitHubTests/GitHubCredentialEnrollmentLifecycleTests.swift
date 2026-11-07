@@ -106,3 +106,17 @@ func lifecycleMetadataSerializesWithoutCredentialSecrets() throws {
     #expect(!text.contains("accessToken"))
     #expect(!text.contains("refreshToken"))
 }
+
+@Test
+func enrollmentOriginMustNotIncludeAPreselectedPath() throws {
+    for origin in ["https://github.com/private", "https://github.com/v1?x=1",
+                   "https://github.com/#access"] {
+        #expect(throws: GitHubCredentialEnrollmentTransitionError.invalidIdentity) {
+            try GitHubCredentialEnrollmentLifecycle(
+                enrollmentID: UUID(), purpose: .read,
+                canonicalWebOrigin: origin, numericAccountID: "123",
+                appClientID: "Iv1.client"
+            )
+        }
+    }
+}

@@ -23,15 +23,27 @@ private final class CredentialJournalMemoryFixture: GitHubCredentialEnrollmentJo
         return records
     }
 
-    func replace(_ newRecords: [GitHubCredentialEnrollmentLifecycle]) throws {
+    func compareAndReplace(
+        expected: [GitHubCredentialEnrollmentLifecycle],
+        next newRecords: [GitHubCredentialEnrollmentLifecycle]
+    ) throws {
         lock.lock()
         defer { lock.unlock() }
+        guard records == expected else {
+            throw GitHubCredentialEnrollmentJournalError.staleSnapshot
+        }
         if failure {
             failure = false
             if commitThenFail { records = newRecords }
             throw JournalFixtureError.injectedFailure
         }
         records = newRecords
+    }
+
+    func forceLoadFixture(_ values: [GitHubCredentialEnrollmentLifecycle]) {
+        lock.lock()
+        defer { lock.unlock() }
+        records = values
     }
 }
 
@@ -124,9 +136,31 @@ func journalFailsClosedBeforeAndAfterInjectedPersistenceErrors() async throws {
 func journalRefusesDuplicateIDsInLoadedSnapshot() async throws {
     let memory = CredentialJournalMemoryFixture()
     let a = try journalFixtureState()
-    try memory.replace([a, a])
+    memory.forceLoadFixture([a, a])
     let journal = GitHubCredentialEnrollmentJournal(persistence: memory)
     await #expect(throws: GitHubCredentialEnrollmentJournalError.invalidSnapshot) {
         try await journal.record(for: a.enrollmentID)
     }
+}
+
+@Test
+func twoJournalsRejectLostUpdateAfterIndependentCacheLoad() async throws {
+    let persistence = CredentialJournalMemoryFixture()
+    let first = GitHubCredentialEnrollmentJournal(persistence: persistence)
+    let second = GitHubCredentialEnrollmentJournal(persistence: persistence)
+    let enrollment = try journalFixtureState()
+
+    _ = try await first.register(enrollment)
+    _ = try await second.record(for: enrollment.enrollmentID)
+    let active = try await first.transition(
+        enrollmentID: enrollment.enrollmentID, expectedGeneration: 1, to: .dpActive
+    )
+    #expect(active.generation == 2)
+    await #expect(throws: GitHubCredentialEnrollmentJournalError.staleSnapshot) {
+        try await second.transition(
+            enrollmentID: enrollment.enrollmentID,
+            expectedGeneration: 1, to: .disconnected
+        )
+    }
+    #expect(try await second.record(for: enrollment.enrollmentID) == active)
 }
