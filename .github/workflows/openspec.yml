@@ -1,0 +1,47 @@
+name: OpenSpec Validation
+
+on:
+  pull_request:
+    paths:
+      - "openspec/**"
+      - ".github/workflows/openspec.yml"
+  push:
+    branches: [main]
+    paths:
+      - "openspec/**"
+      - ".github/workflows/openspec.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: openspec-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+
+      - name: Use Node.js 22
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "22.12.0"
+
+      - name: Install pinned OpenSpec CLI
+        run: npm install --global @fission-ai/openspec@1.16.0 --no-audit --no-fund
+
+      - name: Report OpenSpec version
+        run: openspec --version
+
+      - name: Validate all changes and specs strictly
+        env:
+          OPENSPEC_TELEMETRY: "0"
+        run: openspec validate --all --strict --no-interactive

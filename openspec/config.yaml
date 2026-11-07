@@ -1,0 +1,36 @@
+schema: spec-driven
+
+context: |
+  Project: Lamy210/SchneeBar, native local-first macOS menu-bar application.
+  Target platform: macOS 15+, Swift 6, AppKit + SwiftUI, Tuist, modular monolith / Ports & Adapters.
+  Architecture authorities: docs/decisions/0001-native-modular-architecture.md,
+    docs/decisions/0002-github-authentication-flow.md (Accepted),
+    docs/decisions/0004-schneerunner-integration-boundaries.md (Proposed).
+  Existing UI: SchneeBarDesignSystem and deterministic Visual Harness.
+  GitHub: multi-account GitHub.com, GHE.com and GHES; secrets remain in Keychain;
+    only GitHub integration may use credentials or perform mutations.
+  Security: least privilege, verified trust boundaries, no Client Secret in public binary,
+    no raw tokens in logs, remote authorization != local disconnect.
+  Companion: SchneeRunnerCore is reuse reference; the merged app owns one NSStatusItem,
+    shared CPU sampling and notification coordination.
+  Preserve user data during migrations; never archive SchneeRunner automatically.
+  Distinguish observed code evidence, inference and not-yet-tested assumptions.
+  Avoid unsupported statements that test execution or release has completed.
+
+rules:
+  proposal:
+    - List New and Modified Capabilities using exact spec directory paths.
+    - Identify in-scope, out-of-scope, dependencies, rollout and rollback.
+  specs:
+    - Define observable behavior, not implementation class names.
+    - Use normative SHALL/MUST and at least one #### Scenario with WHEN and THEN per requirement.
+    - Include denial, cancellation, duplicate, stale, corrupted and recovery cases when relevant.
+    - Never imply local GitHub account security settings are remotely verified without evidence.
+  design:
+    - Identify data ownership, privilege and event trust boundaries.
+    - Include alternatives, failure modes, migration rollback and security/performance trade-offs.
+    - Distinguish existing ADR decisions from new proposals.
+  tasks:
+    - Use numbered checkboxes and state a test, measurement or review artifact for each task.
+    - Mark a task complete only after evidence is available.
+    - Place the implementation and its focused tests in the same task group.
