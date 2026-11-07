@@ -90,7 +90,7 @@ func fileJournalRejectsUnsafeDirectoryAndSymlinkedPayload() async throws {
         let file = dir.appendingPathComponent("enrollments-v1.json")
         try FileManager.default.createSymbolicLink(at: file, withDestinationURL: sensitive)
         let good = GitHubCredentialEnrollmentFileJournalStore(directoryURL: dir)
-        #expect(throws: any Error) { try good.load() }
+        #expect(throws: (any Error).self) { try good.load() }
         #expect(try Data(contentsOf: sensitive) == Data("{}".utf8))
     }
 }
