@@ -5,7 +5,7 @@ Status: opt-in implementation in a separate PR against `main`. Related: #368, Op
 ## What is implemented
 
 - `GitHubCredentialEnrollmentKey` separates V2 read/write authorization records by a fresh immutable enrollment UUID. The account string is `v2:<purpose>:<uuid>` and uses a **different service** from the legacy `GitHubCredentialKey(connectionID, accountID)` storage.
-- `DataProtectionGitHubCredentialStore` has a separate opt-in interface (`load`, **insert-only**, exact-record `delete`), not the production `GitHubCredentialStore` interface. The shipping coordinator still uses the existing legacy service. No user credential is migrated, deleted, rotated or silently promoted.
+- `DataProtectionGitHubCredentialStore` has a separate opt-in interface (`load`, **insert-only with a bound enrollment snapshot**, exact-record `delete`), not the production `GitHubCredentialStore` interface. Insert rejects a wrong/missing endpoint identity, malformed opaque token or a lifecycle phase other than `prepared` / `migrationPrepared` before any Keychain I/O. It builds the item key from the enrollment's purpose and ID, not an independently supplied account key. The shipping coordinator still uses the existing legacy service. No user credential is migrated, deleted, rotated or silently promoted.
 - All V2 item queries explicitly set `kSecUseDataProtectionKeychain=true` and `kSecAttrSynchronizable=false`. New items request `kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly` for future background read-only sessions.
 - A unit test checks namespace isolation and query construction. The optional real-Keychain smoke uses a unique service + synthetic token and is disabled by default on unsigned CI.
 
@@ -26,3 +26,7 @@ These document expected API selection, **not evidence of this app's signed runti
 5. Failure fixtures for duplicate V2 insert, exact delete, legacy and DPK coexistence, empty or corrupt stored record, cancellation between every migration phase.
 
 Do not enable V2 for real credentials based on passing unsigned macOS CI alone. The present code is a **narrow foundation** suitable for separate code review.
+
+## Additional boundary: enrollment-bound V2 insert
+
+This is a **local precondition**, not authorization to write a token from a stale journal generation. The future migration/rotation coordinator must durably verify the current generation and the numeric GitHub account/App identity and perform a read-back before changing any legacy record. The separate V2 store remains disconnected from normal auth flows. Unit tests exercise cross-origin attempts (including wrong port), missing endpoint binding, malformed access/refresh tokens, invalid phase and valid GHES origin. No real Keychain migration is claimed.
