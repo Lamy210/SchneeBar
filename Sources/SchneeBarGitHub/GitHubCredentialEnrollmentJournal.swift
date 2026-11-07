@@ -4,6 +4,7 @@ public enum GitHubCredentialEnrollmentJournalError: Error, Equatable, Sendable {
     case duplicateEnrollment
     case missingEnrollment
     case invalidSnapshot
+    case staleSnapshot
 }
 
 /// Implementations must make each replacement durable and crash-safe before
@@ -11,7 +12,12 @@ public enum GitHubCredentialEnrollmentJournalError: Error, Equatable, Sendable {
 /// cross-process locking, fsync and symlink handling are separate gates.
 public protocol GitHubCredentialEnrollmentJournalPersistence: Sendable {
     func load() throws -> [GitHubCredentialEnrollmentLifecycle]
-    func replace(_ records: [GitHubCredentialEnrollmentLifecycle]) throws
+    /// Compare under the same cross-process lock used for durable replacement.
+    /// Stale expected snapshots MUST fail; never blindly replace the file.
+    func compareAndReplace(
+        expected: [GitHubCredentialEnrollmentLifecycle],
+        next: [GitHubCredentialEnrollmentLifecycle]
+    ) throws
 }
 
 /// In-process serial transition coordinator. A caller must retain the returned
@@ -74,7 +80,7 @@ public actor GitHubCredentialEnrollmentJournal {
         let all = try persistence.load()
         var byID: [UUID: GitHubCredentialEnrollmentLifecycle] = [:]
         for record in all {
-            guard record.generation > 0,
+            guard record.isValidPersistedSnapshot(),
                   byID.updateValue(record, forKey: record.enrollmentID) == nil
             else {
                 throw GitHubCredentialEnrollmentJournalError.invalidSnapshot
@@ -91,7 +97,10 @@ public actor GitHubCredentialEnrollmentJournal {
             $0.enrollmentID.uuidString < $1.enrollmentID.uuidString
         }
         do {
-            try persistence.replace(sorted)
+            let expected = records.values.sorted {
+                $0.enrollmentID.uuidString < $1.enrollmentID.uuidString
+            }
+            try persistence.compareAndReplace(expected: expected, next: sorted)
             records = next
         } catch {
             // A storage adapter may have committed bytes but failed at its

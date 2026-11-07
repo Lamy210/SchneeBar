@@ -55,6 +55,8 @@ public struct GitHubCredentialEnrollmentLifecycle: Codable, Equatable, Sendable 
               let host = url.host, !host.isEmpty,
               url.user == nil, url.password == nil,
               url.query == nil, url.fragment == nil,
+              url.path.isEmpty || url.path == "/",
+              url.port == nil || (1...65535).contains(url.port!),
               let numericID = Int64(numericAccountID),
               numericID > 0, String(numericID) == numericAccountID,
               !appClientID.isEmpty,
@@ -70,6 +72,20 @@ public struct GitHubCredentialEnrollmentLifecycle: Codable, Equatable, Sendable 
         self.appClientID = appClientID
         self.phase = .prepared
         self.generation = 1
+    }
+
+    /// Guard against malformed data decoded directly from an untrusted file.
+    func isValidPersistedSnapshot() -> Bool {
+        guard generation > 0,
+              !(phase == .prepared && generation != 1)
+        else { return false }
+        return (try? Self(
+            enrollmentID: enrollmentID,
+            purpose: purpose,
+            canonicalWebOrigin: canonicalWebOrigin,
+            numericAccountID: numericAccountID,
+            appClientID: appClientID
+        )) != nil
     }
 
     /// This constructor must only be called AFTER the caller has validated the
