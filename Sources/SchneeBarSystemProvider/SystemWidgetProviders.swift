@@ -49,10 +49,12 @@ public struct ClockWidgetProvider: WidgetProvider {
     }
 }
 
+/// Whole-machine CPU activity; unlike Activity Monitor's per-process % CPU,
+/// 100% means all of the host's CPU time is busy.
 public actor CPUWidgetProvider: WidgetProvider {
     public nonisolated let descriptor = WidgetDescriptor(
         id: "system.cpu",
-        displayName: "CPU",
+        displayName: "Total CPU",
         defaultIsEnabled: true,
         defaultOrder: 100,
         defaultRepresentation: .normal,
@@ -60,31 +62,50 @@ public actor CPUWidgetProvider: WidgetProvider {
         refreshPolicy: .interval(5)
     )
 
-    private var previous: CPUCounters?
+    private var previous: (counters: CPUCounters, instant: ContinuousClock.Instant)?
+    private var inFlight: Task<Double, Error>?
+    private let readCounters: @Sendable () throws -> CPUCounters
+    private let bootstrapDelay: @Sendable () async throws -> Void
+    private let now: @Sendable () -> ContinuousClock.Instant
+    // Internal test hook; production does not observe/coalesce callbacks.
+    private let onJoinInFlight: (@Sendable () -> Void)?
 
-    public init() {}
+    public init() {
+        readCounters = readCPUCounters
+        bootstrapDelay = { try await Task.sleep(for: .milliseconds(500)) }
+        now = { ContinuousClock.now }
+        onJoinInFlight = nil
+    }
+
+    /// Internal injection seams allow deterministic counter and sampling-gap
+    /// tests without depending on the host's current CPU load.
+    init(
+        readCounters: @escaping @Sendable () throws -> CPUCounters,
+        bootstrapDelay: @escaping @Sendable () async throws -> Void,
+        now: @escaping @Sendable () -> ContinuousClock.Instant,
+        onJoinInFlight: (@Sendable () -> Void)? = nil
+    ) {
+        self.readCounters = readCounters
+        self.bootstrapDelay = bootstrapDelay
+        self.now = now
+        self.onJoinInFlight = onJoinInFlight
+    }
 
     public func snapshot() async throws -> WidgetSnapshot {
-        var current = try readCPUCounters()
-        let baseline: CPUCounters
-
-        if let previous {
-            baseline = previous
+        // WidgetEngine may request another refresh while the first bootstrap
+        // sleep is suspended. Share that measurement instead of racing baselines.
+        let percentage: Double
+        if let inFlight {
+            onJoinInFlight?()
+            percentage = try await inFlight.value
         } else {
-            baseline = current
-            try await Task.sleep(for: .milliseconds(120))
-            current = try readCPUCounters()
+            let task = Task { try await measurePercentage() }
+            inFlight = task
+            defer { inFlight = nil }
+            percentage = try await task.value
         }
 
-        previous = current
-
-        let totalDelta = current.total >= baseline.total ? current.total - baseline.total : 0
-        let activeDelta = current.active >= baseline.active ? current.active - baseline.active : 0
-        let percentage = totalDelta == 0
-            ? 0
-            : min(100, max(0, Double(activeDelta) / Double(totalDelta) * 100))
         let rounded = Int(percentage.rounded())
-
         let severity: WidgetSeverity
         let priority: WidgetPriority
         switch percentage {
@@ -102,12 +123,12 @@ public actor CPUWidgetProvider: WidgetProvider {
         let compact = WidgetContent(
             text: "\(rounded)%",
             systemImage: "cpu",
-            accessibilityLabel: "CPU usage \(rounded) percent"
+            accessibilityLabel: "Total CPU usage \(rounded) percent"
         )
         let normal = WidgetContent(
-            text: "CPU \(rounded)%",
+            text: "Total CPU \(rounded)%",
             systemImage: "cpu",
-            accessibilityLabel: "CPU usage \(rounded) percent"
+            accessibilityLabel: "Total CPU usage \(rounded) percent"
         )
 
         return WidgetSnapshot(
@@ -118,22 +139,73 @@ public actor CPUWidgetProvider: WidgetProvider {
                 compact: compact,
                 normal: normal,
                 critical: WidgetContent(
-                    text: "CPU \(rounded)%",
+                    text: "Total CPU \(rounded)%",
                     systemImage: "exclamationmark.triangle.fill",
-                    accessibilityLabel: "High CPU usage \(rounded) percent"
+                    accessibilityLabel: "High total CPU usage \(rounded) percent"
                 )
             )
         )
     }
+
+    private func measurePercentage() async throws -> Double {
+        let first = try readCounters()
+        let firstInstant = now()
+
+        if let previous {
+            let elapsed = previous.instant.duration(to: firstInstant)
+            // Discard a stale baseline after sleep/wake or a long suspension.
+            // A fresh short interval is preferable to a misleading average.
+            if elapsed > .zero && elapsed <= .seconds(30) {
+                self.previous = (first, firstInstant)
+                return try first.usagePercentage(since: previous.counters)
+            }
+        }
+
+        try await bootstrapDelay()
+        try Task.checkCancellation()
+        let second = try readCounters()
+        previous = (second, now())
+        return try second.usagePercentage(since: first)
+    }
 }
 
-private struct CPUCounters {
-    let active: UInt64
-    let total: UInt64
+/// host_cpu_load_info_data_t uses natural_t (32-bit) *per CPU state*.
+/// Widening already-summed counters before subtraction loses wrap information;
+/// subtract each state with modulo-2^32 arithmetic, then widen and aggregate.
+struct CPUCounters: Sendable, Equatable {
+    let user: UInt32
+    let system: UInt32
+    let idle: UInt32
+    let nice: UInt32
+
+    func usagePercentage(since previous: CPUCounters) throws -> Double {
+        let userDelta = UInt64(user &- previous.user)
+        let systemDelta = UInt64(system &- previous.system)
+        let niceDelta = UInt64(nice &- previous.nice)
+        let idleDelta = UInt64(idle &- previous.idle)
+
+        // A true 32-bit wrap over an ordinary five-second window produces
+        // a small modular delta. A huge modular delta is far more likely to
+        // be a reset/discontinuity, so fail rather than invent CPU load.
+        let largestDelta = max(userDelta, systemDelta, niceDelta, idleDelta)
+        guard largestDelta <= UInt64(UInt32.max / 2) else {
+            throw CPUWidgetError.implausibleCounterDelta
+        }
+
+        let activeDelta = userDelta + systemDelta + niceDelta
+        let totalDelta = activeDelta + idleDelta
+        guard totalDelta > 0 else {
+            // Lack of fresh host ticks is not evidence of a genuinely idle CPU.
+            throw CPUWidgetError.noCounterProgress
+        }
+        return Double(activeDelta) / Double(totalDelta) * 100
+    }
 }
 
-private enum CPUWidgetError: Error {
+enum CPUWidgetError: Error, Equatable {
     case hostStatistics(kern_return_t)
+    case noCounterProgress
+    case implausibleCounterDelta
 }
 
 private func readCPUCounters() throws -> CPUCounters {
@@ -152,11 +224,10 @@ private func readCPUCounters() throws -> CPUCounters {
         throw CPUWidgetError.hostStatistics(result)
     }
 
-    let user = UInt64(info.cpu_ticks.0)
-    let system = UInt64(info.cpu_ticks.1)
-    let idle = UInt64(info.cpu_ticks.2)
-    let nice = UInt64(info.cpu_ticks.3)
-    let active = user + system + nice
-
-    return CPUCounters(active: active, total: active + idle)
+    return CPUCounters(
+        user: UInt32(truncatingIfNeeded: info.cpu_ticks.0),
+        system: UInt32(truncatingIfNeeded: info.cpu_ticks.1),
+        idle: UInt32(truncatingIfNeeded: info.cpu_ticks.2),
+        nice: UInt32(truncatingIfNeeded: info.cpu_ticks.3)
+    )
 }

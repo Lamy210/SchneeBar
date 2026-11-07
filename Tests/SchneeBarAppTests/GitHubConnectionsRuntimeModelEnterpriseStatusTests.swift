@@ -119,9 +119,47 @@ func refreshKeepsTestedEnterpriseServerVersionConnected() async throws {
     #expect(card.status == .connected(repositoryCount: 1))
 }
 
+@Test @MainActor
+func refreshReportsRequestInventoryLimitWithoutDeletingSavedSelection() async throws {
+    let profile = try enterpriseStatusProfile(serverVersion: "3.22.0")
+    let model = enterpriseStatusModel(
+        profile: profile,
+        inventoryFetchLimits: .init(maximumRequests: 0, maximumItems: 10_000)
+    )
+    model.profiles = [profile]
+
+    await model.refresh(profileID: profile.id)
+
+    let card = try #require(model.connectionCards.first)
+    #expect(card.status == .inventoryLimitReached)
+    #expect(card.status.label == "Repository discovery limit reached")
+    #expect(model.profiles.first?.repositorySelection == profile.repositorySelection)
+    // Management remains accessible for recovery, but incomplete inventory
+    // must never be surfaced as current repository access.
+    let management = try #require(model.managementModel(profileID: profile.id))
+    #expect(management.repositories.isEmpty)
+}
+
+@Test @MainActor
+func refreshReportsItemInventoryLimitWithoutDeletingSavedSelection() async throws {
+    let profile = try enterpriseStatusProfile(serverVersion: "3.22.0")
+    let model = enterpriseStatusModel(
+        profile: profile,
+        inventoryFetchLimits: .init(maximumRequests: 256, maximumItems: 0)
+    )
+    model.profiles = [profile]
+
+    await model.refresh(profileID: profile.id)
+
+    let card = try #require(model.connectionCards.first)
+    #expect(card.status == .inventoryLimitReached)
+    #expect(model.profiles.first?.repositorySelection == profile.repositorySelection)
+}
+
 @MainActor
 private func enterpriseStatusModel(
-    profile: GitHubConnectionProfile
+    profile: GitHubConnectionProfile,
+    inventoryFetchLimits: GitHubInventoryFetchLimits = .init()
 ) -> GitHubConnectionsRuntimeModel {
     let credentialStore = EnterpriseStatusCredentialStore(profile: profile)
     let transport = EnterpriseStatusTransport(
@@ -129,7 +167,10 @@ private func enterpriseStatusModel(
     )
     let coordinator = GitHubConnectionSessionCoordinator(
         credentialStore: credentialStore,
-        accessClient: GitHubAccessClient(transport: transport)
+        accessClient: GitHubAccessClient(
+            transport: transport,
+            inventoryFetchLimits: inventoryFetchLimits
+        )
     )
 
     return GitHubConnectionsRuntimeModel(

@@ -747,13 +747,14 @@ final class GitHubConnectionsRuntimeModel {
                 GitHubAccessClientError.inventoryItemBudgetExceeded {
             // A budget-limited discovery is not an authoritative permission
             // snapshot. Drop stale runtime access, but preserve saved profile
-            // selection so that the user can retry after adjusting scope.
+            // selection so that the user can retry after changing GitHub App
+            // installation access; in-app selection does not reduce inventory discovery.
             guard isCurrentOperationGeneration(generation, for: profileID) else { return }
             let hadInventory = inventoryByConnectionID.removeValue(forKey: profileID) != nil
             capabilitiesByConnectionID.removeValue(forKey: profileID)
             await activityProvider.reset(connectionID: profileID)
             guard isCurrentOperationGeneration(generation, for: profileID) else { return }
-            statusByConnectionID[profileID] = .unavailable
+            statusByConnectionID[profileID] = .inventoryLimitReached
             if hadInventory {
                 onActivitySourceChanged?()
             }
