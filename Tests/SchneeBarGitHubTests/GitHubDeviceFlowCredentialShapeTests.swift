@@ -202,3 +202,24 @@ private func credentialShapeEnterpriseConnection() throws -> GitHubConnection {
         webBaseURL: try #require(URL(string: "https://github.internal.example"))
     )
 }
+
+
+@Test
+func legacyGHESPollAcceptsNonExpiringCredentialShape() async throws {
+    let transport = CredentialShapeTransport([
+        #"{"access_token":"ghu_legacy","token_type":"bearer"}"#,
+    ])
+    let client = credentialShapeClient(transport: transport)
+    let result = try await client.pollOnce(
+        connection: try credentialShapeEnterpriseConnection(),
+        clientID: "Iv1.client",
+        session: try credentialShapeSession()
+    )
+    guard case let .authorized(credential) = result else {
+        Issue.record("Expected legacy GHES authorization")
+        return
+    }
+    #expect(credential.accessToken == "ghu_legacy")
+    #expect(credential.refreshToken == nil)
+    #expect(credential.accessTokenExpiresAt == nil)
+}
