@@ -3,6 +3,7 @@ import Foundation
 public enum GitHubHTTPTransportError: Error, Equatable, Sendable {
     case nonHTTPResponse
     case redirectRejected
+    case unsupportedBackgroundSession
 }
 
 public protocol GitHubHTTPTransport: Sendable {
@@ -36,6 +37,12 @@ public struct URLSessionGitHubHTTPTransport: GitHubHTTPTransport {
     }
 
     public func data(for request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+        // Apple does not deliver the redirect callback for background sessions.
+        // Reject an injected background configuration before sending secrets.
+        guard session.configuration.identifier == nil else {
+            throw GitHubHTTPTransportError.unsupportedBackgroundSession
+        }
+
         let (data, response) = try await session.data(
             for: request,
             delegate: Self.noRedirectDelegate
