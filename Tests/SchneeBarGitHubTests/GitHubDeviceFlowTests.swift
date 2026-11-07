@@ -68,6 +68,7 @@ func beginsDeviceFlowWithoutClientSecret() async throws {
     #expect(request.value(forHTTPHeaderField: "User-Agent") == "SchneeBar")
     let body = String(data: try #require(request.httpBody), encoding: .utf8) ?? ""
     #expect(body.contains("client_id=Iv1.public-client-id"))
+    #expect(body.contains("scope=offline_access"))
     #expect(!body.contains("client_secret"))
 }
 
@@ -89,6 +90,8 @@ func beginsDeviceFlowAgainstCustomPortGHES() async throws {
 
     let request = try #require(await transport.recordedRequests().last)
     #expect(request.url?.absoluteString == "https://github.internal.example:8443/login/device/code")
+    let body = String(data: try #require(request.httpBody), encoding: .utf8) ?? ""
+    #expect(!body.contains("offline_access"))
 }
 
 @Test
@@ -548,4 +551,24 @@ private func githubDotComConnection() throws -> GitHubConnection {
         deploymentKind: .githubDotCom,
         webBaseURL: try #require(URL(string: "https://github.com"))
     )
+}
+
+@Test
+func hostedGitHubEnterpriseCloudDeviceFlowRequestsExpiringCredential() async throws {
+    let transport = QueueGitHubTransport([
+        DeviceFlowStubResponse(
+            #"{"device_code":"device","user_code":"ABCD-EFGH","verification_uri":"https://tenant.ghe.com/login/device","expires_in":900,"interval":5}"#
+        )
+    ])
+    let client = GitHubDeviceFlowClient(transport: transport, now: { fixedNow })
+    let connection = GitHubConnection(
+        displayName: "Hosted Enterprise",
+        deploymentKind: .gheDotCom,
+        webBaseURL: try #require(URL(string: "https://tenant.ghe.com"))
+    )
+    _ = try await client.begin(connection: connection, clientID: "Iv1.enterprise")
+
+    let request = try #require(await transport.recordedRequests().last)
+    let body = String(data: try #require(request.httpBody), encoding: .utf8) ?? ""
+    #expect(body.contains("scope=offline_access"))
 }
