@@ -58,6 +58,9 @@ func fileJournalDoesNotOverwriteUnreadableSharedSnapshot() async throws {
     try await withPrivateJournalDirectory { dir in
         let file = dir.appendingPathComponent("enrollments-v1.json")
         try Data("{broken".utf8).write(to: file)
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o600], ofItemAtPath: file.path
+        )
         let store = GitHubCredentialEnrollmentFileJournalStore(directoryURL: dir)
         #expect(throws: GitHubCredentialEnrollmentFileStoreError.corruptFile) {
             try store.compareAndReplace(expected: [], next: [enrollmentForDisk()])
@@ -98,6 +101,9 @@ func fileJournalRejectsUnknownSchemaWithoutChangingBytes() async throws {
         let file = dir.appendingPathComponent("enrollments-v1.json")
         let bytes = Data("{\"version\":999,\"records\":[]}".utf8)
         try bytes.write(to: file)
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o600], ofItemAtPath: file.path
+        )
         let store = GitHubCredentialEnrollmentFileJournalStore(directoryURL: dir)
         #expect(throws: GitHubCredentialEnrollmentFileStoreError.unsupportedFormat) {
             try store.load()
