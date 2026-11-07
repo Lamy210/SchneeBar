@@ -5,7 +5,7 @@ import Foundation
 /// deterministic failure injection without touching real user credentials.
 public protocol GitHubCredentialEnrollmentStagingDestination: Sendable {
     func load(for key: GitHubCredentialEnrollmentKey) async throws -> GitHubCredential?
-    func insert(_ credential: GitHubCredential, for key: GitHubCredentialEnrollmentKey) async throws
+    func insert(_ credential: GitHubCredential, for enrollment: GitHubCredentialEnrollmentLifecycle) async throws
 }
 
 /// Evidence that the *caller* has independently checked a connection profile
@@ -128,7 +128,7 @@ public actor GitHubCredentialMigrationStager {
             // A crash after insertion may leave the V2 item present while the
             // journal still says migrationPrepared. Resume verifies exact
             // equality rather than overwriting it or deleting the old item.
-            try await destination.insert(candidate, for: prepared.key)
+            try await destination.insert(candidate, for: prepared)
         }
         guard try await destination.load(for: prepared.key) == candidate else {
             throw GitHubCredentialMigrationStagingError.v2ReadbackMismatch

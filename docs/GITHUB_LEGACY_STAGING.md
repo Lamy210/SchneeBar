@@ -23,3 +23,7 @@ A new `GitHubCredentialMigrationStager` accepts a previously verified `GitHubLeg
 ## Tests
 
 Synthetic, no-secret fixtures cover verified copy and non-deletion, staged resume after crash, account/client/endpoint mismatch, absent legacy, preexisting mismatched V2, readback failure, an intervening disconnect and prohibition on treating read access as write authorization. No real Keychain data or GitHub API requests are used.
+
+## PR #381 API alignment
+
+The destination insert method takes the immutable `migrationPrepared` **enrollment lifecycle snapshot**, rather than a separately supplied raw V2 Keychain account key, matching the production V2 store's endpoint, token-shape and phase validation. The synthetic test store checks the prepared phase, read purpose and endpoint binding before accepting an insert. A broader persisted-journal/credential mutation lock is still required before runtime activation.

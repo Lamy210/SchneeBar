@@ -83,15 +83,22 @@ private actor MigrationSyntheticV2Store: GitHubCredentialEnrollmentStagingDestin
 
     func insert(
         _ credential: GitHubCredential,
-        for key: GitHubCredentialEnrollmentKey
+        for enrollment: GitHubCredentialEnrollmentLifecycle
     ) async throws {
+        guard enrollment.phase == .migrationPrepared,
+              enrollment.purpose == .read,
+              credential.endpointIdentity == enrollment.canonicalWebOrigin,
+              !credential.accessToken.isEmpty
+        else {
+            throw MigrationFixtureError.duplicate
+        }
         if let callback = onInsert {
             try await callback()
         }
-        guard entries[key] == nil else {
+        guard entries[enrollment.key] == nil else {
             throw MigrationFixtureError.duplicate
         }
-        entries[key] = credential
+        entries[enrollment.key] = credential
     }
 }
 
@@ -308,4 +315,18 @@ func disconnectDuringStagingPreventsDpActivePromotion() async throws {
     #expect(try await f.journal.record(for: enrollmentID)?.phase == .disconnected)
     #expect(try await f.legacy.load(for: f.oldKey) == f.credential)
     #expect(await f.legacy.deletionCount() == 0)
+}
+
+@Test
+func migrationStagingInsertsUsingPreparedBoundEnrollmentSnapshot() async throws {
+    let f = try await migrationContext()
+    let result = try await f.stager.stageReadCredential(
+        enrollmentID: f.lifecycle.enrollmentID,
+        legacyKey: f.oldKey,
+        binding: f.binding,
+        expectedGeneration: 1
+    )
+    #expect(result.phase == .dpActive)
+    #expect(result.generation == 3)
+    #expect(try await f.destination.load(for: result.key) == f.credential)
 }
