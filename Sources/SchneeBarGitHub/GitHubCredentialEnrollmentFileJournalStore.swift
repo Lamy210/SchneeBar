@@ -44,6 +44,7 @@ public struct GitHubCredentialEnrollmentFileJournalStore:
             guard current == expected else {
                 throw GitHubCredentialEnrollmentJournalError.staleSnapshot
             }
+            try verifyAppendOnlyTransitions(current: current, proposed: next)
             let ordered = next.sorted {
                 $0.enrollmentID.uuidString < $1.enrollmentID.uuidString
             }
@@ -54,6 +55,43 @@ public struct GitHubCredentialEnrollmentFileJournalStore:
                 throw GitHubCredentialEnrollmentFileStoreError.tooLarge
             }
             try atomicWrite(data, directoryFD: fd)
+        }
+    }
+
+    /// No caller can remove a previous enrollment or rewrite identity.
+    /// Persisted tombstones are irreversible; each changed record must be
+    /// exactly one generation ahead along an allowed phase transition.
+    private func verifyAppendOnlyTransitions(
+        current: [GitHubCredentialEnrollmentLifecycle],
+        proposed: [GitHubCredentialEnrollmentLifecycle]
+    ) throws {
+        let nextByID = Dictionary(uniqueKeysWithValues:
+            proposed.map { ($0.enrollmentID, $0) }
+        )
+        let existingIDs = Set(current.map(\.enrollmentID))
+        for old in current {
+            guard let updated = nextByID[old.enrollmentID] else {
+                throw GitHubCredentialEnrollmentJournalError.invalidSnapshot
+            }
+            if updated == old { continue }
+            guard updated.purpose == old.purpose,
+                  updated.canonicalWebOrigin == old.canonicalWebOrigin,
+                  updated.numericAccountID == old.numericAccountID,
+                  updated.appClientID == old.appClientID,
+                  let valid = try? old.transitioned(
+                      to: updated.phase, expectedGeneration: old.generation
+                  ),
+                  valid == updated
+            else {
+                throw GitHubCredentialEnrollmentJournalError.invalidSnapshot
+            }
+        }
+        for entry in proposed where !existingIDs.contains(entry.enrollmentID) {
+            guard entry.generation == 1,
+                  entry.phase == .prepared || entry.phase == .legacyActive
+            else {
+                throw GitHubCredentialEnrollmentJournalError.invalidSnapshot
+            }
         }
     }
 

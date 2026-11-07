@@ -135,3 +135,41 @@ func fileJournalDoesNotReuseEnrolledUUIDAcrossReconnect() async throws {
         #expect(try await restarted.record(for: newer.enrollmentID) == newer)
     }
 }
+
+@Test
+func fileJournalNeverDeletesOrResurrectsPreviousEnrollment() async throws {
+    try await withPrivateJournalDirectory { dir in
+        let store = GitHubCredentialEnrollmentFileJournalStore(directoryURL: dir)
+        let created = try enrollmentForDisk()
+        try store.compareAndReplace(expected: [], next: [created])
+        #expect(throws: GitHubCredentialEnrollmentJournalError.invalidSnapshot) {
+            try store.compareAndReplace(expected: [created], next: [])
+        }
+        let disconnected = try created.transitioned(
+            to: .disconnected, expectedGeneration: 1
+        )
+        try store.compareAndReplace(expected: [created], next: [disconnected])
+        #expect(throws: GitHubCredentialEnrollmentJournalError.invalidSnapshot) {
+            try store.compareAndReplace(expected: [disconnected], next: [created])
+        }
+        #expect(try store.load() == [disconnected])
+    }
+}
+
+@Test
+func fileJournalRejectsIdentityChangeWithinEnrollment() async throws {
+    try await withPrivateJournalDirectory { dir in
+        let store = GitHubCredentialEnrollmentFileJournalStore(directoryURL: dir)
+        let created = try enrollmentForDisk()
+        try store.compareAndReplace(expected: [], next: [created])
+        let spoof = try GitHubCredentialEnrollmentLifecycle(
+            enrollmentID: created.enrollmentID, purpose: .write,
+            canonicalWebOrigin: "https://other.example",
+            numericAccountID: "999", appClientID: "Iv1.spoof"
+        )
+        #expect(throws: GitHubCredentialEnrollmentJournalError.invalidSnapshot) {
+            try store.compareAndReplace(expected: [created], next: [spoof])
+        }
+        #expect(try store.load() == [created])
+    }
+}
