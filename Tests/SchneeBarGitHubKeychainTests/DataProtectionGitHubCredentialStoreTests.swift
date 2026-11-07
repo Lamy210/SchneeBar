@@ -59,9 +59,9 @@ func dataProtectionWriteQueryCannotMatchLegacyAccountByAccident() {
         "dev.lamy.schneebar.github-credentials")
 }
 
-/// Optional, REAL macOS/keychain test. It must run in a signed, interactive
-/// host app with its own test service. Unsigned GitHub CI is not Keychain
-/// protection or lock-state evidence. Enable it only with a dedicated host.
+/// Optional real-Mac smoke test. Run only with a signed interactive host
+/// and an intentionally provided environment opt-in; CI alone cannot prove
+/// Keychain accessibility across lock/first-unlock states.
 @Test
 func signedMacDataProtectionKeychainSmokeWhenExplicitlyEnabled() async throws {
     guard ProcessInfo.processInfo.environment["SCHNEEBAR_DPK_REAL_MAC_SMOKE"] == "1"
@@ -72,29 +72,55 @@ func signedMacDataProtectionKeychainSmokeWhenExplicitlyEnabled() async throws {
     let store = DataProtectionGitHubCredentialStore(
         service: "dev.lamy.schneebar.dpk-smoke.\(UUID().uuidString)"
     )
-    let key = GitHubCredentialEnrollmentKey(
+    let firstKey = GitHubCredentialEnrollmentKey(
         enrollmentID: UUID(),
         purpose: .read
     )
-    let credential = GitHubCredential(
-        accessToken: "synthetic-smoke-token",
+    let secondKey = GitHubCredentialEnrollmentKey(
+        enrollmentID: UUID(),
+        purpose: .read
+    )
+    let first = GitHubCredential(
+        accessToken: "synthetic-smoke-token-a",
         endpointIdentity: "https://github.com"
     )
-    defer {
-        // Never leave a real token here; this fixture stores synthetic data.
-        // Asynchronous cleanup is performed below, not in this defer.
-    }
-    #expect(try await store.load(for: key) == nil)
-    try await store.insert(credential, for: key)
-    #expect(try await store.load(for: key) == credential)
+    let second = GitHubCredential(
+        accessToken: "synthetic-smoke-token-b",
+        endpointIdentity: "https://github.com"
+    )
+    var insertedKeys: [GitHubCredentialEnrollmentKey] = []
 
     do {
-        try await store.insert(credential, for: key)
-        Issue.record("V2 insert unexpectedly overwrote the existing item")
-    } catch GitHubKeychainError.unexpectedStatus(errSecDuplicateItem) {
-        // Expected: existing enrollment cannot be overwritten.
+        #expect(try await store.load(for: firstKey) == nil)
+        try await store.insert(first, for: firstKey)
+        insertedKeys.append(firstKey)
+        #expect(try await store.load(for: firstKey) == first)
+
+        try await store.insert(second, for: secondKey)
+        insertedKeys.append(secondKey)
+        #expect(try await store.load(for: secondKey) == second)
+
+        do {
+            try await store.insert(first, for: firstKey)
+            Issue.record("Existing V2 enrollment was unexpectedly overwritten")
+        } catch GitHubKeychainError.unexpectedStatus(errSecDuplicateItem) {
+            // Expected: one consent never silently replaces another.
+        }
+
+        try await store.delete(for: firstKey)
+        insertedKeys.removeAll { $0 == firstKey }
+        #expect(try await store.load(for: firstKey) == nil)
+        #expect(try await store.load(for: secondKey) == second)
+    } catch {
+        // Clean up even after a failed live Keychain assertion.
+        for key in insertedKeys {
+            try? await store.delete(for: key)
+        }
+        throw error
     }
 
-    try await store.delete(for: key)
-    #expect(try await store.load(for: key) == nil)
+    for key in insertedKeys {
+        try await store.delete(for: key)
+        #expect(try await store.load(for: key) == nil)
+    }
 }
