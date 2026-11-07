@@ -80,6 +80,8 @@ func signedMacDataProtectionKeychainSmokeWhenExplicitlyEnabled() async throws {
         enrollmentID: UUID(),
         purpose: .read
     )
+    let firstEnrollment = try identityBoundTestEnrollment(for: firstKey)
+    let secondEnrollment = try identityBoundTestEnrollment(for: secondKey)
     let first = GitHubCredential(
         accessToken: "synthetic-smoke-token-a",
         endpointIdentity: "https://github.com"
@@ -92,16 +94,16 @@ func signedMacDataProtectionKeychainSmokeWhenExplicitlyEnabled() async throws {
 
     do {
         #expect(try await store.load(for: firstKey) == nil)
-        try await store.insert(first, for: firstKey)
+        try await store.insert(first, for: firstEnrollment)
         insertedKeys.append(firstKey)
         #expect(try await store.load(for: firstKey) == first)
 
-        try await store.insert(second, for: secondKey)
+        try await store.insert(second, for: secondEnrollment)
         insertedKeys.append(secondKey)
         #expect(try await store.load(for: secondKey) == second)
 
         do {
-            try await store.insert(first, for: firstKey)
+            try await store.insert(first, for: firstEnrollment)
             Issue.record("Existing V2 enrollment was unexpectedly overwritten")
         } catch GitHubKeychainError.unexpectedStatus(errSecDuplicateItem) {
             // Expected: one consent never silently replaces another.
@@ -122,5 +124,117 @@ func signedMacDataProtectionKeychainSmokeWhenExplicitlyEnabled() async throws {
     for key in insertedKeys {
         try await store.delete(for: key)
         #expect(try await store.load(for: key) == nil)
+    }
+}
+
+
+private func identityBoundTestEnrollment(
+    for key: GitHubCredentialEnrollmentKey,
+    origin: String = "https://github.com"
+) throws -> GitHubCredentialEnrollmentLifecycle {
+    try GitHubCredentialEnrollmentLifecycle(
+        enrollmentID: key.enrollmentID,
+        purpose: key.purpose,
+        canonicalWebOrigin: origin,
+        numericAccountID: "12345",
+        appClientID: "Iv1.synthetic-testing"
+    )
+}
+
+@Test
+func v2InsertionRequiresExactCanonicalEndpointBinding() throws {
+    let key = GitHubCredentialEnrollmentKey(enrollmentID: UUID(), purpose: .read)
+    let enrollment = try identityBoundTestEnrollment(for: key)
+    try DataProtectionGitHubCredentialInsertPolicy.validate(
+        credential: GitHubCredential(
+            accessToken: "ghu_test",
+            endpointIdentity: "https://github.com"
+        ),
+        enrollment: enrollment
+    )
+    let untrustedOrigins: [String?] = [
+        nil,
+        "https://other.example",
+        "https://github.com:8443",
+        "https://github.com/other",
+    ]
+    for otherOrigin in untrustedOrigins {
+        #expect(throws: DataProtectionGitHubCredentialStoreError.invalidCredentialBinding) {
+            try DataProtectionGitHubCredentialInsertPolicy.validate(
+                credential: GitHubCredential(
+                    accessToken: "ghu_test",
+                    endpointIdentity: otherOrigin
+                ),
+                enrollment: enrollment
+            )
+        }
+    }
+}
+
+@Test
+func v2InsertionRejectsStalePhaseAndInvalidOpaqueTokens() throws {
+    let key = GitHubCredentialEnrollmentKey(enrollmentID: UUID(), purpose: .write)
+    let prepared = try identityBoundTestEnrollment(for: key)
+    let active = try prepared.transitioned(to: .dpActive, expectedGeneration: 1)
+    #expect(throws: DataProtectionGitHubCredentialStoreError.invalidEnrollmentPhase) {
+        try DataProtectionGitHubCredentialInsertPolicy.validate(
+            credential: GitHubCredential(
+                accessToken: "ghu_test",
+                endpointIdentity: "https://github.com"
+            ),
+            enrollment: active
+        )
+    }
+    for token in [
+        "",
+        String(
+            repeating: "a",
+            count: GitHubDeviceFlowResponsePolicy.maximumOpaqueTokenCharacters + 1
+        ),
+    ] {
+        #expect(throws: DataProtectionGitHubCredentialStoreError.invalidCredentialBinding) {
+            try DataProtectionGitHubCredentialInsertPolicy.validate(
+                credential: GitHubCredential(
+                    accessToken: token,
+                    endpointIdentity: "https://github.com"
+                ),
+                enrollment: prepared
+            )
+        }
+    }
+    #expect(throws: DataProtectionGitHubCredentialStoreError.invalidCredentialBinding) {
+        try DataProtectionGitHubCredentialInsertPolicy.validate(
+            credential: GitHubCredential(
+                accessToken: "ghu_test",
+                refreshToken: "",
+                endpointIdentity: "https://github.com"
+            ),
+            enrollment: prepared
+        )
+    }
+}
+
+@Test
+func v2InsertionSupportsExactlyMatchedCustomGHESOrigin() throws {
+    let key = GitHubCredentialEnrollmentKey(enrollmentID: UUID(), purpose: .read)
+    let enrollment = try identityBoundTestEnrollment(
+        for: key,
+        origin: "https://github.internal.example:8443"
+    )
+    try DataProtectionGitHubCredentialInsertPolicy.validate(
+        credential: GitHubCredential(
+            accessToken: "ghu_enterprise",
+            endpointIdentity: "https://github.internal.example:8443"
+        ),
+        enrollment: enrollment
+    )
+    #expect(throws: DataProtectionGitHubCredentialStoreError.invalidCredentialBinding) {
+        try DataProtectionGitHubCredentialInsertPolicy.validate(
+            credential: GitHubCredential(
+                accessToken: "ghu_enterprise",
+                endpointIdentity: "https://github.internal.example"
+            ),
+            enrollment: enrollment
+        )
     }
 }
