@@ -45,12 +45,12 @@ func issuedCredentialRejectsMissingAlternateOrWhitespaceTokenTypes() async throw
 @Test
 func issuedCredentialAcceptsCaseInsensitiveBearerTokenType() async throws {
     let polled = try await pollTokenTypeCredential(
-        #"{"access_token":"ghu_poll","token_type":"Bearer"}"#
+        #"{"access_token":"ghu_poll","expires_in":28800,"refresh_token":"ghr_poll","refresh_token_expires_in":15897600,"token_type":"Bearer"}"#
     )
     #expect(polled.accessToken == "ghu_poll")
 
     let refreshed = try await refreshTokenTypeCredential(
-        #"{"access_token":"ghu_refresh","token_type":"BEARER"}"#
+        #"{"access_token":"ghu_refresh","expires_in":28800,"refresh_token":"ghr_refresh","refresh_token_expires_in":15897600,"token_type":"BEARER"}"#
     )
     #expect(refreshed.accessToken == "ghu_refresh")
 }
