@@ -195,9 +195,15 @@ public struct GitHubDeviceFlowClient: Sendable {
         let url = endpoints.authenticationBaseURL
             .appendingPathComponent("login/device/code", isDirectory: false)
 
+        var parameters = ["client_id": clientID]
+        if Self.requiresExpiringCredential(for: connection) {
+            // GitHub Apps accept only offline_access for token-expiry opt-in.
+            // This does not expand repository permissions.
+            parameters["scope"] = "offline_access"
+        }
         let response: DeviceCodePayload = try await postForm(
             url: url,
-            parameters: ["client_id": clientID]
+            parameters: parameters
         )
         if let error = response.error {
             let code = try validatedOAuthErrorCode(error)
@@ -284,7 +290,11 @@ public struct GitHubDeviceFlowClient: Sendable {
             url: url,
             parameters: parameters
         )
-        return try pollResult(from: payload, session: session)
+        return try pollResult(
+            from: payload,
+            session: session,
+            requireExpiration: Self.requiresExpiringCredential(for: connection)
+        )
     }
 
     public func refresh(
@@ -333,18 +343,25 @@ public struct GitHubDeviceFlowClient: Sendable {
                 description: description
             )
         }
-        return try issuedCredential(from: payload)
+        return try issuedCredential(
+            from: payload,
+            requireExpiration: Self.requiresExpiringCredential(for: connection)
+        )
     }
 
     private func pollResult(
         from payload: TokenPayload,
-        session: GitHubDeviceAuthorizationSession
+        session: GitHubDeviceAuthorizationSession,
+        requireExpiration: Bool
     ) throws -> GitHubDeviceFlowPollResult {
         if payload.accessToken != nil, payload.error != nil {
             throw GitHubDeviceFlowError.invalidResponse
         }
         if payload.accessToken != nil {
-            return .authorized(try issuedCredential(from: payload))
+            return .authorized(try issuedCredential(
+                from: payload,
+                requireExpiration: requireExpiration
+            ))
         }
 
         guard let rawError = payload.error else {
@@ -376,8 +393,18 @@ public struct GitHubDeviceFlowClient: Sendable {
         }
     }
 
+    /// GitHub.com / GHE.com must not newly issue non-expiring user tokens.
+    /// Older GHES installations may not support expiring tokens, so their
+    /// existing documented non-expiring credential shape remains accepted.
+    private static func requiresExpiringCredential(
+        for connection: GitHubConnection
+    ) -> Bool {
+        connection.deploymentKind != .enterpriseServer
+    }
+
     private func issuedCredential(
-        from payload: TokenPayload
+        from payload: TokenPayload,
+        requireExpiration: Bool
     ) throws -> GitHubCredential {
         guard let tokenType = payload.tokenType,
               tokenType == tokenType.trimmingCharacters(
@@ -395,8 +422,12 @@ public struct GitHubDeviceFlowClient: Sendable {
             payload.refreshTokenExpiresIn
         ) {
         case (nil, nil, nil):
-            // GitHub omits all expiration/refresh fields when user access
-            // token expiration is disabled.
+            // Hosted GitHub Apps must issue rotating tokens for new sessions.
+            // Legacy GHES may return the non-expiring shape, which does not
+            // imply a new hosted token is valid.
+            guard !requireExpiration else {
+                throw GitHubDeviceFlowError.invalidResponse
+            }
             return try credential(from: payload)
 
         case let (
