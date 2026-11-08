@@ -127,7 +127,7 @@ private actor OnboardingSaveRaceTransport: GitHubHTTPTransport {
                   path == "/login/oauth/access_token"
         {
             json =
-                #"{"access_token":"save-race-access","token_type":"bearer"}"#
+                #"{"access_token":"save-race-access","expires_in":28800,"refresh_token":"synthetic-refresh-save-race-access","refresh_token_expires_in":15897600,"token_type":"bearer"}"#
         } else if method == "GET", path == "/user" {
             json =
                 #"{"id":42,"login":"octocat","name":"Test User","avatar_url":null}"#

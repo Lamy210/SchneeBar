@@ -66,7 +66,7 @@ private actor RuntimeRaceTransport: GitHubHTTPTransport {
         if method == "POST", path == "/login/oauth/access_token" {
             return try response(
                 for: request,
-                json: #"{"access_token":"test-recovery-token","token_type":"bearer"}"#
+                json: #"{"access_token":"test-recovery-token","expires_in":28800,"refresh_token":"synthetic-refresh-test-recovery-token","refresh_token_expires_in":15897600,"token_type":"bearer"}"#
             )
         }
 

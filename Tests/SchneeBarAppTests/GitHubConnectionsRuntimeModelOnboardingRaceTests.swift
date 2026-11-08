@@ -137,7 +137,7 @@ private actor OnboardingRaceTransport: GitHubHTTPTransport {
                 #"{"device_code":"onboarding-device","user_code":"ONBOARD-CODE","verification_uri":"https://github.com/login/device","expires_in":900,"interval":1}"#
         } else if method == "POST", path == "/login/oauth/access_token" {
             json =
-                #"{"access_token":"fresh-onboarding-token","token_type":"bearer"}"#
+                #"{"access_token":"fresh-onboarding-token","expires_in":28800,"refresh_token":"synthetic-refresh-fresh-onboarding-token","refresh_token_expires_in":15897600,"token_type":"bearer"}"#
         } else if method == "GET", path == "/user" {
             userRequestCount += 1
             json = onboardingRaceUserJSON(

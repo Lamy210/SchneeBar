@@ -313,7 +313,7 @@ private func deviceAuthorizationJSON() -> String {
 }
 
 private func accessTokenJSON() -> String {
-    #"{"access_token":"test-access-token","token_type":"bearer"}"#
+    #"{"access_token":"test-access-token","expires_in":28800,"refresh_token":"synthetic-refresh-test-access-token","refresh_token_expires_in":15897600,"token_type":"bearer"}"#
 }
 
 private func userJSON(id: Int, login: String) -> String {

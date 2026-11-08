@@ -62,7 +62,7 @@ func waiterAccumulatesSlowDownAndNeverReturnsToShorterPendingInterval() async th
         WaiterStubResponse(#"{"error":"slow_down"}"#),
         WaiterStubResponse(#"{"error":"slow_down"}"#),
         WaiterStubResponse(#"{"error":"authorization_pending"}"#),
-        WaiterStubResponse(#"{"access_token":"ghu_access","token_type":"bearer"}"#),
+        WaiterStubResponse(#"{"access_token":"ghu_access","expires_in":28800,"refresh_token":"synthetic-refresh-ghu_access","refresh_token_expires_in":15897600,"token_type":"bearer"}"#),
     ])
     let sleeps = SleepRecorder()
     let client = GitHubDeviceFlowClient(transport: transport, now: { waiterNow })
@@ -86,7 +86,7 @@ func waiterAccumulatesSlowDownAndNeverReturnsToShorterPendingInterval() async th
 func waiterUsesServerSlowDownIntervalWhenItIsLonger() async throws {
     let transport = WaiterQueueTransport([
         WaiterStubResponse(#"{"error":"slow_down","interval":30}"#),
-        WaiterStubResponse(#"{"access_token":"ghu_access","token_type":"bearer"}"#),
+        WaiterStubResponse(#"{"access_token":"ghu_access","expires_in":28800,"refresh_token":"synthetic-refresh-ghu_access","refresh_token_expires_in":15897600,"token_type":"bearer"}"#),
     ])
     let sleeps = SleepRecorder()
     let waiter = GitHubDeviceAuthorizationWaiter(
