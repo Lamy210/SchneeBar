@@ -86,3 +86,23 @@ The app SHALL keep manual character selection higher priority than automatic rea
 #### Scenario: Menu renderer hidden while desktop remains visible
 - **WHEN** the menu character is hidden while the desktop character remains enabled
 - **THEN** menu-specific frame work SHALL stop and the desktop renderer SHALL remain usable; hiding both SHALL stop frame scheduling and ongoing decoding.
+
+### Requirement: Companion trigger resolution is deterministic and bounded
+
+The companion SHALL resolve state using fixed source-derived priorities (manual 1000, local/build/productivity/developer event 500, system event 400, system advisory 300, CPU 100). The most recently accepted trigger at the same priority SHALL win, with run as the empty fallback. The domain SHALL use normalized typed identities rather than raw external strings or caller-selected numeric priorities.
+
+#### Scenario: Manual override and equal-priority reactions
+- **WHEN** CPU walk, a system advisory, two distinct local events and a manual idle override are accepted in order
+- **THEN** manual idle SHALL win; clearing manual SHALL reveal the newest eligible local event and clearing that event SHALL reveal the older eligible event.
+
+#### Scenario: Expiry and renewal at a monotonic boundary
+- **WHEN** a trigger is renewed before its prior deadline and resolution is requested at the prior deadline
+- **THEN** the renewed trigger SHALL survive until its current deadline; at or after its current deadline it SHALL expire, and an earlier timestamp SHALL NOT resurrect it.
+
+#### Scenario: Capacity limit and manual control
+- **WHEN** the proposed domain cap of 126 non-manual/non-CPU triggers is reached
+- **THEN** new nonreserved identities SHALL be rejected without eviction; existing identities may be renewed and manual/CPU singleton slots and explicit clears SHALL remain available. At most 64 of those 126 entries SHALL be untrusted local/build triggers combined.
+
+#### Scenario: Local event without a deadline
+- **WHEN** an internal caller attempts to install a local/build trigger without a future expiry
+- **THEN** it SHALL be rejected; the adapter SHALL assign the existing lease for legacy events omitting duration before calling the domain.

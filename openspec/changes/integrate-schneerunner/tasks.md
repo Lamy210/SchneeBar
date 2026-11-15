@@ -82,3 +82,10 @@ All tasks are pending; the [implementation and parity contract](implementation-p
 - [ ] 9.7 (PR-F) Complete preference/file inventory and journal fault injection; expected source bytes unchanged, repeat import deduped, native concurrent edit not overwritten, imported schedules inactive; rollback preserves native records and source login item.
 - [ ] 9.8 (PR-G) Record explicit security acceptance links for #368/#369 and current hardening change; expected no raw token/API capability or stale generation in character projection, default opt-out, old GitHub navigation retained.
 - [ ] 9.9 (PR-H) Execute fixed-device baseline matrix, visual scenarios (ja/en, disabled state, focus, character, existing activity/detail/history), accessibility/keyboard, signed/unsigned launch/schedule test; attach actual evidence and approve release/rollback, retain Runner until explicit separate end-of-life approval.
+
+## 10. C1 decomposition
+
+- [ ] 10.1 Review C1a contract and proposed capacity limits; evidence: approved scope and ADR disposition, recorded source reuse decision before any source copying.
+- [ ] 10.2 Implement isolated C1a state arbitration and A01–A08 fixtures; evidence: exact target/test paths, isolated Swift results and macOS Tuist build/test.
+- [ ] 10.3 Implement C1b clip selection and timing; evidence: unchanged clip and per-frame duration fixtures with documented equivalence.
+- [ ] 10.4 Implement C1c EMA/hysteresis; evidence: source-pinned threshold and boundary fixtures, manual speed tests and invalid sample behavior.

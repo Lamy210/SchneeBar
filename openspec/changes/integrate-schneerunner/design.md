@@ -115,3 +115,7 @@ Each module behind a feature flag, disabled by default initially. Migration does
 ## Implementation execution and parity gate (2026-11-15)
 
 See [implementation and parity contract](implementation-parity-contract.md) for source-pinned target boundaries, explicit behavior differences, UI navigation, PR dependency order and reproducible measurement protocol. These are proposed refinements, not ADR acceptance. Existing migration/notification/event security constraints prevail. The first implementation PR is deliberately local-only pure domain work under issue #370; do not copy RunnerApp or bundle artwork. No GitHub security gate is bypassed.
+
+## C1 state-arbitration execution boundary
+
+See [C1a contract](companion-arbitration-contract.md). A standalone independently authored, unlinked draft can be reviewed while ADR and reuse rights are pending; merge, source reuse, and runtime activation remain gated. C1b/C1c are separate; no claim of full C1 parity.

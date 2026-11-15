@@ -42,7 +42,7 @@ Retain existing PopoverRootView navigation, including activity detail and delive
 
 ## Sequenced delivery and stop conditions
 
-- PR-A (issue #370 first slice): accepted ADR/reuse decision, pure CompanionCore + fixture tests; no rendering, network, migration or settings churn. If license or ADR unresolved, stop code reuse; produce inventory and test fixtures only where authorized.
+- PR-A (issue #370 first slice): accepted ADR/reuse decision, pure CompanionCore + fixture tests; no rendering, network, migration or settings churn. If license or ADR unresolved, stop source reuse and production adoption; an independently authored, unlinked C1a draft and original behavior tests may be reviewed under companion-arbitration-contract.md, but merge remains gated.
 - PR-B: shared CPU adapter (issue #365) with existing Bar tests plus deterministic spy tests, no change to displayed metric semantics. Requires C1 interface only; can be reviewed independently after scope agreement.
 - PR-C: bounded assets + menu render feature flag, then desktop as separate focused PR. Test malicious assets, missing selected clip, safe launch and single status item.
 - PR-D: local event adapter and optionally native CLI proposal, disabled by default. No GitHub event until security gate.
