@@ -27,3 +27,9 @@ Split C1 into C1a (state arbitration), C1b (animation timing/clip identity), C1c
 | A08 | source-independent build/test | no privileged target imports, no app integration; Linux isolated Swift test possible, macOS Tuist validation still required |
 
 The full integration task 9.2 and issue #370 stay open until remaining C1b/C1c and original acceptance are evidenced. No original tests copied; source fixture comparisons and license/ADR decision still required.
+
+## Review correction: explicit observation at clear and rejection semantics
+
+Clear and local quarantine take the same monotonic elapsed timestamp as submit/advance; reconcile expired entries before removing requested identities. Reject time regression with no change. State/nextDeadline getters reflect the last reconciled time, not a live clock. A rejected insert at a valid later timestamp may still expire unrelated elapsed entries; it must not replace or evict any live entry. The Core also rejects local/build deadlines more than 3600 seconds after acceptance; a positive shorter remaining duration is allowed after adapter-side wire validation of the 0.1-second minimum. An asynchronous callback must be generation-fenced by its adapter; scheduled expiry uses advance, never an unversioned clear. A delayed raw legacy v1 event does not have authenticated sender generation and cannot be proven fresh; do not promise that. The typed timestamp is local observation time, not proof of sender ordering.
+
+Additional fixtures: clear manual at the underlying event deadline resolves fallback; regressed clear/quarantine leaves state untouched; rejected later insert expires elapsed entries without evicting live ones; local 3600s accepted, >3600s rejected. Existing C1a draft is updated before further integration.

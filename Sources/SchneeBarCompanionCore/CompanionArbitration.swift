@@ -1,6 +1,6 @@
 import Foundation
 
-public enum CompanionState: Equatable, Sendable {
+public enum CompanionState: Hashable, Sendable {
     case idle, walk, run, dash, sprint
 }
 
@@ -83,7 +83,9 @@ public struct CompanionArbitration: Sendable {
         guard advance(to: now) else { return false }
         if let deadline, deadline <= now { return false }
         if source == .manual, deadline != nil { return false }
-        if source.isLocal, deadline == nil { return false }
+        if source.isLocal {
+            guard let deadline, deadline - now <= .seconds(3600) else { return false }
+        }
 
         if let index = entries.firstIndex(where: { $0.source == source }) {
             entries.remove(at: index)
@@ -97,12 +99,19 @@ public struct CompanionArbitration: Sendable {
         return true
     }
 
-    public mutating func clear(_ source: CompanionSource) {
+    /// Explicit removal reconciles expiry at the same monotonic observation.
+    @discardableResult
+    public mutating func clear(_ source: CompanionSource, at now: Duration) -> Bool {
+        guard advance(to: now) else { return false }
         entries.removeAll { $0.source == source }
+        return true
     }
 
     /// Local ingress quarantine must not cancel trusted or user-owned state.
-    public mutating func clearLocal() {
+    @discardableResult
+    public mutating func clearLocal(at now: Duration) -> Bool {
+        guard advance(to: now) else { return false }
         entries.removeAll { $0.source.isLocal }
+        return true
     }
 }

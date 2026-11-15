@@ -106,3 +106,23 @@ The companion SHALL resolve state using fixed source-derived priorities (manual 
 #### Scenario: Local event without a deadline
 - **WHEN** an internal caller attempts to install a local/build trigger without a future expiry
 - **THEN** it SHALL be rejected; the adapter SHALL assign the existing lease for legacy events omitting duration before calling the domain.
+
+### Requirement: Playback cursor ignores obsolete or repeated frame ticks
+
+The app SHALL preserve an unchanged resolved clip's current frame and SHALL invalidate pending frame callbacks when a clip is replaced, cleared or its playback rate changes. The app SHALL apply at most one frame advancement for each current tick and SHALL avoid scheduling a single-frame clip.
+
+#### Scenario: Old callback after replacement
+- **WHEN** a callback for an old clip arrives after a different clip revision was installed
+- **THEN** it SHALL NOT advance the new clip or reset its frame index.
+
+#### Scenario: Speed changes while playing an authored animation
+- **WHEN** the user changes the playback rate while a clip is active
+- **THEN** its frame index SHALL remain the same and each base duration SHALL be scaled by the exact selected rate without changing relative authored frame durations.
+
+### Requirement: CPU reactions distinguish invalid samples from idle load
+
+The companion SHALL use valid host-wide CPU samples, keep state and playback speed separate, and clear its automatic CPU contribution after invalid or missing samples.
+
+#### Scenario: CPU sample is outside its declared range
+- **WHEN** a host percentage is nonfinite, absent or outside 0 through 100
+- **THEN** the derived automatic CPU state SHALL become unavailable and SHALL NOT be interpreted as a true zero-percent observation.

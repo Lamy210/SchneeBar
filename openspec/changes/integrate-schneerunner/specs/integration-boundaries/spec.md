@@ -106,3 +106,11 @@ The app SHALL share the host sampling owner and SHALL stop acquisition when its 
 #### Scenario: Invalid sample after wake
 - **WHEN** host counters cannot yield a valid post-wake measurement
 - **THEN** the app SHALL present unavailable measurement state rather than a fabricated zero percentage, and automatic CPU reaction SHALL clear its stale trigger.
+
+### Requirement: Terminal build results have reserved admission
+
+The app SHALL classify local build success, failure and cancellation as terminal events using the same reserved capacity as local state clearing. Successful terminal admission SHALL extinguish any prior started state for that build channel, replacing it only with a bounded completion reaction if appropriate.
+
+#### Scenario: Build succeeds after update saturation
+- **WHEN** all 12 update slots are used and a valid local build success arrives with a terminal reserve slot available
+- **THEN** the app SHALL end the old started reaction and MAY show the bounded success reaction without consuming an update slot.

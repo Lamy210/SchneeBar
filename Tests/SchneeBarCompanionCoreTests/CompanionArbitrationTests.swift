@@ -20,15 +20,15 @@ import Testing
     #expect((policy.submit(.dash, from: local, at: .zero, until: .seconds(10))) == true)
     #expect((policy.submit(.sprint, from: .manual, at: .zero)) == true)
     #expect(policy.state == .sprint)
-    policy.clear(.manual)
+    policy.clear(.manual, at: .zero)
     #expect(policy.winningSource == local)
-    policy.clear(local)
+    policy.clear(local, at: .zero)
     #expect(policy.winningSource == system)
-    policy.clear(system)
+    policy.clear(system, at: .zero)
     #expect(policy.winningSource == advisory)
-    policy.clear(advisory)
+    policy.clear(advisory, at: .zero)
     #expect(policy.winningSource == .cpu)
-    policy.clear(.cpu)
+    policy.clear(.cpu, at: .zero)
     #expect(policy.state == .run)
 }
 
@@ -41,7 +41,7 @@ import Testing
     #expect(policy.winningSource == second)
     #expect((policy.submit(.sprint, from: first, at: .zero, until: .seconds(20))) == true)
     #expect(policy.winningSource == first)
-    policy.clear(first)
+    policy.clear(first, at: .zero)
     #expect(policy.winningSource == second)
 }
 
@@ -79,7 +79,7 @@ import Testing
     #expect((policy.submit(.walk, from: .cpu, at: .zero)) == true)
     #expect((policy.submit(.idle, from: .manual, at: .zero)) == true)
     #expect(policy.winningSource == .manual)
-    policy.clear(local)
+    policy.clear(local, at: .zero)
     #expect((policy.submit(.run, from: excess, at: .zero)) == true)
 }
 
@@ -105,15 +105,46 @@ import Testing
     #expect((policy.submit(.dash, from: .localBuild, at: .zero, until: .seconds(10))) == true)
     #expect((policy.submit(.sprint, from: .localState(UUID()), at: .zero, until: .seconds(10))) == true)
     #expect((policy.submit(.idle, from: .manual, at: .zero)) == true)
-    policy.clearLocal()
+    policy.clearLocal(at: .zero)
     #expect(policy.winningSource == .manual)
     #expect(policy.nextDeadline == nil)
-    policy.clear(.manual)
+    policy.clear(.manual, at: .zero)
     #expect(policy.winningSource == .productivity)
-    policy.clear(.productivity)
+    policy.clear(.productivity, at: .zero)
     #expect(policy.winningSource == developer)
-    policy.clear(developer)
+    policy.clear(developer, at: .zero)
     #expect(policy.winningSource == system)
-    policy.clear(system)
+    policy.clear(system, at: .zero)
     #expect(policy.winningSource == .cpu)
+}
+
+@Test func timestampedClearReconcilesUnderlyingExpiry() {
+    var p = CompanionArbitration()
+    let local = CompanionSource.localState(UUID())
+    #expect((p.submit(.dash, from: local, at: .zero, until: .seconds(2))) == true)
+    #expect((p.submit(.idle, from: .manual, at: .zero)) == true)
+    #expect((p.clear(.manual, at: .seconds(2))) == true)
+    #expect(p.state == .run)
+    #expect(p.nextDeadline == nil)
+}
+
+@Test func regressedClearAndQuarantineDoNotMutateCurrentState() {
+    var p = CompanionArbitration()
+    #expect((p.submit(.dash, from: .localBuild, at: .seconds(5), until: .seconds(10))) == true)
+    #expect((p.clear(.localBuild, at: .seconds(4))) == false)
+    #expect((p.clearLocal(at: .seconds(4))) == false)
+    #expect(p.state == .dash)
+    #expect((p.clearLocal(at: .seconds(5))) == true)
+    #expect(p.state == .run)
+}
+
+@Test func localLeaseBoundaryAndRejectedInsertReconcilesExpiry() {
+    var p = CompanionArbitration()
+    #expect((p.submit(.dash, from: .localBuild, at: .zero, until: .seconds(3600))) == true)
+    #expect((p.submit(.idle, from: .localBuild, at: .zero, until: .seconds(3601))) == false)
+    #expect(p.state == .dash)
+    #expect((p.submit(.walk, from: .cpu, at: .zero)) == true)
+    #expect((p.submit(.idle, from: .localBuild, at: .seconds(3600))) == false)
+    #expect(p.state == .walk)
+    #expect(p.nextDeadline == nil)
 }
