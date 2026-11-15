@@ -70,3 +70,19 @@ The app SHALL recover safely from handled renderer/asset failures but SHALL NOT 
 #### Scenario: Safe recovery after process restart
 - **WHEN** the user relaunches after an application crash correlated with Companion playback
 - **THEN** the app SHALL provide a safe option to keep Companion disabled while retaining settings and GitHub connection state.
+
+### Requirement: Character playback preserves user control and clip timing
+
+The app SHALL keep manual character selection higher priority than automatic reactions and SHALL keep playback rate separate from resolved state, preserving relative authored frame durations. Returning to Automatic SHALL remove only the manual override. The app SHALL avoid restarting an unchanged clip solely because its trigger changed.
+
+#### Scenario: Manual override released during a local reaction
+- **WHEN** a manual state is selected during an active local reaction and then Automatic is selected
+- **THEN** the active valid reaction SHALL resume precedence without discarding unrelated triggers or restarting an unchanged clip.
+
+#### Scenario: Desktop movement restored after relaunch
+- **WHEN** the app launches with a previously visible desktop character and autonomous movement had been enabled
+- **THEN** it SHALL restore supported visibility and safe placement but SHALL leave autonomous movement disabled until explicitly enabled again.
+
+#### Scenario: Menu renderer hidden while desktop remains visible
+- **WHEN** the menu character is hidden while the desktop character remains enabled
+- **THEN** menu-specific frame work SHALL stop and the desktop renderer SHALL remain usable; hiding both SHALL stop frame scheduling and ongoing decoding.

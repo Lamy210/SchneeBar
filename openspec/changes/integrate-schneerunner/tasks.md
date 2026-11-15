@@ -68,3 +68,17 @@
 - [ ] 8.2 Define user-facing data-only limitation and future protocol requirements (signed/authenticated peer identity, source revision, nonce/replay, durable stop evidence); verify raw distributed notifications and user-confirm-only flags never set `runnerDisabledVerified`.
 - [ ] 8.3 Implement 12 update + 4 reserved clear/cancel budget and a fail-closed volatile-state clear on terminal overflow; verify valid clear after update saturation, 5th terminal clear and 129th raw ingress attempt cannot leave a stale local trigger.
 - [ ] 8.4 Measure the initial bounded event ingress and fail-safe rendering on a Mac; verify privacy-safe diagnostics and ensure GitHub/Focus aren't canceled by a local event storm.
+
+## 9. Implementation-ready slices and evidence (2026-11-15)
+
+All tasks are pending; the [implementation and parity contract](implementation-parity-contract.md) defines the proposed order. These refine sections 1–8, not duplicate implementation mandates. Complete related original task only when its complete scope is evidenced.
+
+- [ ] 9.1 (PR-A preflight) Record maintainer reuse/asset rights and ADR-0004 disposition; exact SHA, target dependency graph and full source-test parity ledger; strict OpenSpec output. Stop reuse if approval unavailable.
+- [ ] 9.2 (PR-A / #370) Implement pure C1 policy target and focused tests; input metric→system advisory→event→manual→clear, equal priority renewals, empty fallback; expected priorities 100/300/400/500/1000, newest tie and run fallback; verify no platform/GitHub imports. No assets/UI in this PR.
+- [ ] 9.3 (PR-B / #365) Shared sample adapter; fake counter+clock for concurrent requests, first/invalid sample, disable last subscriber while in-flight, sleep/wake; expected one owner, stale generation dropped, no fabricated 0%, existing widget fixture preserved.
+- [ ] 9.4 (PR-C) Asset corpus and feature-flagged menu renderer, then desktop PR; expected reject malicious/symlink/oversize input without owned partial copy, exact clip fallback and one NSStatusItem; real-Mac display recovery, click-through escape and motion-off-on-launch checks.
+- [ ] 9.5 (PR-D) Verify actual v1 CLI wire fixtures and coexistence warning; expected build started→dash, succeeded→sprint for 2s, failed→idle for 5s, cancel clears, lease expires; existing ingress caps and zero GitHub writes; no CLI replacement.
+- [ ] 9.6 (PR-E) Native Focus domain, notification adapter and UI separately; expected fake clock deadline reconciliation once, recurrence DST fixtures, 500-entry history compatibility (source README), disabled surface does not cancel native schedules, permission-denied fallback is labeled and imported definitions inactive.
+- [ ] 9.7 (PR-F) Complete preference/file inventory and journal fault injection; expected source bytes unchanged, repeat import deduped, native concurrent edit not overwritten, imported schedules inactive; rollback preserves native records and source login item.
+- [ ] 9.8 (PR-G) Record explicit security acceptance links for #368/#369 and current hardening change; expected no raw token/API capability or stale generation in character projection, default opt-out, old GitHub navigation retained.
+- [ ] 9.9 (PR-H) Execute fixed-device baseline matrix, visual scenarios (ja/en, disabled state, focus, character, existing activity/detail/history), accessibility/keyboard, signed/unsigned launch/schedule test; attach actual evidence and approve release/rollback, retain Runner until explicit separate end-of-life approval.
