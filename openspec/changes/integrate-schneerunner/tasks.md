@@ -96,3 +96,9 @@ All tasks are pending; the [implementation and parity contract](implementation-p
 - [ ] 11.2 Implement C1b bounded timing, default catalog, exact rates and single-use cursor tick token; verify B01–B05 fixtures, no production renderer connectivity.
 - [ ] 11.3 Implement C1c pure EMA/hysteresis and invalid sample reset; verify C01–C03; keep C04 runtime wiring under PR-B and do not claim exact time-response parity.
 - [ ] 11.4 Verify every C1 implementation target actually appears in macOS Tuist test execution (CI success alone does not prove the new suite ran); record test counts/logs and full fixture ledger. Review proposed bounds and ADR before merging.
+
+## 12. Shared CPU ownership rollout
+
+- [ ] 12.1 PR-B1: extract demand-driven shared host sampler, preserve widget formatting, compile and verify old/new fake clock, counter, cache, error, and cancellation fixtures.
+- [ ] 12.2 PR-B2: app-owned shared instance with configuration-revision and sleep/wake fencing; verify final unsubscribe, both-consumer and single-consumer modes, distinct sample IDs for Companion EMA, and no new autonomous polling loop.
+- [ ] 12.3 Validate aligned whole-machine comparison and same-device performance; capture real measurements before default activation.
