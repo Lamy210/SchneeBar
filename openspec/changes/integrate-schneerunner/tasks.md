@@ -89,3 +89,10 @@ All tasks are pending; the [implementation and parity contract](implementation-p
 - [ ] 10.2 Implement isolated C1a state arbitration and A01–A08 fixtures; evidence: exact target/test paths, isolated Swift results and macOS Tuist build/test.
 - [ ] 10.3 Implement C1b clip selection and timing; evidence: unchanged clip and per-frame duration fixtures with documented equivalence.
 - [ ] 10.4 Implement C1c EMA/hysteresis; evidence: source-pinned threshold and boundary fixtures, manual speed tests and invalid sample behavior.
+
+## 11. C1 re-review and playback/CPU policy slices
+
+- [ ] 11.1 Add C1a timestamped clear/quarantine and maximum local lease tests; verify stale timestamp, elapsed underlying state and accepted/rejected insertion behavior.
+- [ ] 11.2 Implement C1b bounded timing, default catalog, exact rates and single-use cursor tick token; verify B01–B05 fixtures, no production renderer connectivity.
+- [ ] 11.3 Implement C1c pure EMA/hysteresis and invalid sample reset; verify C01–C03; keep C04 runtime wiring under PR-B and do not claim exact time-response parity.
+- [ ] 11.4 Verify every C1 implementation target actually appears in macOS Tuist test execution (CI success alone does not prove the new suite ran); record test counts/logs and full fixture ledger. Review proposed bounds and ADR before merging.
