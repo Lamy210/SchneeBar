@@ -21,6 +21,23 @@ let project = Project(
             sources: ["Sources/SchneeBarCore/**"]
         ),
         .target(
+            name: "SchneeBarCompanionCore",
+            destinations: .macOS,
+            product: .staticFramework,
+            bundleId: "dev.lamy.schneebar.companion-core",
+            deploymentTargets: deploymentTarget,
+            sources: ["Sources/SchneeBarCompanionCore/**"]
+        ),
+        .target(
+            name: "SchneeBarCompanionCoreTests",
+            destinations: .macOS,
+            product: .unitTests,
+            bundleId: "dev.lamy.schneebar.companion-core-tests",
+            deploymentTargets: deploymentTarget,
+            sources: ["Tests/SchneeBarCompanionCoreTests/**"],
+            dependencies: [.target(name: "SchneeBarCompanionCore")]
+        ),
+        .target(
             name: "SchneeBarDesignSystem",
             destinations: .macOS,
             product: .staticFramework,
