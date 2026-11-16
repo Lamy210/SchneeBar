@@ -38,6 +38,53 @@ let project = Project(
             dependencies: [.target(name: "SchneeBarCompanionCore")]
         ),
         .target(
+            name: "SchneeBarCompanionAssets",
+            destinations: .macOS,
+            product: .staticFramework,
+            bundleId: "dev.lamy.schneebar.companion-assets",
+            deploymentTargets: deploymentTarget,
+            sources: ["Sources/SchneeBarCompanionAssets/**"],
+            dependencies: [.target(name: "SchneeBarCompanionCore")]
+        ),
+        .target(
+            name: "SchneeBarCompanionFeature",
+            destinations: .macOS,
+            product: .staticFramework,
+            bundleId: "dev.lamy.schneebar.companion-feature",
+            deploymentTargets: deploymentTarget,
+            sources: ["Sources/SchneeBarCompanionFeature/**"],
+            dependencies: [
+                .target(name: "SchneeBarCompanionCore"),
+                .target(name: "SchneeBarCompanionAssets"),
+                .target(name: "SchneeBarDesignSystem"),
+            ]
+        ),
+        .target(
+            name: "SchneeBarCompanionAssetsTests",
+            destinations: .macOS,
+            product: .unitTests,
+            bundleId: "dev.lamy.schneebar.companion-assets-tests",
+            deploymentTargets: deploymentTarget,
+            sources: ["Tests/SchneeBarCompanionAssetsTests/**"],
+            dependencies: [
+                .target(name: "SchneeBarCompanionAssets"),
+                .target(name: "SchneeBarCompanionCore"),
+            ]
+        ),
+        .target(
+            name: "SchneeBarCompanionFeatureTests",
+            destinations: .macOS,
+            product: .unitTests,
+            bundleId: "dev.lamy.schneebar.companion-feature-tests",
+            deploymentTargets: deploymentTarget,
+            sources: ["Tests/SchneeBarCompanionFeatureTests/**"],
+            dependencies: [
+                .target(name: "SchneeBarCompanionFeature"),
+                .target(name: "SchneeBarCompanionAssets"),
+                .target(name: "SchneeBarCompanionCore"),
+            ]
+        ),
+        .target(
             name: "SchneeBarDesignSystem",
             destinations: .macOS,
             product: .staticFramework,
