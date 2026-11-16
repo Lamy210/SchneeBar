@@ -42,8 +42,13 @@ private func fixture(type: UTType, durations: [Double]) throws -> Data {
 }
 
 @Test func animatedGIFPreservesAuthoredDelays() throws {
-    let decoded = try CompanionImageDecoder.decode(fixture(type: .gif, durations: [0.1, 0.2]))
-    #expect(decoded.frames.count == 2)
+    // Fixed independent GIF89a: two distinct 4x2 solid-color frames, 100/200 ms.
+    let data = try #require(Data(base64Encoded: "R0lGODlhBAACAIEAAECA/wAAAAAAAAAAACH/C05FVFNDQVBFMi4wAwEAAAAh+QQACgAAACwAAAAABAACAAAIBwABCBwoMCAAIfkEARQAAQAsAAAAAAQAAgCB/0AAAAAAAAAAAAAACAcAAQgcKDAgADs="))
+    let source = try #require(CGImageSourceCreateWithData(data as CFData, nil))
+    try #require(CGImageSourceGetCount(source) == 2)
+    let decoded = try CompanionImageDecoder.decode(data)
+    try #require(decoded.frames.count == 2)
+    try #require(decoded.clip.durations.count == 2)
     #expect(abs(decoded.clip.durations[0] - 0.1) < 0.011)
     #expect(abs(decoded.clip.durations[1] - 0.2) < 0.011)
 }
