@@ -168,3 +168,28 @@ private final class ManualFrameScheduler {
     #expect(runtime.displayedFrameIndex == nil)
     #expect(!runtime.wantsHostCPU)
 }
+
+@Test @MainActor func coordinatorReducedMotionResolvesStaticFallbackOnDistinctClip() throws {
+    var frames = 0
+    let fake = ManualFrameScheduler()
+    let renderer = CompanionMenuBarRenderer(onFrame: { _ in frames += 1 }, onClear: {},
+        scheduler: { delay, callback in fake.schedule(delay, callback: callback) })
+    let runtime = CompanionRuntimeCoordinator(renderer: renderer)
+    let run = try renderFixture()
+    let sprint = try renderFixture(animated: true)
+    runtime.setCatalog(try CompanionAssetCatalog(assets: [.run: run, .sprint: sprint], defaultState: .run))
+    runtime.setPresentation(enabled: true, visible: true, awake: true, reduceMotion: false)
+    let request = try #require(runtime.beginCPURequest())
+    runtime.acceptCPU(request, id: UUID(), epoch: UUID(), capturedAt: .now, hostPercentage: 100)
+    #expect(runtime.state == .sprint)
+    #expect(fake.delays.count == 1)
+    fake.fire(0)
+    #expect(runtime.displayedFrameIndex == 1)
+    runtime.setPresentation(enabled: true, visible: true, awake: true, reduceMotion: true)
+    #expect(runtime.state == .run)
+    #expect(runtime.displayedFrameIndex == 0)
+    #expect(!runtime.wantsHostCPU)
+    let previousCount = frames
+    fake.fire(1)
+    #expect(frames == previousCount)
+}
