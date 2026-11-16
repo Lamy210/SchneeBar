@@ -80,10 +80,14 @@ final class MenuBarController: NSObject {
     deinit {
         refreshTask?.cancel()
         immediateActivityRefreshTask?.cancel()
-        configurationTask?.cancel()
-        // Capture only the actor, not this controller.
+        let pending = configurationTask
+        pending?.cancel()
+        // Drain earlier transitions before the final suspend, without retaining self.
         let sampler = cpuSampler
-        Task { await sampler.reconcileDemand(widget: false, companion: false, sleeping: true) }
+        Task {
+            await pending?.value
+            await sampler.reconcileDemand(widget: false, companion: false, sleeping: true)
+        }
         workspaceNotificationCenter.removeObserver(self)
     }
 
@@ -229,13 +233,8 @@ final class MenuBarController: NSObject {
                 return
             }
 
-            let initial = enqueueConfiguration(model.configuration, sleeping: false)
-            await initial.value
+            let descriptors = await engine.descriptors()
             guard isCurrentRuntime(generation) else { return }
-
-            model.descriptors = await engine.descriptors()
-            guard isCurrentRuntime(generation) else { return }
-            widgetRuntimeIsConfigured = true
 
             model.onConfigurationChanged = { [weak self, engine] configuration in
                 guard let self, isCurrentRuntime(generation) else { return }
@@ -250,6 +249,13 @@ final class MenuBarController: NSObject {
                     await applyCurrentPresentation(from: engine, generation: generation)
                 }
             }
+
+            let initial = enqueueConfiguration(model.configuration, sleeping: false)
+            model.descriptors = descriptors
+            await initial.value
+            await configurationTask?.value
+            guard isCurrentRuntime(generation), !Task.isCancelled else { return }
+            widgetRuntimeIsConfigured = true
 
             if forceRefreshOnStart {
                 activityRefreshIsPending = false
@@ -304,11 +310,12 @@ final class MenuBarController: NSObject {
             await previous?.value
             guard !Task.isCancelled else { return }
             await sampler.reconcileDemand(widget: enabled, companion: false, sleeping: sleeping)
-            if resetCPU {
-                await engine.invalidateRuntime(id: descriptor.id)
-            }
             if let configuration {
-                await engine.setConfiguration(configuration)
+                await engine.setConfiguration(
+                    configuration, invalidatingRuntimeOf: resetCPU ? descriptor.id : nil
+                )
+            } else if resetCPU {
+                await engine.invalidateRuntime(id: descriptor.id)
             }
         }
         configurationTask = task

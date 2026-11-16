@@ -864,3 +864,65 @@ private func makeSnapshot(
         )
     )
 }
+
+private actor LifecycleParkedWidgetProvider: WidgetProvider {
+    nonisolated let descriptor = WidgetDescriptor(
+        id: "test.cpu.lifecycle", displayName: "Lifecycle CPU", refreshPolicy: .interval(5)
+    )
+    private var calls = 0
+    private var parked = false
+    private var entryWaiter: CheckedContinuation<Void, Never>?
+    private var releaseWaiter: CheckedContinuation<Void, Never>?
+
+    func snapshot() async throws -> WidgetSnapshot {
+        calls += 1
+        let index = calls
+        if index == 1 {
+            await withCheckedContinuation { continuation in
+                releaseWaiter = continuation
+                parked = true
+                entryWaiter?.resume()
+                entryWaiter = nil
+            }
+        }
+        return makeSnapshot(
+            descriptor: descriptor, severity: .nominal, priority: .normal, text: "sample \(index)"
+        )
+    }
+
+    func waitForFirstRequest() async {
+        if parked { return }
+        await withCheckedContinuation { entryWaiter = $0 }
+    }
+
+    func releaseFirstRequest() {
+        releaseWaiter?.resume()
+        releaseWaiter = nil
+    }
+}
+
+@Test
+func scopedWidgetLifecycleResetRejectsOldCompletionAndPreservesOtherWidget() async {
+    let cpu = LifecycleParkedWidgetProvider()
+    let other = CountingWidgetProvider()
+    let engine = WidgetEngine(providers: [cpu, other])
+    let otherSnapshot = await engine.refresh(id: other.descriptor.id)
+    let old = Task { await engine.refresh(id: cpu.descriptor.id) }
+    await cpu.waitForFirstRequest()
+
+    var disabled = WidgetConfiguration()
+    disabled.setEnabled(false, for: cpu.descriptor)
+    await engine.setConfiguration(disabled, invalidatingRuntimeOf: cpu.descriptor.id)
+    #expect(await engine.snapshot(id: cpu.descriptor.id) == nil)
+    #expect(await engine.snapshot(id: other.descriptor.id) == otherSnapshot)
+
+    var enabled = WidgetConfiguration()
+    enabled.setEnabled(true, for: cpu.descriptor)
+    await engine.setConfiguration(enabled, invalidatingRuntimeOf: cpu.descriptor.id)
+    let fresh = await engine.refresh(id: cpu.descriptor.id)
+    #expect(fresh?.content().text == "sample 2")
+    await cpu.releaseFirstRequest()
+    _ = await old.value
+    #expect(await engine.snapshot(id: cpu.descriptor.id) == fresh)
+    #expect(await engine.snapshot(id: other.descriptor.id) == otherSnapshot)
+}

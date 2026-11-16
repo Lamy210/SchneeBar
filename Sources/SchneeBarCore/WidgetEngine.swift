@@ -240,7 +240,11 @@ public actor WidgetEngine {
         }
     }
 
-    public func setConfiguration(_ configuration: WidgetConfiguration) {
+    public func setConfiguration(
+        _ configuration: WidgetConfiguration,
+        invalidatingRuntimeOf id: WidgetID? = nil
+    ) {
+        if let id { invalidateRuntime(id: id) }
         let previousConfiguration = self.configuration
         self.configuration = configuration
 
