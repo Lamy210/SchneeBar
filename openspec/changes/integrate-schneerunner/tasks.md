@@ -116,3 +116,10 @@ All tasks are pending; the [implementation and parity contract](implementation-p
 - [ ] 14.2 C2b/C2c: file/pack import, owned staging, traversal/symlink/TOCTOU, all-format fixtures, export and catalogue resource limits as specified in companion-assets-renderer-contract.md.
 - [ ] 14.3 C3a: verify isolated frame driver and static fixture, deterministic async cancellation/Reduce Motion integration before app connection.
 - [ ] 14.4 C3b: approved opt-in UI, application-owned status item, CPU demand/renderer lifecycle, accessible fallback and disable/recovery evidence.
+
+## 15. Bounded single-file intake and coordinator
+
+- [ ] 15.1 Verify descriptor-based bounded local file intake: valid, final symlink, directory, FIFO, empty, oversize and non-file URL; add deterministic mutation/read fault fixtures before enabling user import.
+- [ ] 15.2 Verify retained catalogue budget, fallback/alias behavior; add a cumulative boundary fixture without excessive CI allocations and pre-decode aggregate accounting for pack imports.
+- [ ] 15.3 Verify coordinator opt-in, manual state versus speed, fallback continuity, stale request rejection, sleep, Reduce Motion and asset removal. No host demand or UI wiring until separately reviewed.
+- [ ] 15.4 Integrate app-owned single status item, off-main single-flight import and atomic publication, shared sampler scheduling, settings/UI and localized accessible fallback; keep production gate until approvals and real-device verification.
