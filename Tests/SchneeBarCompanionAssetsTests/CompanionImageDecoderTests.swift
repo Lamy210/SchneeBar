@@ -1,6 +1,7 @@
 import CoreGraphics
 import Foundation
 import ImageIO
+import SchneeBarCompanionCore
 @testable import SchneeBarCompanionAssets
 import Testing
 import UniformTypeIdentifiers
@@ -87,4 +88,17 @@ private func fixture(type: UTType, durations: [Double]) throws -> Data {
     let catalog = try CompanionAssetCatalog(assets: [.run: asset, .idle: asset], defaultState: .run)
     #expect(catalog.asset(for: .sprint).clip == asset.clip)
     #expect(catalog.asset(for: .idle).clip == asset.clip)
+}
+
+@Test func originalPreviewCatalogueHasBoundedDistinctStateClips() throws {
+    let catalogue = try CompanionPreviewAssets.catalogue()
+    let states: [SchneeBarCompanionCore.CompanionState] = [.idle, .walk, .run, .dash, .sprint]
+    var ids: Set<UUID> = []
+    for state in states {
+        let decoded = catalogue.asset(for: state)
+        ids.insert(decoded.clip.revision)
+        #expect(decoded.frames.count == 2)
+        #expect(decoded.frames.allSatisfy { $0.width == 32 && $0.height == 32 })
+    }
+    #expect(ids.count == 5)
 }

@@ -123,3 +123,9 @@ All tasks are pending; the [implementation and parity contract](implementation-p
 - [ ] 15.2 Verify retained catalogue budget, fallback/alias behavior; add a cumulative boundary fixture without excessive CI allocations and pre-decode aggregate accounting for pack imports.
 - [ ] 15.3 Verify coordinator opt-in, manual state versus speed, fallback continuity, stale request rejection, sleep, Reduce Motion and asset removal. No host demand or UI wiring until separately reviewed.
 - [ ] 15.4 Integrate app-owned single status item, off-main single-flight import and atomic publication, shared sampler scheduling, settings/UI and localized accessible fallback; keep production gate until approvals and real-device verification.
+
+## 16. Developer preview
+
+- [ ] 16.1 Build independent preview target; verify original five-state procedural catalogue and two-frame animation; no dependency from shipping app.
+- [ ] 16.2 Real Mac checklist: explicit start/stop, single preview status item, existing Bar conflict, show/hide and fallback, CPU-only/automatic/manual/both-disabled, Reduce Motion, sleep/wake, window close and quit, stale callback and power measurements.
+- [ ] 16.3 Complete production approval and integration separately; no preview artefact distribution or imported assets.

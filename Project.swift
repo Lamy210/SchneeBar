@@ -251,6 +251,25 @@ let project = Project(
             )
         ),
         .target(
+            name: "SchneeBarCompanionPreview",
+            destinations: .macOS,
+            product: .app,
+            bundleId: "dev.lamy.schneebar.companion-preview",
+            deploymentTargets: deploymentTarget,
+            infoPlist: .extendingDefault(with: [
+                "CFBundleDisplayName": "SchneeBar Companion Preview",
+            ]),
+            sources: ["Sources/SchneeBarCompanionPreview/**"],
+            dependencies: [
+                .target(name: "SchneeBarCompanionCore"),
+                .target(name: "SchneeBarCompanionAssets"),
+                .target(name: "SchneeBarCompanionFeature"),
+                .target(name: "SchneeBarSystemProvider"),
+                .target(name: "SchneeBarCore"),
+                .target(name: "SchneeBarDesignSystem"),
+            ]
+        ),
+        .target(
             name: "SchneeBarVisualHarness",
             destinations: .macOS,
             product: .app,
