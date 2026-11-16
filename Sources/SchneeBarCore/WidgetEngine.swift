@@ -254,6 +254,14 @@ public actor WidgetEngine {
         }
     }
 
+    /// Explicit lifecycle invalidation for a provider whose demand epoch changed.
+    /// Do not clear unrelated widget diagnostics or snapshots.
+    public func invalidateRuntime(id: WidgetID) {
+        guard providers[id] != nil else { return }
+        invalidateProviderRevision(id: id)
+        resetRuntimeState(id: id)
+    }
+
     public func currentConfiguration() -> WidgetConfiguration {
         configuration
     }

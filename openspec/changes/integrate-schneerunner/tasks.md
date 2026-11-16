@@ -102,3 +102,10 @@ All tasks are pending; the [implementation and parity contract](implementation-p
 - [ ] 12.1 PR-B1: extract demand-driven shared host sampler, preserve widget formatting, compile and verify old/new fake clock, counter, cache, error, and cancellation fixtures.
 - [ ] 12.2 PR-B2: app-owned shared instance with configuration-revision and sleep/wake fencing; verify final unsubscribe, both-consumer and single-consumer modes, distinct sample IDs for Companion EMA, and no new autonomous polling loop.
 - [ ] 12.3 Validate aligned whole-machine comparison and same-device performance; capture real measurements before default activation.
+
+## 13. B2 lifecycle and Companion input
+
+- [ ] 13.1 Verify app-owned sampler, serialized demand/engine configuration changes, CPU-only and zero-consumer modes, sleep/wake and scoped WidgetEngine runtime invalidation.
+- [ ] 13.2 Verify CompanionCPUInput newest-request/session fence, cached sample deduplication, unavailable/reset and manual/automatic transitions.
+- [ ] 13.3 Connect actual opt-in Companion renderer/settings to managed demand and existing scheduler, preserving a single owner and no polling when disabled. Not included in B2a.
+- [ ] 13.4 Execute macOS tests and real-device lifecycle/power checks; record CI/test counts, remaining compatibility exceptions and approval.

@@ -14,6 +14,11 @@ final class MenuBarController: NSObject {
     private let activityRuntimeModel: ActivityRuntimeModel
     private let externalWidgetStartupCoordinator: ExternalWidgetStartupCoordinator
     private let widgetEngine: WidgetEngine
+    private let cpuSampler: HostCPUSampler
+    private let cpuProvider: CPUWidgetProvider
+    private var configurationTask: Task<Void, Never>?
+    private var configurationRevision = UUID()
+    private var cpuDemandEnabled = false
     private let workspaceNotificationCenter: NotificationCenter
     private var refreshTask: Task<Void, Never>?
     private var immediateActivityRefreshTask: Task<Void, Never>?
@@ -36,9 +41,13 @@ final class MenuBarController: NSObject {
         externalWidgetStartupCoordinator = ExternalWidgetStartupCoordinator(
             registrar: externalWidgetRegistrar
         )
+        let sampler = HostCPUSampler()
+        let provider = CPUWidgetProvider(sampler: sampler)
+        cpuSampler = sampler
+        cpuProvider = provider
         widgetEngine = WidgetEngine(providers: [
             ClockWidgetProvider(),
-            CPUWidgetProvider(),
+            provider,
             ActivityWidgetProvider(loadSnapshot: loadActivitySnapshot),
         ])
         workspaceNotificationCenter = NSWorkspace.shared.notificationCenter
@@ -71,6 +80,10 @@ final class MenuBarController: NSObject {
     deinit {
         refreshTask?.cancel()
         immediateActivityRefreshTask?.cancel()
+        configurationTask?.cancel()
+        // Capture only the actor, not this controller.
+        let sampler = cpuSampler
+        Task { await sampler.reconcileDemand(widget: false, companion: false, sleeping: true) }
         workspaceNotificationCenter.removeObserver(self)
     }
 
@@ -151,6 +164,7 @@ final class MenuBarController: NSObject {
         runtimeLifecycle.willSleep()
         activeRuntimeGeneration = nil
         widgetRuntimeIsConfigured = false
+        _ = enqueueConfiguration(nil, sleeping: true)
         externalWidgetStartupCoordinator.handleSleep(
             model: runtimeModel
         )
@@ -215,7 +229,8 @@ final class MenuBarController: NSObject {
                 return
             }
 
-            await engine.setConfiguration(model.configuration)
+            let initial = enqueueConfiguration(model.configuration, sleeping: false)
+            await initial.value
             guard isCurrentRuntime(generation) else { return }
 
             model.descriptors = await engine.descriptors()
@@ -223,11 +238,13 @@ final class MenuBarController: NSObject {
             widgetRuntimeIsConfigured = true
 
             model.onConfigurationChanged = { [weak self, engine] configuration in
+                guard let self, isCurrentRuntime(generation) else { return }
+                let transition = enqueueConfiguration(configuration, sleeping: false)
+                let revision = configurationRevision
                 Task { @MainActor [weak self] in
-                    guard let self, isCurrentRuntime(generation) else { return }
-
-                    await engine.setConfiguration(configuration)
-                    guard isCurrentRuntime(generation) else { return }
+                    await transition.value
+                    guard let self, isCurrentRuntime(generation),
+                          configurationRevision == revision else { return }
 
                     _ = await engine.refreshDue()
                     await applyCurrentPresentation(from: engine, generation: generation)
@@ -243,6 +260,8 @@ final class MenuBarController: NSObject {
             }
 
             while !Task.isCancelled, isCurrentRuntime(generation) {
+                await configurationTask?.value
+                guard isCurrentRuntime(generation), !Task.isCancelled else { return }
                 _ = await engine.refreshDue()
                 await applyCurrentPresentation(from: engine, generation: generation)
 
@@ -259,6 +278,43 @@ final class MenuBarController: NSObject {
         }
     }
 
+    /// Submit every transition in main-actor order; the FIFO contains only
+    /// short configuration calls, never a counter acquisition or widget refresh.
+    @discardableResult
+    private func enqueueConfiguration(
+        _ configuration: WidgetConfiguration?, sleeping: Bool
+    ) -> Task<Void, Never> {
+        let previous = configurationTask
+        let sampler = cpuSampler
+        let engine = widgetEngine
+        let descriptor = cpuProvider.descriptor
+        let enabled = !sleeping && (configuration?.isEnabled(descriptor) ?? false)
+        let resetCPU = sleeping || enabled != cpuDemandEnabled
+        cpuDemandEnabled = enabled
+        configurationRevision = UUID()
+        if resetCPU {
+            // Do not expose a last-known-good CPU value across a demand epoch.
+            let remaining = runtimeModel.snapshots.filter { $0.descriptor.id != descriptor.id }
+            var diagnostics = runtimeModel.diagnosticsByWidgetID
+            diagnostics.removeValue(forKey: descriptor.id)
+            apply(snapshots: remaining, diagnostics: diagnostics)
+        }
+
+        let task = Task { @MainActor in
+            await previous?.value
+            guard !Task.isCancelled else { return }
+            await sampler.reconcileDemand(widget: enabled, companion: false, sleeping: sleeping)
+            if resetCPU {
+                await engine.invalidateRuntime(id: descriptor.id)
+            }
+            if let configuration {
+                await engine.setConfiguration(configuration)
+            }
+        }
+        configurationTask = task
+        return task
+    }
+
     private func isCurrentRuntime(_ generation: WidgetRuntimeLifecycle.Generation) -> Bool {
         activeRuntimeGeneration == generation && runtimeLifecycle.isCurrent(generation)
     }
@@ -267,15 +323,23 @@ final class MenuBarController: NSObject {
         from engine: WidgetEngine,
         generation: WidgetRuntimeLifecycle.Generation
     ) async {
+        let revision = configurationRevision
+        await configurationTask?.value
+        guard isCurrentRuntime(generation), configurationRevision == revision else { return }
         let presentation = await engine.currentPresentation()
-        guard isCurrentRuntime(generation) else { return }
+        guard isCurrentRuntime(generation), configurationRevision == revision else { return }
         let diagnostics = Dictionary(
             presentation.diagnostics
                 .filter { runtimeModel.configuration.isEnabled($0.descriptor) }
                 .map { ($0.descriptor.id, $0) },
             uniquingKeysWith: { _, latest in latest }
         )
-        apply(snapshots: presentation.snapshots, diagnostics: diagnostics)
+        apply(
+            snapshots: presentation.snapshots.filter {
+                runtimeModel.configuration.isEnabled($0.descriptor)
+            },
+            diagnostics: diagnostics
+        )
     }
 
     private func apply(
