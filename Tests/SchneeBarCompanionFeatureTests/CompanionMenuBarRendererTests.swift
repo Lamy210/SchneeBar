@@ -9,6 +9,13 @@ import UniformTypeIdentifiers
 
 @MainActor
 private func renderFixture(animated: Bool = false) throws -> CompanionDecodedClip {
+    if animated {
+        // Independent fixed GIF, not an encoder-dependent identical frame pair.
+        let data = try #require(Data(base64Encoded: "R0lGODlhBAACAIEAAECA/wAAAAAAAAAAACH/C05FVFNDQVBFMi4wAwEAAAAh+QQACgAAACwAAAAABAACAAAIBwABCBwoMCAAIfkEARQAAQAsAAAAAAQAAgCB/0AAAAAAAAAAAAAACAcAAQgcKDAgADs="))
+        let decoded = try CompanionImageDecoder.decode(data)
+        try #require(decoded.frames.count == 2)
+        return decoded
+    }
     let context = try #require(CGContext(
         data: nil, width: 4, height: 2, bitsPerComponent: 8, bytesPerRow: 16,
         space: CGColorSpaceCreateDeviceRGB(),
@@ -19,18 +26,9 @@ private func renderFixture(animated: Bool = false) throws -> CompanionDecodedCli
     let image = try #require(context.makeImage())
     let data = NSMutableData()
     let destination = try #require(CGImageDestinationCreateWithData(
-        data as CFMutableData,
-        (animated ? UTType.gif : UTType.png).identifier as CFString,
-        animated ? 2 : 1, nil
+        data as CFMutableData, UTType.png.identifier as CFString, 1, nil
     ))
-    if animated {
-        CGImageDestinationAddImage(destination, image,
-            [kCGImagePropertyGIFDictionary: [kCGImagePropertyGIFDelayTime: 0.1]] as CFDictionary)
-        CGImageDestinationAddImage(destination, image,
-            [kCGImagePropertyGIFDictionary: [kCGImagePropertyGIFDelayTime: 0.2]] as CFDictionary)
-    } else {
-        CGImageDestinationAddImage(destination, image, nil)
-    }
+    CGImageDestinationAddImage(destination, image, nil)
     #expect(CGImageDestinationFinalize(destination))
     return try CompanionImageDecoder.decode(data as Data)
 }
@@ -66,6 +64,10 @@ private final class ManualFrameScheduler {
 
     // Intentionally invoke even cancelled or previously consumed callbacks.
     func fire(_ index: Int) {
+        guard callbacks.indices.contains(index) else {
+            Issue.record("Missing scheduled callback at index \(index)")
+            return
+        }
         callbacks[index]()
     }
 }
@@ -89,7 +91,7 @@ private final class ManualFrameScheduler {
     #expect(frames == 2)
     renderer.setRate(.double)
     #expect(renderer.displayedFrameIndex == 1)
-    #expect(fake.delays.count == 3)
+    try #require(fake.delays.count == 3)
     #expect(abs(fake.delays[2] - 0.1) < 0.011)
     fake.fire(1)
     #expect(frames == 2)

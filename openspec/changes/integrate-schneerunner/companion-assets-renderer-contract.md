@@ -20,3 +20,7 @@ An isolated MainActor AppKit driver consumes validated clip, scales menu image l
 ### Deterministic renderer verification
 
 An internal injected scheduler can deliberately invoke cancelled/duplicate callbacks. The new animated GIF fixture exercises normal advancement, duplicate rejection, speed changes preserving frame, Reduce Motion freeze/resume and stop with late callback. The test is independent of real-time sleeps and does not replace macOS integration or actual power measurement.
+
+### GIF fixture correction
+
+CI run 43969112202 and preview validation 43969112107 failed at animatedGIFPreservesAuthoredDelays: decoded frame count was 1 instead of 2. The prior fixture encoded identical images; encoder coalescing is the suspected cause, not confirmed from the log alone. Replace with independently generated, two distinct 4x2 color frames (100/200 ms), verified by Pillow before commit. Require frame counts before indexing, and record missing fake scheduler callbacks instead of trapping. Re-run macOS ImageIO and both renderer suites; do not claim decoder correctness until CI confirms.
