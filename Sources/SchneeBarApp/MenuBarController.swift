@@ -288,7 +288,7 @@ final class MenuBarController: NSObject {
     /// short configuration calls, never a counter acquisition or widget refresh.
     @discardableResult
     private func enqueueConfiguration(
-        _ configuration: WidgetConfiguration?, sleeping: Bool
+        _ configuration: SchneeBarCore.WidgetConfiguration?, sleeping: Bool
     ) -> Task<Void, Never> {
         let previous = configurationTask
         let sampler = cpuSampler
