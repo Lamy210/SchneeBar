@@ -14,13 +14,32 @@ public final class CompanionMenuBarRenderer {
     private var reduceMotion = false
     private let onFrame: @MainActor (NSImage) -> Void
     private let onClear: @MainActor () -> Void
+    typealias Scheduler = @MainActor (Double, @escaping @MainActor () -> Void) -> Task<Void, Never>
+    private let scheduler: Scheduler
 
-    public init(
+    public convenience init(
         onFrame: @escaping @MainActor (NSImage) -> Void,
         onClear: @escaping @MainActor () -> Void
     ) {
+        self.init(onFrame: onFrame, onClear: onClear, scheduler: { delay, callback in
+            Task { @MainActor in
+                do { try await Task.sleep(for: .seconds(delay)) } catch { return }
+                guard !Task.isCancelled else { return }
+                callback()
+            }
+        })
+    }
+
+    /// Internal deterministic scheduling seam. The scheduler must enqueue,
+    /// never invoke the callback synchronously before returning.
+    init(
+        onFrame: @escaping @MainActor (NSImage) -> Void,
+        onClear: @escaping @MainActor () -> Void,
+        scheduler: @escaping Scheduler
+    ) {
         self.onFrame = onFrame
         self.onClear = onClear
+        self.scheduler = scheduler
     }
 
     deinit { pending?.cancel() }
@@ -75,9 +94,8 @@ public final class CompanionMenuBarRenderer {
         cancelTick()
         guard !reduceMotion, let tick = cursor.nextTick else { return }
         let expected = scheduleID
-        pending = Task { @MainActor [weak self] in
-            do { try await Task.sleep(for: .seconds(tick.delay)) } catch { return }
-            guard let self, !Task.isCancelled, self.scheduleID == expected,
+        pending = scheduler(tick.delay) { [weak self] in
+            guard let self, self.scheduleID == expected,
                   !self.reduceMotion, self.cursor.tick(tick.token) else { return }
             self.pending = nil
             self.emitCurrentFrame()

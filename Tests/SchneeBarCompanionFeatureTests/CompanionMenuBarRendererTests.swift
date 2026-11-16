@@ -3,12 +3,12 @@ import CoreGraphics
 import Foundation
 import ImageIO
 import SchneeBarCompanionAssets
-import SchneeBarCompanionFeature
+@testable import SchneeBarCompanionFeature
 import Testing
 import UniformTypeIdentifiers
 
 @MainActor
-private func renderFixture() throws -> CompanionDecodedClip {
+private func renderFixture(animated: Bool = false) throws -> CompanionDecodedClip {
     let context = try #require(CGContext(
         data: nil, width: 4, height: 2, bitsPerComponent: 8, bytesPerRow: 16,
         space: CGColorSpaceCreateDeviceRGB(),
@@ -19,9 +19,18 @@ private func renderFixture() throws -> CompanionDecodedClip {
     let image = try #require(context.makeImage())
     let data = NSMutableData()
     let destination = try #require(CGImageDestinationCreateWithData(
-        data as CFMutableData, UTType.png.identifier as CFString, 1, nil
+        data as CFMutableData,
+        (animated ? UTType.gif : UTType.png).identifier as CFString,
+        animated ? 2 : 1, nil
     ))
-    CGImageDestinationAddImage(destination, image, nil)
+    if animated {
+        CGImageDestinationAddImage(destination, image,
+            [kCGImagePropertyGIFDictionary: [kCGImagePropertyGIFDelayTime: 0.1]] as CFDictionary)
+        CGImageDestinationAddImage(destination, image,
+            [kCGImagePropertyGIFDictionary: [kCGImagePropertyGIFDelayTime: 0.2]] as CFDictionary)
+    } else {
+        CGImageDestinationAddImage(destination, image, nil)
+    }
     #expect(CGImageDestinationFinalize(destination))
     return try CompanionImageDecoder.decode(data as Data)
 }
@@ -42,4 +51,58 @@ private func renderFixture() throws -> CompanionDecodedClip {
     renderer.stop()
     #expect(clears == 1)
     #expect(renderer.displayedFrameIndex == nil)
+}
+
+@MainActor
+private final class ManualFrameScheduler {
+    private(set) var delays: [Double] = []
+    private var callbacks: [@MainActor () -> Void] = []
+
+    func schedule(_ delay: Double, callback: @escaping @MainActor () -> Void) -> Task<Void, Never> {
+        delays.append(delay)
+        callbacks.append(callback)
+        return Task {}
+    }
+
+    // Intentionally invoke even cancelled or previously consumed callbacks.
+    func fire(_ index: Int) {
+        callbacks[index]()
+    }
+}
+
+@Test @MainActor func rendererFencesOldAndDuplicateCallbacks() throws {
+    let fake = ManualFrameScheduler()
+    var frames = 0
+    var clears = 0
+    let renderer = CompanionMenuBarRenderer(
+        onFrame: { _ in frames += 1 }, onClear: { clears += 1 },
+        scheduler: { delay, callback in fake.schedule(delay, callback: callback) }
+    )
+    let asset = try renderFixture(animated: true)
+    renderer.install(asset)
+    #expect(frames == 1)
+    #expect(fake.delays.count == 1)
+    fake.fire(0)
+    #expect(renderer.displayedFrameIndex == 1)
+    #expect(frames == 2)
+    fake.fire(0)
+    #expect(frames == 2)
+    renderer.setRate(.double)
+    #expect(renderer.displayedFrameIndex == 1)
+    #expect(fake.delays.count == 3)
+    #expect(abs(fake.delays[2] - 0.1) < 0.011)
+    fake.fire(1)
+    #expect(frames == 2)
+    renderer.setReduceMotion(true)
+    fake.fire(2)
+    #expect(frames == 2)
+    renderer.setReduceMotion(false)
+    #expect(fake.delays.count == 4)
+    fake.fire(3)
+    #expect(renderer.displayedFrameIndex == 0)
+    #expect(frames == 3)
+    renderer.stop()
+    fake.fire(4)
+    #expect(frames == 3)
+    #expect(clears == 1)
 }

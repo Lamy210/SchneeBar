@@ -16,3 +16,7 @@ An isolated MainActor AppKit driver consumes validated clip, scales menu image l
 - C2c: actual APNG/WebP animated fixtures, malformed/truncated image and excessive metadata/decode corpus, decoder memory and compositing verification. Source compatibility ledger.
 - C3b: explicit opt-in settings and one app-owned coordinator sharing CPU service, no hidden polling, real status item image restore, Reduce Motion and accessible text. Render only validated assets; use independent original fallback. Desktop surface and Productivity follow separately.
 - Tests in C2a/C3a: generated PNG and animated GIF, size/type limits, dimension/cumulative admission, idempotent static frame rendering/clear. Timing cursor tests from C1b cover stale/duplicate ticks; add deterministic renderer scheduler and cancellation integration fixtures before connecting actual UI. Verify new targets are exercised in macOS CI. No completion claim for C2/C3 or #370.
+
+### Deterministic renderer verification
+
+An internal injected scheduler can deliberately invoke cancelled/duplicate callbacks. The new animated GIF fixture exercises normal advancement, duplicate rejection, speed changes preserving frame, Reduce Motion freeze/resume and stop with late callback. The test is independent of real-time sleeps and does not replace macOS integration or actual power measurement.
