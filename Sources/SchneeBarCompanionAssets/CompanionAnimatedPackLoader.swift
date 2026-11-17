@@ -38,15 +38,19 @@ public enum CompanionAnimatedPackLoader {
     }
 
     static func capture(_ url: URL, limits: Limits = Limits()) throws -> Capture {
+        try Task.checkCancellation()
+        let scoped = url.startAccessingSecurityScopedResource()
+        defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+        return try capture(CompanionPackDirectory(url), limits: limits)
+    }
+
+    static func capture(_ directory: CompanionPackDirectory, limits: Limits = Limits()) throws -> Capture {
         guard (1...maximumEncodedBytes).contains(limits.bytes),
               (1...maximumFrames).contains(limits.frames),
               (1...maximumPixels).contains(limits.pixels) else {
             throw CompanionAnimatedPackError.invalidLimits
         }
         try Task.checkCancellation()
-        let scoped = url.startAccessingSecurityScopedResource()
-        defer { if scoped { url.stopAccessingSecurityScopedResource() } }
-        let directory = try CompanionPackDirectory(url)
         let manifest = try directory.manifest()
         var remainingBytes = limits.bytes
         var remainingFrames = limits.frames

@@ -29,6 +29,19 @@ public final class CompanionPackDirectory {
         device = info.st_dev
     }
 
+    /// Ownership transfers on entry even if validation fails. The caller
+    /// has already opened the UUID child relative to a private root.
+    init(ownedDescriptor fd: Int32) throws {
+        var info = stat()
+        guard fstat(fd, &info) == 0,
+              (info.st_mode & mode_t(S_IFMT)) == mode_t(S_IFDIR) else {
+            _ = Darwin.close(fd)
+            throw CompanionPackError.invalidDirectory
+        }
+        root = fd
+        device = info.st_dev
+    }
+
     deinit { _ = Darwin.close(root) }
 
     public func manifest() throws -> CompanionPackManifest {
