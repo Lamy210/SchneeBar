@@ -288,8 +288,9 @@ final class MenuBarController: NSObject {
                 // Keep the existing one-second floor for ordinary widgets;
                 // allow the CPU's subsecond remainder after a bootstrap.
                 let delay = min(.seconds(max(1, otherDelay)), cpuDelay ?? .seconds(30))
-                let sleeper = Task {
-                    try? await Task.sleep(for: max(.milliseconds(50), delay))
+                let sleeper = Task<Void, Never> {
+                    do { try await Task.sleep(for: max(.milliseconds(50), delay)) }
+                    catch { /* Configuration change interrupts the wait. */ }
                 }
                 refreshSleepTask = sleeper
                 await sleeper.value
