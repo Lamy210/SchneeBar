@@ -23,6 +23,23 @@ public struct HostCPUSample: Equatable, Sendable {
     public let percentage: Double
 }
 
+/// Atomic snapshot of the host's shared scheduling deadline and demand.
+public struct HostCPURefreshPlan: Equatable, Sendable {
+    public let consumers: Set<HostCPUConsumer>
+    public let acquisitionDelay: Duration?
+
+    /// nil acquisitionDelay means no demand. The ordinary widget floor
+    /// must not delay a subsecond CPU remainder.
+    public func nextHostDelay(otherWidgetsSeconds: Double) -> Duration {
+        max(.milliseconds(50), min(.seconds(max(1, otherWidgetsSeconds)),
+                                  acquisitionDelay ?? .seconds(30)))
+    }
+
+    public func isDue(_ consumer: HostCPUConsumer) -> Bool {
+        consumers.contains(consumer) && acquisitionDelay == .zero
+    }
+}
+
 /// Demand-driven, monotonic five-second acquisition window. No autonomous timer.
 /// Consumers must poll from their existing lifecycle, and fence presentation
 /// with their own runtime generation after asynchronous calls.
@@ -121,6 +138,19 @@ public actor HostCPUSampler {
     /// consumer; zero means acquire now or join the current flight.
     public func delayUntilNextAcquisition(for consumer: HostCPUConsumer) -> Duration? {
         guard !suspended, leases[consumer] != nil else { return nil }
+        return acquisitionDelay()
+    }
+
+    /// Both consumers use the same physical acquisition window. One actor
+    /// read avoids inconsistent separate deadline/lease observations.
+    public func refreshPlan() -> HostCPURefreshPlan {
+        guard !suspended, !leases.isEmpty else {
+            return HostCPURefreshPlan(consumers: [], acquisitionDelay: nil)
+        }
+        return HostCPURefreshPlan(consumers: Set(leases.keys), acquisitionDelay: acquisitionDelay())
+    }
+
+    private func acquisitionDelay() -> Duration {
         guard let cached else { return .zero }
         let age = cached.at.duration(to: now())
         return age >= .zero && age < .seconds(5) ? .seconds(5) - age : .zero

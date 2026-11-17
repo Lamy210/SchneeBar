@@ -540,3 +540,51 @@ func managedDemandCanSwitchConsumersWithoutAdditionalRead() async throws {
     await sampler.reconcileDemand(widget: true, companion: false, sleeping: false)
     #expect(await sampler.delayUntilNextAcquisition(for: .widget) == .zero)
 }
+
+
+@Test func sharedCPURefreshPlanTracksBothConsumersAndFreshDeadline() async throws {
+    let reader = ScriptedCPUReader([
+        cpuCounters(), cpuCounters(user: 30, idle: 70),
+        cpuCounters(user: 80, idle: 120)
+    ])
+    let clock = ScriptedCPUClock()
+    let sampler = HostCPUSampler(readCounters: { try reader.next() },
+        bootstrapDelay: {}, now: { clock.now() })
+
+    let idle = await sampler.refreshPlan()
+    #expect(idle.consumers.isEmpty && idle.acquisitionDelay == nil)
+    #expect(idle.nextHostDelay(otherWidgetsSeconds: 0) == .seconds(1))
+    #expect(idle.nextHostDelay(otherWidgetsSeconds: 60) == .seconds(30))
+    #expect(!idle.isDue(.widget) && !idle.isDue(.companion))
+
+    await sampler.reconcileDemand(widget: false, companion: true, sleeping: false)
+    let companionOnly = await sampler.refreshPlan()
+    #expect(companionOnly.consumers == [.companion])
+    #expect(companionOnly.isDue(.companion) && !companionOnly.isDue(.widget))
+    #expect(companionOnly.nextHostDelay(otherWidgetsSeconds: 30) == .milliseconds(50))
+
+    let first = try await sampler.sample(for: HostCPUConsumer.companion)
+    await sampler.reconcileDemand(widget: true, companion: true, sleeping: false)
+    let both = await sampler.refreshPlan()
+    #expect(both.consumers == [.widget, .companion])
+    #expect(both.acquisitionDelay == .seconds(5))
+    #expect(!both.isDue(.widget) && !both.isDue(.companion))
+    let cached = try await sampler.sample(for: HostCPUConsumer.widget)
+    #expect(cached == first && reader.callCount() == 2)
+
+    clock.advance(by: .milliseconds(4750))
+    let remainder = await sampler.refreshPlan()
+    #expect(remainder.nextHostDelay(otherWidgetsSeconds: 0) == .milliseconds(250))
+    clock.advance(by: .milliseconds(250))
+    let due = await sampler.refreshPlan()
+    #expect(due.isDue(.widget) && due.isDue(.companion))
+    let fresh = try await sampler.sample(for: HostCPUConsumer.widget)
+    #expect(fresh.id != first.id && reader.callCount() == 3)
+
+    await sampler.reconcileDemand(widget: true, companion: false, sleeping: false)
+    let widgetOnly = await sampler.refreshPlan()
+    #expect(widgetOnly.consumers == [.widget] && widgetOnly.acquisitionDelay == .seconds(5))
+    await sampler.reconcileDemand(widget: false, companion: false, sleeping: true)
+    #expect(await sampler.refreshPlan() == idle)
+    #expect(reader.callCount() == 3)
+}
