@@ -3,6 +3,7 @@ import CoreGraphics
 import Foundation
 import ImageIO
 import SchneeBarCompanionAssets
+import SchneeBarCompanionCore
 @testable import SchneeBarCompanionFeature
 import Testing
 import UniformTypeIdentifiers
@@ -107,4 +108,90 @@ private final class ManualFrameScheduler {
     fake.fire(4)
     #expect(frames == 3)
     #expect(clears == 1)
+}
+
+@Test @MainActor func coordinatorOptInCPUManualStateAndSleep() throws {
+    var frames = 0
+    var clears = 0
+    let renderer = CompanionMenuBarRenderer(onFrame: { _ in frames += 1 }, onClear: { clears += 1 })
+    let runtime = CompanionRuntimeCoordinator(renderer: renderer)
+    let asset = try renderFixture()
+    let catalogue = try CompanionAssetCatalog(assets: [.run: asset], defaultState: .run)
+    runtime.setCatalog(catalogue)
+    #expect(frames == 0)
+    #expect(!runtime.wantsHostCPU)
+    runtime.setPresentation(enabled: true, visible: true, awake: true, reduceMotion: false)
+    #expect(frames == 1)
+    #expect(runtime.wantsHostCPU)
+    let first = try #require(runtime.beginCPURequest())
+    let epoch = UUID()
+    let time = ContinuousClock.now
+    runtime.acceptCPU(first, id: UUID(), epoch: epoch, capturedAt: time, hostPercentage: 100)
+    #expect(runtime.state == .sprint)
+    #expect(runtime.rate == .double)
+    #expect(frames == 1) // fallback resolves to the same clip
+    runtime.setManualState(.idle)
+    #expect(runtime.state == .idle)
+    #expect(runtime.rate == .double)
+    let stale = try #require(runtime.beginCPURequest())
+    runtime.setMode(.manual(.half))
+    #expect(!runtime.wantsHostCPU)
+    #expect(runtime.state == .idle)
+    #expect(runtime.rate == .half)
+    runtime.acceptCPU(stale, id: UUID(), epoch: epoch, capturedAt: time, hostPercentage: 100)
+    #expect(runtime.rate == .half)
+    runtime.setManualState(nil)
+    #expect(runtime.state == .run)
+    runtime.setPresentation(enabled: true, visible: true, awake: false, reduceMotion: false)
+    #expect(clears == 1)
+    #expect(runtime.displayedFrameIndex == nil)
+    runtime.setMode(.automatic)
+    #expect(!runtime.wantsHostCPU)
+    runtime.setPresentation(enabled: true, visible: true, awake: true, reduceMotion: false)
+    #expect(runtime.wantsHostCPU)
+    #expect(runtime.rate == .normal)
+    #expect(frames == 2)
+}
+
+@Test @MainActor func coordinatorReducedMotionAndAssetRemovalFenceCPU() throws {
+    let renderer = CompanionMenuBarRenderer(onFrame: { _ in }, onClear: {})
+    let runtime = CompanionRuntimeCoordinator(renderer: renderer)
+    let asset = try renderFixture()
+    runtime.setCatalog(try CompanionAssetCatalog(assets: [.run: asset], defaultState: .run))
+    runtime.setPresentation(enabled: true, visible: true, awake: true, reduceMotion: false)
+    let pending = try #require(runtime.beginCPURequest())
+    runtime.setPresentation(enabled: true, visible: true, awake: true, reduceMotion: true)
+    #expect(!runtime.wantsHostCPU)
+    #expect(runtime.displayedFrameIndex == 0)
+    runtime.acceptCPU(pending, id: UUID(), epoch: UUID(), capturedAt: .now, hostPercentage: 100)
+    #expect(runtime.state == .run)
+    #expect(runtime.rate == .normal)
+    runtime.setCatalog(nil)
+    #expect(runtime.displayedFrameIndex == nil)
+    #expect(!runtime.wantsHostCPU)
+}
+
+@Test @MainActor func coordinatorReducedMotionResolvesStaticFallbackOnDistinctClip() throws {
+    var frames = 0
+    let fake = ManualFrameScheduler()
+    let renderer = CompanionMenuBarRenderer(onFrame: { _ in frames += 1 }, onClear: {},
+        scheduler: { delay, callback in fake.schedule(delay, callback: callback) })
+    let runtime = CompanionRuntimeCoordinator(renderer: renderer)
+    let run = try renderFixture()
+    let sprint = try renderFixture(animated: true)
+    runtime.setCatalog(try CompanionAssetCatalog(assets: [.run: run, .sprint: sprint], defaultState: .run))
+    runtime.setPresentation(enabled: true, visible: true, awake: true, reduceMotion: false)
+    let request = try #require(runtime.beginCPURequest())
+    runtime.acceptCPU(request, id: UUID(), epoch: UUID(), capturedAt: .now, hostPercentage: 100)
+    #expect(runtime.state == .sprint)
+    #expect(fake.delays.count == 1)
+    fake.fire(0)
+    #expect(runtime.displayedFrameIndex == 1)
+    runtime.setPresentation(enabled: true, visible: true, awake: true, reduceMotion: true)
+    #expect(runtime.state == .run)
+    #expect(runtime.displayedFrameIndex == 0)
+    #expect(!runtime.wantsHostCPU)
+    let previousCount = frames
+    fake.fire(1)
+    #expect(frames == previousCount)
 }

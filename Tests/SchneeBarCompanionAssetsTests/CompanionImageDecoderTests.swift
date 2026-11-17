@@ -78,3 +78,13 @@ private func fixture(type: UTType, durations: [Double]) throws -> Data {
     }
     #expect(total == 16_000_000)
 }
+
+@Test func catalogRequiresDefaultAndResolvesAliases() throws {
+    let asset = try CompanionImageDecoder.decode(fixture(type: .png, durations: [0.1]))
+    #expect(throws: CompanionAssetCatalogError.missingDefault) {
+        try CompanionAssetCatalog(assets: [.idle: asset], defaultState: .run)
+    }
+    let catalog = try CompanionAssetCatalog(assets: [.run: asset, .idle: asset], defaultState: .run)
+    #expect(catalog.asset(for: .sprint).clip == asset.clip)
+    #expect(catalog.asset(for: .idle).clip == asset.clip)
+}
