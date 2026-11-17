@@ -64,6 +64,28 @@ public final class CompanionRuntimeCoordinator {
     public var rate: CompanionPlaybackRate { input.rate }
     public var displayedFrameIndex: Int? { renderer.displayedFrameIndex }
 
+    /// Host bridge applies a complete decision before reconciling, avoiding
+    /// intermediate render/CPU/event activation while inputs are being changed.
+    /// The bridge exclusively owns these inputs when attached.
+    func applyHostDecision(_ decision: CompanionHostPolicy.Decision,
+                           catalog next: CompanionAssetCatalog?, catalogueChanged: Bool) {
+        if catalogueChanged {
+            input.invalidateSession()
+            if localEventSession != nil {
+                localEventSession = nil
+                localIngress.revokeLocalState(at: elapsed(), arbitration: &arbitration)
+            }
+        }
+        catalog = decision.rendersCharacter ? next : nil
+        enabled = decision.rendersCharacter
+        visible = decision.rendersCharacter
+        awake = decision.rendersCharacter
+        reduceMotion = decision.reduceMotion
+        preferredMode = decision.mode
+        localEventsEnabled = decision.listensToLocalEvents
+        reconcile()
+    }
+
     public func setCatalog(_ next: CompanionAssetCatalog?) {
         catalog = next
         input.invalidateSession()
