@@ -116,6 +116,16 @@ public actor HostCPUSampler {
         if hadDemand && leases.isEmpty { invalidate() }
     }
 
+    /// Delay until a fresh observation can be acquired, measured on the same
+    /// monotonic clock as cache admission. nil means no active demand for this
+    /// consumer; zero means acquire now or join the current flight.
+    public func delayUntilNextAcquisition(for consumer: HostCPUConsumer) -> Duration? {
+        guard !suspended, leases[consumer] != nil else { return nil }
+        guard let cached else { return .zero }
+        let age = cached.at.duration(to: now())
+        return age >= .zero && age < .seconds(5) ? .seconds(5) - age : .zero
+    }
+
     /// Resolve the active lease at request entry; retain that lease across suspension.
     public func sample(for consumer: HostCPUConsumer) async throws -> HostCPUSample {
         guard let lease = leases[consumer] else { throw CancellationError() }
