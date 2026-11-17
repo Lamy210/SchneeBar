@@ -75,6 +75,7 @@ let project = Project(
             deploymentTargets: deploymentTarget,
             sources: ["Sources/SchneeBarCompanionFeature/**"],
             dependencies: [
+                .target(name: "SchneeBarSystemProvider"),
                 .target(name: "SchneeBarCompanionEvents"),
                 .target(name: "SchneeBarCompanionCore"),
                 .target(name: "SchneeBarCompanionAssets"),
