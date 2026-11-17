@@ -190,7 +190,11 @@ private actor CancellationAwareBudgetWorkflowLoader: GitHubWorkflowRunLoading {
     private var calls: [Int64] = []
     private var shouldBlock = true
     private let retryGate = BudgetCancellationGate()
-    private var shouldBlockRetry = true
+    private var shouldBlockRetry: Bool
+
+    init(parkRetry: Bool = false) {
+        shouldBlockRetry = parkRetry
+    }
 
     func workflowRuns(
         connection: GitHubConnection,
@@ -221,6 +225,16 @@ private actor CancellationAwareBudgetWorkflowLoader: GitHubWorkflowRunLoading {
         await releaseGate.open()
     }
 
+    // Do not hang the suite if the retry scheduling contract regresses.
+    func waitForRetryWave(_ expectedCount: Int) async -> Bool {
+        let deadline = ContinuousClock.now.advanced(by: .seconds(5))
+        while calls.count < expectedCount {
+            guard ContinuousClock.now < deadline, !Task.isCancelled else { return false }
+            do { try await Task.sleep(for: .milliseconds(5)) } catch { return false }
+        }
+        return true
+    }
+
     func releaseRetry() async {
         shouldBlockRetry = false
         await retryGate.open()
@@ -236,7 +250,11 @@ private actor CancellationAwareBudgetReviewLoader: GitHubReviewRequestLoading {
     private var calls: [Int64] = []
     private var shouldBlock = true
     private let retryGate = BudgetCancellationGate()
-    private var shouldBlockRetry = true
+    private var shouldBlockRetry: Bool
+
+    init(parkRetry: Bool = false) {
+        shouldBlockRetry = parkRetry
+    }
 
     func reviewRequests(
         connection: GitHubConnection,
@@ -266,6 +284,16 @@ private actor CancellationAwareBudgetReviewLoader: GitHubReviewRequestLoading {
         await releaseGate.open()
     }
 
+    // Do not hang the suite if the retry scheduling contract regresses.
+    func waitForRetryWave(_ expectedCount: Int) async -> Bool {
+        let deadline = ContinuousClock.now.advanced(by: .seconds(5))
+        while calls.count < expectedCount {
+            guard ContinuousClock.now < deadline, !Task.isCancelled else { return false }
+            do { try await Task.sleep(for: .milliseconds(5)) } catch { return false }
+        }
+        return true
+    }
+
     func releaseRetry() async {
         shouldBlockRetry = false
         await retryGate.open()
@@ -281,7 +309,11 @@ private actor CancellationAwareBudgetCheckLoader: GitHubCheckRunLoading {
     private var calls: [Int64] = []
     private var shouldBlock = true
     private let retryGate = BudgetCancellationGate()
-    private var shouldBlockRetry = true
+    private var shouldBlockRetry: Bool
+
+    init(parkRetry: Bool = false) {
+        shouldBlockRetry = parkRetry
+    }
 
     func checkRuns(
         connection: GitHubConnection,
@@ -310,6 +342,16 @@ private actor CancellationAwareBudgetCheckLoader: GitHubCheckRunLoading {
     func release() async {
         shouldBlock = false
         await releaseGate.open()
+    }
+
+    // Do not hang the suite if the retry scheduling contract regresses.
+    func waitForRetryWave(_ expectedCount: Int) async -> Bool {
+        let deadline = ContinuousClock.now.advanced(by: .seconds(5))
+        while calls.count < expectedCount {
+            guard ContinuousClock.now < deadline, !Task.isCancelled else { return false }
+            do { try await Task.sleep(for: .milliseconds(5)) } catch { return false }
+        }
+        return true
     }
 
     func releaseRetry() async {
@@ -732,7 +774,7 @@ func cancelledWorkflowRefreshStopsQueuedRepositoriesAndPrioritizesUnattemptedRep
     let repositories = try (1 ... 4).map { id in
         try budgetRepository(id: Int64(id))
     }
-    let workflows = CancellationAwareBudgetWorkflowLoader()
+    let workflows = CancellationAwareBudgetWorkflowLoader(parkRetry: true)
     let provider = GitHubActivityProvider(
         workflowRunLoader: workflows,
         maximumConcurrentRepositories: 2,
@@ -771,11 +813,13 @@ func cancelledWorkflowRefreshStopsQueuedRepositoriesAndPrioritizesUnattemptedRep
             capabilities: capabilities
         )
     }
-    await workflows.waitUntilCallCount(4)
+    let reachedRetryWave = await workflows.waitForRetryWave(4)
+    #expect(reachedRetryWave)
     let firstRetryWave = await workflows.repositoryIDs()
     #expect(firstRetryWave.count == 4)
     #expect(Set(firstRetryWave.dropFirst(2)) == Set([3, 4]))
     await workflows.releaseRetry()
+    if !reachedRetryWave { retry.cancel() }
     _ = await retry.value
 
     let requestedRepositoryIDs = await workflows.repositoryIDs()
@@ -788,7 +832,7 @@ func cancelledReviewRefreshStopsQueuedRepositoriesAndPrioritizesUnattemptedRepos
     let repositories = try (1 ... 4).map { id in
         try budgetRepository(id: Int64(id))
     }
-    let reviews = CancellationAwareBudgetReviewLoader()
+    let reviews = CancellationAwareBudgetReviewLoader(parkRetry: true)
     let provider = GitHubActivityProvider(
         workflowRunLoader: BudgetWorkflowLoader(),
         reviewRequestLoader: reviews,
@@ -830,11 +874,13 @@ func cancelledReviewRefreshStopsQueuedRepositoriesAndPrioritizesUnattemptedRepos
             capabilities: capabilities
         )
     }
-    await reviews.waitUntilCallCount(4)
+    let reachedRetryWave = await reviews.waitForRetryWave(4)
+    #expect(reachedRetryWave)
     let firstRetryWave = await reviews.repositoryIDs()
     #expect(firstRetryWave.count == 4)
     #expect(Set(firstRetryWave.dropFirst(2)) == Set([3, 4]))
     await reviews.releaseRetry()
+    if !reachedRetryWave { retry.cancel() }
     _ = await retry.value
 
     let requestedRepositoryIDs = await reviews.repositoryIDs()
@@ -847,7 +893,7 @@ func cancelledCheckRefreshStopsQueuedTargetsAndPrioritizesUnattemptedRepositorie
     let repositories = try (1 ... 4).map { id in
         try budgetRepository(id: Int64(id))
     }
-    let checks = CancellationAwareBudgetCheckLoader()
+    let checks = CancellationAwareBudgetCheckLoader(parkRetry: true)
     let provider = GitHubActivityProvider(
         workflowRunLoader: BudgetWorkflowLoader(),
         reviewRequestLoader: FairBudgetReviewLoader(),
@@ -892,11 +938,13 @@ func cancelledCheckRefreshStopsQueuedTargetsAndPrioritizesUnattemptedRepositorie
             capabilities: capabilities
         )
     }
-    await checks.waitUntilCallCount(4)
+    let reachedRetryWave = await checks.waitForRetryWave(4)
+    #expect(reachedRetryWave)
     let firstRetryWave = await checks.repositoryIDs()
     #expect(firstRetryWave.count == 4)
     #expect(Set(firstRetryWave.dropFirst(2)) == Set([3, 4]))
     await checks.releaseRetry()
+    if !reachedRetryWave { retry.cancel() }
     _ = await retry.value
 
     let requestedRepositoryIDs = await checks.repositoryIDs()
