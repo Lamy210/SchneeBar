@@ -502,3 +502,41 @@ func managedDemandCanSwitchConsumersWithoutAdditionalRead() async throws {
     } catch { #expect(error is CancellationError) }
     #expect(reader.callCount() == 2)
 }
+
+@Test func cpuAcquisitionDeadlineUsesCaptureNotAttemptAndSharedFailureWindow() async throws {
+    let reader = ScriptedCPUReader([
+        cpuCounters(), cpuCounters(user: 10, idle: 90),
+        cpuCounters(user: 20, idle: 180), cpuCounters(user: 20, idle: 180)
+    ])
+    let clock = ScriptedCPUClock()
+    let sampler = HostCPUSampler(
+        readCounters: { try reader.next() },
+        bootstrapDelay: { clock.advance(by: .milliseconds(500)) },
+        now: { clock.now() }
+    )
+    #expect(await sampler.delayUntilNextAcquisition(for: .widget) == nil)
+    await sampler.reconcileDemand(widget: true, companion: true, sleeping: false)
+    #expect(await sampler.delayUntilNextAcquisition(for: .widget) == .zero)
+    let initial = try await sampler.sample(for: HostCPUConsumer.widget)
+    clock.advance(by: .milliseconds(4500))
+    #expect(await sampler.delayUntilNextAcquisition(for: .widget) == .milliseconds(500))
+    #expect(await sampler.delayUntilNextAcquisition(for: .companion) == .milliseconds(500))
+    let cached = try await sampler.sample(for: HostCPUConsumer.companion)
+    #expect(cached == initial)
+    #expect(reader.callCount() == 2)
+    clock.advance(by: .milliseconds(500))
+    #expect(await sampler.delayUntilNextAcquisition(for: .widget) == .zero)
+    let fresh = try await sampler.sample(for: HostCPUConsumer.widget)
+    #expect(fresh.id != initial.id)
+    #expect(reader.callCount() == 3)
+    clock.advance(by: .seconds(5))
+    do {
+        _ = try await sampler.sample(for: HostCPUConsumer.widget)
+        Issue.record("Expected stalled counters")
+    } catch { #expect(error as? CPUWidgetError == .noCounterProgress) }
+    #expect(await sampler.delayUntilNextAcquisition(for: .companion) == .seconds(5))
+    await sampler.reconcileDemand(widget: false, companion: false, sleeping: true)
+    #expect(await sampler.delayUntilNextAcquisition(for: .widget) == nil)
+    await sampler.reconcileDemand(widget: true, companion: false, sleeping: false)
+    #expect(await sampler.delayUntilNextAcquisition(for: .widget) == .zero)
+}
