@@ -6,6 +6,7 @@ import SchneeBarCompanionAssets
 enum PreviewPackLibrary {
     enum Request: Sendable {
         case refresh, restoreSelection, install(URL), select(UUID), builtIn
+        case trash(UUID), restoreTrash(UUID), purgeTrash(UUID), discardStage(UUID), discardPendingSelection
     }
     struct Output: Sendable {
         let inventory: CompanionOwnedPackStore.Inventory?
@@ -54,6 +55,26 @@ enum PreviewPackLibrary {
             try CompanionOwnedPackStore.selectBuiltIn(in: root)
             selection = .builtIn
             message = "Default choice saved."
+        case .trash(let id):
+            try CompanionOwnedPackStore.trash(id: id, in: root)
+            selection = nil
+            message = "Pack moved to trash. Restore it before selecting again."
+        case .restoreTrash(let id):
+            try CompanionOwnedPackStore.restore(id: id, in: root)
+            selection = nil
+            message = "Pack restored without selecting it."
+        case .purgeTrash(let id):
+            try CompanionOwnedPackStore.purgeTrash(id: id, in: root)
+            selection = nil
+            message = "Trash entry permanently removed."
+        case .discardStage(let id):
+            try CompanionOwnedPackStore.discardAbandonedStage(id: id, in: root)
+            selection = nil
+            message = "Abandoned import removed."
+        case .discardPendingSelection:
+            try CompanionOwnedPackStore.discardPendingSelection(in: root)
+            selection = nil
+            message = "Uncommitted selection discarded."
         }
         // Failure to list after a durable commit does not undo the commit.
         let inventory = try? CompanionOwnedPackStore.inventory(in: root)

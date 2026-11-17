@@ -273,6 +273,79 @@ final class CompanionPreviewModel: NSObject, ObservableObject {
     func selectPack(_ id: UUID) { runLibrary(.select(id)) }
     func selectLibraryDefault() { runLibrary(.builtIn) }
 
+    enum RecoveryAction: Equatable {
+        case trash(UUID), restore(UUID), purge(UUID), discardStage(UUID), discardPendingSelection
+
+        var title: String {
+            switch self {
+            case .trash: "Move to trash"
+            case .restore: "Restore pack"
+            case .purge: "Permanently delete pack"
+            case .discardStage: "Discard abandoned import"
+            case .discardPendingSelection: "Discard uncommitted selection"
+            }
+        }
+
+        var detail: String {
+            switch self {
+            case .trash(let id): "Move the owned copy \(id.uuidString) to trash. The original source is unchanged."
+            case .restore(let id): "Restore the owned copy \(id.uuidString) without selecting it."
+            case .purge(let id): "Permanently remove the owned trash entry \(id.uuidString). This cannot be undone."
+            case .discardStage(let id): "Discard the incomplete import \(id.uuidString). Unknown or unsafe contents are left untouched."
+            case .discardPendingSelection: "Discard the uncommitted preference. The last committed choice is not changed."
+            }
+        }
+    }
+
+    struct RecoveryConfirmation: Identifiable {
+        let id = UUID()
+        let action: RecoveryAction
+        let session: UUID
+    }
+
+    func recoveryConfirmation(_ action: RecoveryAction) -> RecoveryConfirmation? {
+        guard canUseLibrary, let session = imageSelectionSession, recoveryTargetExists(action) else { return nil }
+        return RecoveryConfirmation(action: action, session: session)
+    }
+
+    private func recoveryTargetExists(_ action: RecoveryAction) -> Bool {
+        guard let libraryInventory else { return false }
+        switch action {
+        case .trash(let id): return libraryInventory.entries.contains { $0.id == id }
+        case .restore(let id), .purge(let id): return libraryInventory.trashedIDs.contains(id)
+        case .discardStage(let id): return libraryInventory.abandonedStageIDs.contains(id)
+        case .discardPendingSelection: return libraryInventory.pendingSelectionRecovery
+        }
+    }
+
+    func confirmRecovery(_ confirmation: RecoveryConfirmation) {
+        guard imageSelectionSession == confirmation.session,
+              canUseLibrary, !imageQueue.isBusy,
+              recoveryTargetExists(confirmation.action) else { return }
+        switch confirmation.action {
+        case .trash(let id):
+            if imageSource == .installedPack(id) {
+                // Do not keep presenting a pack whose selection may be
+                // cleared before the move. Even on failure, stay built-in
+                // until the user explicitly restores the saved choice.
+                do {
+                    runtime.setCatalog(try CompanionPreviewAssets.catalogue())
+                    imageSource = .builtIn
+                    imageMessage = ""
+                    updatePresentation()
+                } catch {
+                    libraryMessage = "Unable to restore default. Trash operation not started."
+                    return
+                }
+            }
+            runLibrary(.trash(id))
+        case .restore(let id): runLibrary(.restoreTrash(id))
+        case .purge(let id): runLibrary(.purgeTrash(id))
+        case .discardStage(let id): runLibrary(.discardStage(id))
+        case .discardPendingSelection: runLibrary(.discardPendingSelection)
+        }
+    }
+
     private func restoreLibraryIfNeeded() {
         guard libraryNeedsRestore, !libraryBusy, imageSelectionSession != nil else { return }
         guard !imageQueue.isBusy else {

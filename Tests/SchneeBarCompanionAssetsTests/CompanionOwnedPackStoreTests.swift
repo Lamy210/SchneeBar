@@ -329,3 +329,24 @@ private func withStore(_ body: (URL, URL) throws -> Void) throws {
         #expect(!FileManager.default.fileExists(atPath: record.path))
     }
 }
+
+@Test func ownedPendingSelectionIsDistinctFromUnknownButStillBlocksImport() throws {
+    try withStore { source, target in
+        let pending = target.appendingPathComponent(CompanionOwnedPackStore.selectionStageName)
+        try #require(FileManager.default.createFile(atPath: pending.path, contents: Data(),
+            attributes: [.posixPermissions: NSNumber(value: 0o600)]))
+        let inventory = try CompanionOwnedPackStore.inventory(in: target)
+        #expect(inventory.pendingSelectionRecovery)
+        #expect(inventory.unknownEntryCount == 0)
+        #expect(!inventory.canInstall)
+        #expect(throws: CompanionOwnedPackError.recoveryRequired) {
+            try CompanionOwnedPackStore.install(from: source, into: target)
+        }
+        try CompanionOwnedPackStore.discardPendingSelection(in: target)
+        try FileManager.default.createSymbolicLink(at: pending, withDestinationURL: source.appendingPathComponent("character.json"))
+        let unsafe = try CompanionOwnedPackStore.inventory(in: target)
+        #expect(!unsafe.pendingSelectionRecovery)
+        #expect(unsafe.unknownEntryCount == 1)
+        #expect(!unsafe.canInstall)
+    }
+}
