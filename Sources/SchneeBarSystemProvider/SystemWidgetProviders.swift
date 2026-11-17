@@ -63,7 +63,7 @@ public actor CPUWidgetProvider: WidgetProvider {
     )
 
     private let sampler: HostCPUSampler
-    private let lease: HostCPUConsumerLease
+    private let lease: HostCPUConsumerLease?
 
     public init() {
         let lease = HostCPUConsumerLease(consumer: .widget)
@@ -74,6 +74,12 @@ public actor CPUWidgetProvider: WidgetProvider {
             now: { ContinuousClock.now },
             initialLease: lease
         )
+    }
+
+    /// Managed mode: the app reconciles demand before asking the engine to refresh.
+    public init(sampler: HostCPUSampler) {
+        self.sampler = sampler
+        lease = nil
     }
 
     /// The shared composition root passes its own widget lease.
@@ -100,7 +106,12 @@ public actor CPUWidgetProvider: WidgetProvider {
     }
 
     public func snapshot() async throws -> WidgetSnapshot {
-        let sample = try await sampler.sample(for: lease)
+        let sample: HostCPUSample
+        if let lease {
+            sample = try await sampler.sample(for: lease)
+        } else {
+            sample = try await sampler.sample(for: .widget)
+        }
         let percentage = sample.percentage
         let rounded = Int(percentage.rounded())
         let severity: WidgetSeverity

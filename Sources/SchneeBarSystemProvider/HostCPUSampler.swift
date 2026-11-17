@@ -93,6 +93,45 @@ public actor HostCPUSampler {
         suspended = false
     }
 
+    /// Atomic demand reconciliation for the single application composition owner.
+    /// Calls must be serialized by that owner; do not mix with ad-hoc leases.
+    public func reconcileDemand(widget: Bool, companion: Bool, sleeping: Bool) {
+        if sleeping {
+            suspend()
+            leases.removeAll()
+            return
+        }
+        resume()
+        let desired: Set<HostCPUConsumer> = Set(
+            (widget ? [.widget] : []) + (companion ? [.companion] : [])
+        )
+        let hadDemand = !leases.isEmpty
+        for consumer in [HostCPUConsumer.widget, .companion] {
+            if desired.contains(consumer) {
+                _ = subscribe(consumer)
+            } else {
+                leases.removeValue(forKey: consumer)
+            }
+        }
+        if hadDemand && leases.isEmpty { invalidate() }
+    }
+
+    /// Delay until a fresh observation can be acquired, measured on the same
+    /// monotonic clock as cache admission. nil means no active demand for this
+    /// consumer; zero means acquire now or join the current flight.
+    public func delayUntilNextAcquisition(for consumer: HostCPUConsumer) -> Duration? {
+        guard !suspended, leases[consumer] != nil else { return nil }
+        guard let cached else { return .zero }
+        let age = cached.at.duration(to: now())
+        return age >= .zero && age < .seconds(5) ? .seconds(5) - age : .zero
+    }
+
+    /// Resolve the active lease at request entry; retain that lease across suspension.
+    public func sample(for consumer: HostCPUConsumer) async throws -> HostCPUSample {
+        guard let lease = leases[consumer] else { throw CancellationError() }
+        return try await sample(for: lease)
+    }
+
     public func sample(for lease: HostCPUConsumerLease) async throws -> HostCPUSample {
         try Task.checkCancellation()
         guard !suspended, leases[lease.consumer] == lease else {
