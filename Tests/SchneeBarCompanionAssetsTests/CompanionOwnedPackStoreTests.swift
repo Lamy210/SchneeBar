@@ -143,3 +143,95 @@ private func withStore(_ body: (URL, URL) throws -> Void) throws {
         }
     }
 }
+
+@Test func ownedTrashRestoreAndPurgePreserveSourceAndSlotAccounting() throws {
+    try withStore { source, target in
+        let installed = try CompanionOwnedPackStore.install(from: source, into: target)
+        try CompanionOwnedPackStore.trash(id: installed.id, in: target)
+        let trashed = try CompanionOwnedPackStore.inventory(in: target)
+        #expect(trashed.entries.isEmpty)
+        #expect(trashed.trashedIDs == [installed.id])
+        #expect(throws: CompanionOwnedPackError.missingPack) {
+            try CompanionOwnedPackStore.load(id: installed.id, from: target)
+        }
+        #expect(throws: CompanionOwnedPackError.packLimit) {
+            try CompanionOwnedPackStore.install(from: source, into: target, maximumPacks: 1) {}
+        }
+        try CompanionOwnedPackStore.restore(id: installed.id, in: target)
+        let reloaded = try CompanionOwnedPackStore.load(id: installed.id, from: target)
+        #expect(reloaded.asset(for: .run).clip.durations == installed.catalogue.asset(for: .run).clip.durations)
+        try CompanionOwnedPackStore.trash(id: installed.id, in: target)
+        try CompanionOwnedPackStore.purgeTrash(id: installed.id, in: target)
+        #expect(try FileManager.default.contentsOfDirectory(atPath: target.path).isEmpty)
+        #expect(try Data(contentsOf: source.appendingPathComponent("character.json")) == Data(ownedManifest.utf8))
+        _ = try CompanionOwnedPackStore.install(from: source, into: target, maximumPacks: 1) {}
+    }
+}
+
+@Test func ownedRestoreNeverOverwritesAndTrashRejectsSymlinks() throws {
+    try withStore { source, target in
+        let installed = try CompanionOwnedPackStore.install(from: source, into: target)
+        try CompanionOwnedPackStore.trash(id: installed.id, in: target)
+        let occupied = target.appendingPathComponent(CompanionOwnedPackStore.packName(installed.id))
+        try Data([8]).write(to: occupied)
+        #expect(throws: CompanionOwnedPackError.moveFailed) {
+            try CompanionOwnedPackStore.restore(id: installed.id, in: target)
+        }
+        #expect(try Data(contentsOf: occupied) == Data([8]))
+        let alias = UUID()
+        try FileManager.default.createSymbolicLink(at: target.appendingPathComponent(CompanionOwnedPackStore.packName(alias)),
+                                                  withDestinationURL: source)
+        #expect(throws: CompanionOwnedPackError.missingPack) {
+            try CompanionOwnedPackStore.trash(id: alias, in: target)
+        }
+        #expect(try CompanionOwnedPackStore.inventory(in: target).trashedIDs == [installed.id])
+    }
+}
+
+@Test func ownedRecoveryRefusesUnknownAndLinkedContentBeforeDeletingAnything() throws {
+    try withStore { source, target in
+        let installed = try CompanionOwnedPackStore.install(from: source, into: target)
+        try CompanionOwnedPackStore.trash(id: installed.id, in: target)
+        let trash = target.appendingPathComponent(CompanionOwnedPackStore.trashName(installed.id))
+        let unknown = trash.appendingPathComponent("unrelated.txt")
+        let existing = trash.appendingPathComponent("run.gif")
+        let bytes = try Data(contentsOf: existing)
+        try Data([1]).write(to: unknown)
+        #expect(throws: CompanionOwnedPackError.unsafeCleanup) {
+            try CompanionOwnedPackStore.purgeTrash(id: installed.id, in: target)
+        }
+        #expect(try Data(contentsOf: existing) == bytes)
+        try FileManager.default.removeItem(at: unknown)
+        let link = trash.appendingPathComponent("walk.gif")
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: source.appendingPathComponent("original.gif"))
+        #expect(throws: CompanionOwnedPackError.unsafeCleanup) {
+            try CompanionOwnedPackStore.purgeTrash(id: installed.id, in: target)
+        }
+        #expect(try Data(contentsOf: existing) == bytes)
+        #expect(try Data(contentsOf: source.appendingPathComponent("original.gif")) == bytes)
+    }
+}
+
+@Test func ownedRecoveryDiscardsOnlyExplicitCanonicalAbandonedStage() throws {
+    try withStore { source, target in
+        let installed = try CompanionOwnedPackStore.install(from: source, into: target)
+        let id = UUID()
+        let stage = target.appendingPathComponent(CompanionOwnedPackStore.stageName(id))
+        let sequence = stage.appendingPathComponent("walk")
+        let fm = FileManager.default
+        try fm.createDirectory(at: stage, withIntermediateDirectories: false,
+                               attributes: [.posixPermissions: NSNumber(value: 0o700)])
+        try fm.createDirectory(at: sequence, withIntermediateDirectories: false,
+                               attributes: [.posixPermissions: NSNumber(value: 0o700)])
+        let frame = sequence.appendingPathComponent("frame-000.png")
+        try #require(fm.createFile(atPath: frame.path, contents: Data(),
+                                  attributes: [.posixPermissions: NSNumber(value: 0o600)]))
+        #expect(try CompanionOwnedPackStore.inventory(in: target).abandonedStageIDs == [id])
+        try CompanionOwnedPackStore.discardAbandonedStage(id: id, in: target)
+        #expect(!fm.fileExists(atPath: stage.path))
+        let inventory = try CompanionOwnedPackStore.inventory(in: target)
+        #expect(inventory.entries.first?.id == installed.id)
+        #expect(inventory.abandonedStageCount == 0)
+        #expect(inventory.canInstall)
+    }
+}
