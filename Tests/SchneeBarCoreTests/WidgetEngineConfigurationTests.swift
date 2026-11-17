@@ -155,3 +155,23 @@ func applyingConfigurationDisablesAlreadyCachedWidgetImmediately() async {
 
     #expect((await engine.orderedVisibleSnapshots()).isEmpty)
 }
+
+@Test func externallyScheduledProviderExcludedFromGenericDeadlinesAndRefresh() async {
+    let external = PreferenceCountingProvider(id: "external-clock", order: 0)
+    let ordinary = PreferenceCountingProvider(id: "ordinary", order: 1)
+    let engine = WidgetEngine(providers: [external, ordinary])
+    let start = Date(timeIntervalSince1970: 1000)
+    _ = await engine.refreshDue(at: start, excluding: [external.descriptor.id])
+    #expect(await external.callCount() == 0)
+    #expect(await ordinary.callCount() == 1)
+    #expect(await engine.secondsUntilNextRefresh(at: start, excluding: [external.descriptor.id]) == 10)
+    _ = await engine.refreshAll(at: start, excluding: [external.descriptor.id])
+    #expect(await external.callCount() == 0)
+    _ = await engine.refreshIfEnabled(id: external.descriptor.id, at: start)
+    #expect(await external.callCount() == 1)
+    var config = WidgetConfiguration()
+    config.setEnabled(false, for: external.descriptor)
+    await engine.setConfiguration(config)
+    _ = await engine.refreshIfEnabled(id: external.descriptor.id, at: start)
+    #expect(await external.callCount() == 1)
+}

@@ -270,6 +270,19 @@ let project = Project(
             ]
         ),
         .target(
+            name: "SchneeBarCompanionPreviewTests",
+            destinations: .macOS,
+            product: .unitTests,
+            bundleId: "dev.lamy.schneebar.companion-preview-tests",
+            deploymentTargets: deploymentTarget,
+            sources: ["Tests/SchneeBarCompanionPreviewTests/**"],
+            dependencies: [
+                .target(name: "SchneeBarCompanionPreview"),
+                .target(name: "SchneeBarCompanionCore"),
+                .target(name: "SchneeBarSystemProvider"),
+            ]
+        ),
+        .target(
             name: "SchneeBarVisualHarness",
             destinations: .macOS,
             product: .app,

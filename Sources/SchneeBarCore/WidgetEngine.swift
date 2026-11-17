@@ -347,29 +347,45 @@ public actor WidgetEngine {
     }
 
     @discardableResult
-    public func refreshAll(at attemptedAt: Date = .now) async -> [WidgetSnapshot] {
-        for id in orderedEnabledProviderIDs() {
+    public func refreshAll(
+        at attemptedAt: Date = .now, excluding: Set<WidgetID> = []
+    ) async -> [WidgetSnapshot] {
+        for id in orderedEnabledProviderIDs() where !excluding.contains(id) {
             guard !Task.isCancelled else { break }
-            _ = await refresh(id: id, at: attemptedAt)
+            _ = await refreshIfEnabled(id: id, at: attemptedAt)
         }
         return orderedVisibleSnapshots()
     }
 
     @discardableResult
-    public func refreshDue(at now: Date = .now) async -> [WidgetSnapshot] {
-        for id in orderedEnabledProviderIDs() where isRefreshDue(id: id, at: now) {
+    public func refreshDue(
+        at now: Date = .now, excluding: Set<WidgetID> = []
+    ) async -> [WidgetSnapshot] {
+        for id in orderedEnabledProviderIDs()
+        where !excluding.contains(id) && isRefreshDue(id: id, at: now) {
             guard !Task.isCancelled else { break }
             _ = await refresh(id: id, at: now)
         }
         return orderedVisibleSnapshots()
     }
 
+    /// The owner of an externally scheduled provider still enters through
+    /// the engine's enabled check and normal revision/diagnostic machinery.
+    @discardableResult
+    public func refreshIfEnabled(id: WidgetID, at attemptedAt: Date = .now) async -> WidgetSnapshot? {
+        guard let registration = providers[id],
+              configuration.isEnabled(registration.descriptor) else { return nil }
+        return await refresh(id: id, at: attemptedAt)
+    }
+
     public func secondsUntilNextRefresh(
         at now: Date = .now,
-        maximum: TimeInterval = 60
+        maximum: TimeInterval = 60,
+        excluding: Set<WidgetID> = []
     ) -> TimeInterval {
         let intervals = providers.compactMap { id, registration -> TimeInterval? in
-            guard configuration.isEnabled(registration.descriptor) else { return nil }
+            guard !excluding.contains(id),
+                  configuration.isEnabled(registration.descriptor) else { return nil }
             guard let lastAttempted = lastAttemptedAt[id] else { return 0 }
 
             let severity = snapshots[id]?.severity ?? .unavailable

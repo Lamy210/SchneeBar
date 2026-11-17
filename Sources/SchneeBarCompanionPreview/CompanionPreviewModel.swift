@@ -20,7 +20,10 @@ final class CompanionPreviewModel: NSObject, ObservableObject {
     @Published var manualRate: CompanionPlaybackRate = .normal { didSet { reconcile() } }
     @Published var freeze = false { didSet { reconcile() } }
 
-    private let sampler = HostCPUSampler()
+    private let sampler: HostCPUSampler
+    private let isBarRunning: @MainActor () -> Bool
+    private let makeStatusItem: @MainActor () -> NSStatusItem?
+    private let systemReduceMotion: @MainActor () -> Bool
     private var item: NSStatusItem?
     private var fallback: NSImage? {
         NSImage(systemSymbolName: "snowflake", accessibilityDescription: "SchneeBar Preview")
@@ -37,13 +40,28 @@ final class CompanionPreviewModel: NSObject, ObservableObject {
     private var revision = UUID()
     private var sleeping = false
 
-    private var barRunning: Bool {
-        !NSRunningApplication.runningApplications(withBundleIdentifier: "dev.lamy.schneebar").isEmpty
+    init(
+        sampler: HostCPUSampler = HostCPUSampler(),
+        isBarRunning: @escaping @MainActor () -> Bool = {
+            !NSRunningApplication.runningApplications(withBundleIdentifier: "dev.lamy.schneebar").isEmpty
+        },
+        makeStatusItem: @escaping @MainActor () -> NSStatusItem? = {
+            NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        },
+        systemReduceMotion: @escaping @MainActor () -> Bool = {
+            NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        }
+    ) {
+        self.sampler = sampler
+        self.isBarRunning = isBarRunning
+        self.makeStatusItem = makeStatusItem
+        self.systemReduceMotion = systemReduceMotion
+        super.init()
     }
 
     func start() {
         guard !started else { return }
-        guard !barRunning else {
+        guard !isBarRunning() else {
             message = "Quit SchneeBar before starting the isolated preview."
             return
         }
@@ -53,13 +71,14 @@ final class CompanionPreviewModel: NSObject, ObservableObject {
             message = "Unable to create preview assets."
             return
         }
-        let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        // The injectable surface may be absent in headless model tests.
+        let statusItem = makeStatusItem()
         item = statusItem
-        statusItem.button?.image = fallback
-        statusItem.button?.imagePosition = .imageOnly
-        statusItem.button?.target = self
-        statusItem.button?.action = #selector(activateWindow)
-        statusItem.button?.setAccessibilityLabel("SchneeBar Companion Preview")
+        statusItem?.button?.image = fallback
+        statusItem?.button?.imagePosition = .imageOnly
+        statusItem?.button?.target = self
+        statusItem?.button?.action = #selector(activateWindow)
+        statusItem?.button?.setAccessibilityLabel("SchneeBar Companion Preview")
         started = true
         message = ""
         reconcile()
@@ -75,7 +94,7 @@ final class CompanionPreviewModel: NSObject, ObservableObject {
     }
 
     func appLaunched() {
-        if started && barRunning {
+        if started && isBarRunning() {
             stop()
             message = "Preview stopped because SchneeBar launched."
         }
@@ -105,11 +124,14 @@ final class CompanionPreviewModel: NSObject, ObservableObject {
         runtime.setMode(automatic ? .automatic : .manual(manualRate))
         runtime.setPresentation(
             enabled: started, visible: showCharacter, awake: !sleeping,
-            reduceMotion: freeze || NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+            reduceMotion: freeze || systemReduceMotion()
         )
-        runtime.invalidateCPU()
+        // setMode/setPresentation already invalidate the input when actual
+        // automatic demand changes. Keep EMA and consumed sample identities
+        // across presentation-only changes. A changed sampler epoch reseeds
+        // the policy on the next accepted observation.
         let companion = runtime.wantsHostCPU
-        cpuText = ""
+        if !widget { cpuText = "" }
         updatePresentation()
         let sampler = sampler
         transition = Task { @MainActor [weak self] in
@@ -119,9 +141,10 @@ final class CompanionPreviewModel: NSObject, ObservableObject {
             guard widget || companion else { return }
             self.refresh = Task { @MainActor [weak self] in
                 while !Task.isCancelled {
-                    guard let self, self.revision == expected else { return }
-                    await self.refreshOnce(widget: widget, companion: companion, revision: expected)
-                    guard !Task.isCancelled, self.revision == expected else { return }
+                    guard self?.revision == expected else { return }
+                    await self?.refreshOnce(widget: widget, companion: companion, revision: expected)
+                    guard !Task.isCancelled, self?.revision == expected else { return }
+                    // Do not bind self strongly across the idle wait.
                     do { try await Task.sleep(for: .seconds(5)) } catch { return }
                 }
             }
@@ -165,8 +188,16 @@ final class CompanionPreviewModel: NSObject, ObservableObject {
             + (cpuText.isEmpty ? "" : ", " + cpuText))
     }
 
-    deinit {
+    isolated deinit {
         refresh?.cancel()
-        // In normal use onDisappear calls stop; no preview work is persisted.
+        if let item { NSStatusBar.system.removeStatusItem(item) }
+        let pending = transition
+        let sampler = sampler
+        // Drain demand changes without retaining the dying model, then revoke
+        // both consumers. Renderer deinit independently cancels its frame task.
+        Task {
+            await pending?.value
+            await sampler.reconcileDemand(widget: false, companion: false, sleeping: true)
+        }
     }
 }

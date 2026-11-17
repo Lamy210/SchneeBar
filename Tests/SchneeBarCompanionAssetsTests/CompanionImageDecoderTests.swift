@@ -102,3 +102,35 @@ private func fixture(type: UTType, durations: [Double]) throws -> Data {
     }
     #expect(ids.count == 5)
 }
+
+@Test func originalPreviewFramesRetainTransparentBorderAtEveryState() throws {
+    let catalogue = try CompanionPreviewAssets.catalogue()
+    let states: [CompanionState] = [.idle, .walk, .run, .dash, .sprint]
+    for state in states {
+        for frame in catalogue.asset(for: state).frames {
+            try #require(frame.width == 32 && frame.height == 32)
+            var pixels = [UInt8](repeating: 0, count: 32 * 32 * 4)
+            try pixels.withUnsafeMutableBytes { bytes in
+                let context = try #require(CGContext(
+                    data: bytes.baseAddress, width: 32, height: 32,
+                    bitsPerComponent: 8, bytesPerRow: 128,
+                    space: CGColorSpaceCreateDeviceRGB(),
+                    bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+                        | CGBitmapInfo.byteOrder32Big.rawValue
+                ))
+                context.clear(CGRect(x: 0, y: 0, width: 32, height: 32))
+                context.draw(frame, in: CGRect(x: 0, y: 0, width: 32, height: 32))
+            }
+            var visible = false
+            for y in 0..<32 {
+                for x in 0..<32 {
+                    let alpha = pixels[(y * 32 + x) * 4 + 3]
+                    if x == 0 || x == 31 || y == 0 || y == 31 {
+                        #expect(alpha == 0)
+                    } else if alpha != 0 { visible = true }
+                }
+            }
+            #expect(visible)
+        }
+    }
+}
