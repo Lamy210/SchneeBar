@@ -279,3 +279,90 @@ private final class LocalDeadlineFixture {
     #expect(runtime.localEventSession == nil)
     #expect(runtime.receiveLocalEvent(session: second, kind: .build, payload: payload) == nil)
 }
+
+@Test @MainActor func hostBridgeRequiresCommittedIntentAndApproval() throws {
+    let name = "SchneeBarTests.hostBridge.\(UUID())"
+    let defaults = try #require(UserDefaults(suiteName: name))
+    defer { defaults.removePersistentDomain(forName: name) }
+    let store = CompanionHostPreferenceStore(defaults: defaults)
+    var frames = 0
+    let runtime = CompanionRuntimeCoordinator(renderer: CompanionMenuBarRenderer(
+        onFrame: { _ in frames += 1 }, onClear: {}))
+    let bridge = CompanionHostRuntimeBridge(store: store, runtime: runtime)
+    try store.save(.init(enabled: true, allowLocalEvents: true))
+    bridge.refreshPreferences()
+    #expect(bridge.decision.availability == .releaseBlocked)
+    #expect(bridge.beginAssetRequest() == nil)
+    #expect(!runtime.wantsHostCPU && runtime.localEventSession == nil)
+    bridge.updateEnvironment(.init(releaseApproved: true, ownsMenuSurface: true))
+    #expect(bridge.decision.availability == .awaitingCatalogue)
+    #expect(frames == 0)
+    let request = try #require(bridge.beginAssetRequest())
+    let catalog = try CompanionAssetCatalog(assets: [.run: renderFixture()], defaultState: .run)
+    #expect(bridge.completeAssetRequest(request, catalogue: catalog))
+    #expect(frames == 1 && runtime.wantsHostCPU && runtime.localEventSession != nil)
+    defaults.set("invalid", forKey: CompanionHostPreferenceStore.storageKey)
+    bridge.refreshPreferences()
+    #expect(bridge.decision.availability == .disabled)
+    #expect(runtime.displayedFrameIndex == nil && !runtime.wantsHostCPU && runtime.localEventSession == nil)
+}
+
+@Test @MainActor func hostBridgeLatestAssetRequestAndLifecycleFence() throws {
+    let name = "SchneeBarTests.hostBridge.\(UUID())"
+    let defaults = try #require(UserDefaults(suiteName: name))
+    defer { defaults.removePersistentDomain(forName: name) }
+    let store = CompanionHostPreferenceStore(defaults: defaults)
+    try store.save(.init(enabled: true))
+    let runtime = CompanionRuntimeCoordinator(renderer: CompanionMenuBarRenderer(onFrame: { _ in }, onClear: {}))
+    let bridge = CompanionHostRuntimeBridge(store: store, runtime: runtime)
+    let catalog = try CompanionAssetCatalog(assets: [.run: renderFixture()], defaultState: .run)
+    bridge.updateEnvironment(.init(releaseApproved: true, ownsMenuSurface: true))
+    let old = try #require(bridge.beginAssetRequest())
+    let latest = try #require(bridge.beginAssetRequest())
+    #expect(!bridge.completeAssetRequest(old, catalogue: catalog))
+    #expect(bridge.completeAssetRequest(latest, catalogue: catalog))
+    #expect(!bridge.completeAssetRequest(latest, catalogue: nil))
+    let replacement = try #require(bridge.beginAssetRequest())
+    let cpu = try #require(runtime.beginCPURequest())
+    bridge.updateEnvironment(.init(releaseApproved: true, awake: false, ownsMenuSurface: true))
+    #expect(runtime.displayedFrameIndex == nil)
+    #expect(!bridge.completeAssetRequest(replacement, catalogue: catalog))
+    bridge.updateEnvironment(.init(releaseApproved: true, ownsMenuSurface: true))
+    #expect(bridge.decision.availability == .awaitingCatalogue)
+    let fresh = try #require(bridge.beginAssetRequest())
+    #expect(bridge.completeAssetRequest(fresh, catalogue: catalog))
+    runtime.acceptCPU(cpu, id: UUID(), epoch: UUID(), capturedAt: .now, hostPercentage: 100)
+    #expect(runtime.rate == .normal)
+    bridge.stop()
+    #expect(bridge.decision.availability == .releaseBlocked && runtime.displayedFrameIndex == nil)
+}
+
+@Test @MainActor func hostBridgeAppliesMotionAndEventPolicyWithoutTransientActivation() throws {
+    let name = "SchneeBarTests.hostBridge.\(UUID())"
+    let defaults = try #require(UserDefaults(suiteName: name))
+    defer { defaults.removePersistentDomain(forName: name) }
+    let store = CompanionHostPreferenceStore(defaults: defaults)
+    try store.save(.init(enabled: true, speed: .half, allowLocalEvents: true))
+    let scheduler = ManualFrameScheduler()
+    let renderer = CompanionMenuBarRenderer(onFrame: { _ in }, onClear: {},
+        scheduler: { delay, callback in scheduler.schedule(delay, callback: callback) })
+    let runtime = CompanionRuntimeCoordinator(renderer: renderer)
+    let bridge = CompanionHostRuntimeBridge(store: store, runtime: runtime)
+    bridge.updateEnvironment(.init(releaseApproved: true, ownsMenuSurface: true, systemReduceMotion: true))
+    let catalog = try CompanionAssetCatalog(assets: [.run: renderFixture(animated: true)], defaultState: .run)
+    #expect(bridge.completeAssetRequest(try #require(bridge.beginAssetRequest()), catalogue: catalog))
+    #expect(runtime.displayedFrameIndex == 0 && scheduler.delays.isEmpty && !runtime.wantsHostCPU)
+    let first = try #require(runtime.localEventSession)
+    bridge.updateEnvironment(.init(releaseApproved: true, ownsMenuSurface: true))
+    #expect(runtime.rate == .half && !runtime.wantsHostCPU)
+    #expect(!scheduler.delays.isEmpty)
+    #expect(runtime.localEventSession == first)
+    #expect(bridge.completeAssetRequest(try #require(bridge.beginAssetRequest()), catalogue: catalog))
+    #expect(runtime.localEventSession != nil && runtime.localEventSession != first)
+    #expect(runtime.receiveLocalEvent(session: first, kind: .build, payload: Data("{\"phase\":\"started\"}".utf8)) == nil)
+    try store.save(.init(enabled: true, allowLocalEvents: true, preset: .minimal))
+    bridge.refreshPreferences()
+    #expect(bridge.decision.availability == .hidden && runtime.localEventSession == nil)
+    #expect(!runtime.wantsHostCPU && runtime.displayedFrameIndex == nil)
+    bridge.stop()
+}
