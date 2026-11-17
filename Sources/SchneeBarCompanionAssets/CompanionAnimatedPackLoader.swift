@@ -1,13 +1,13 @@
+import CoreGraphics
 import Foundation
 import SchneeBarCompanionCore
 
 public enum CompanionAnimatedPackError: Error, Equatable {
     case unsupportedKind, encodedBudget, frameBudget, pixelBudget
-    case formatMismatch, invalidLimits
+    case formatMismatch, invalidLimits, inconsistentFrameDimensions
 }
 
-/// Pack decoding for animated files and static PNG-derived clips.
-/// Directory sequences require a separately bounded enumeration planner.
+/// Pack decoding for all six Runner v1 clip kinds, including bounded sequences.
 /// No copying, persistence, UI, or archive extraction.
 public enum CompanionAnimatedPackLoader {
     public static let maximumEncodedBytes = 32 * 1024 * 1024
@@ -36,21 +36,47 @@ public enum CompanionAnimatedPackLoader {
         defer { if scoped { url.stopAccessingSecurityScopedResource() } }
         let directory = try CompanionPackDirectory(url)
         let manifest = try directory.manifest()
-        // Fail unsupported mixed packs before any referenced clip is read.
-        guard manifest.clips.allSatisfy({ expectedFormat($0.kind) != nil }) else {
-            throw CompanionAnimatedPackError.unsupportedKind
-        }
-
         var remainingBytes = limits.bytes
         var remainingFrames = limits.frames
         var remainingMetadataPixels = limits.pixels
-        var prepared: [(CompanionPackManifest.Clip, CompanionImageDecoder.Prepared)] = []
+        var prepared: [(CompanionPackManifest.Clip, [CompanionImageDecoder.Prepared])] = []
 
         // Read once per declared clip, including aliases, retaining its source
         // for a second phase. ALL metadata must fit before explicit decoding.
         for entry in manifest.clips {
             try Task.checkCancellation()
             guard remainingBytes > 0 else { throw CompanionAnimatedPackError.encodedBudget }
+            if entry.kind == .pngSequence {
+                let data: [Data]
+                do {
+                    data = try directory.readPNGSequence(entry.path, maximumBytes: remainingBytes,
+                        maximumFrames: min(CompanionImageDecoder.maximumFrames, remainingFrames))
+                } catch CompanionFileReadError.invalidSize {
+                    throw CompanionAnimatedPackError.encodedBudget
+                }
+                var sequence: [CompanionImageDecoder.Prepared] = []
+                for bytes in data {
+                    try Task.checkCancellation()
+                    remainingBytes -= bytes.count
+                    let candidate = try CompanionImageDecoder.prepare(bytes)
+                    guard candidate.format == .png, candidate.frameCount == 1 else {
+                        throw CompanionAnimatedPackError.formatMismatch
+                    }
+                    if let first = sequence.first,
+                       first.firstWidth != candidate.firstWidth || first.firstHeight != candidate.firstHeight {
+                        throw CompanionAnimatedPackError.inconsistentFrameDimensions
+                    }
+                    guard candidate.metadataPixels <= remainingMetadataPixels else {
+                        throw CompanionAnimatedPackError.pixelBudget
+                    }
+                    remainingMetadataPixels -= candidate.metadataPixels
+                    remainingFrames -= 1
+                    sequence.append(candidate)
+                }
+                prepared.append((entry, sequence))
+                continue
+            }
+
             let data: Data
             do {
                 data = try directory.read(entry.path, maximumBytes: remainingBytes)
@@ -76,14 +102,30 @@ public enum CompanionAnimatedPackLoader {
             else { throw CompanionAnimatedPackError.pixelBudget }
             remainingFrames -= frames
             remainingMetadataPixels -= candidate.metadataPixels + generatedPixels
-            prepared.append((entry, candidate))
+            prepared.append((entry, [candidate]))
         }
 
         var assets: [CompanionState: CompanionDecodedClip] = [:]
         var remainingDecodedPixels = limits.pixels
-        for (entry, candidate) in prepared {
+        for (entry, candidates) in prepared {
             try Task.checkCancellation()
-            if isStatic(entry.kind) {
+            guard let candidate = candidates.first else { throw CompanionAnimatedPackError.frameBudget }
+            if entry.kind == .pngSequence {
+                var frames: [CGImage] = []
+                for source in candidates {
+                    try Task.checkCancellation()
+                    let decoded = try CompanionImageDecoder.decodePrepared(source, pixelLimit: remainingDecodedPixels)
+                    guard let frame = decoded.frames.first, decoded.frames.count == 1,
+                          frame.width == candidate.firstWidth, frame.height == candidate.firstHeight else {
+                        throw CompanionAnimatedPackError.inconsistentFrameDimensions
+                    }
+                    remainingDecodedPixels -= frame.width * frame.height
+                    frames.append(frame)
+                }
+                let clip = try CompanionClip(revision: UUID(),
+                    durations: Array(repeating: 1.0 / 12.0, count: frames.count))
+                assets[entry.state] = CompanionDecodedClip(clip: clip, frames: frames)
+            } else if isStatic(entry.kind) {
                 let result = try CompanionStaticPackClip.make(candidate, kind: entry.kind,
                                                               pixelLimit: remainingDecodedPixels)
                 remainingDecodedPixels -= result.chargedPixels
