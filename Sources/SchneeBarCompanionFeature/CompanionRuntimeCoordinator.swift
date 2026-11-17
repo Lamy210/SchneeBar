@@ -2,6 +2,7 @@ import AppKit
 import Foundation
 import SchneeBarCompanionAssets
 import SchneeBarCompanionCore
+import SchneeBarCompanionEvents
 
 /// Single-surface composition seam. Owns no AppKit status item, CPU timer,
 /// filesystem permission, or persistence. The host owns demand reconciliation.
@@ -11,19 +12,44 @@ public final class CompanionRuntimeCoordinator {
     private var catalog: CompanionAssetCatalog?
     private var input = CompanionCPUInput()
     private var arbitration = CompanionArbitration()
-    private let origin = ContinuousClock.now
+    private var localIngress = CompanionLocalEventIngress()
+    private var localEventsEnabled = false
+    public private(set) var localEventSession: UUID?
+    private let elapsed: @MainActor () -> Duration
+    typealias DeadlineScheduler = @MainActor (Duration, @escaping @MainActor () -> Void) -> Task<Void, Never>
+    private let deadlineScheduler: DeadlineScheduler
+    private var scheduledDeadline: Duration?
+    private var deadlineTask: Task<Void, Never>?
+    private var deadlineGeneration = UUID()
     private var preferredMode: CompanionCPUInput.Mode = .automatic
     private var enabled = false
     private var visible = false
     private var awake = true
     private var reduceMotion = false
 
-    public init(renderer: CompanionMenuBarRenderer) {
-        self.renderer = renderer
+    public convenience init(renderer: CompanionMenuBarRenderer) {
+        let origin = ContinuousClock.now
+        self.init(renderer: renderer, elapsed: { origin.duration(to: .now) },
+            deadlineScheduler: { delay, callback in
+                Task { @MainActor in
+                    do { try await Task.sleep(for: delay) } catch { return }
+                    guard !Task.isCancelled else { return }
+                    callback()
+                }
+            })
     }
 
+    // Scheduler enqueues the callback; it must not invoke it synchronously.
+    init(renderer: CompanionMenuBarRenderer, elapsed: @escaping @MainActor () -> Duration,
+         deadlineScheduler: @escaping DeadlineScheduler) {
+        self.renderer = renderer
+        self.elapsed = elapsed
+        self.deadlineScheduler = deadlineScheduler
+    }
+
+    deinit { deadlineTask?.cancel() }
+
     private var active: Bool { enabled && visible && awake && catalog != nil }
-    private var elapsed: Duration { origin.duration(to: .now) }
 
     /// Consume this flag from the application's existing scheduler only.
     public var wantsHostCPU: Bool {
@@ -56,11 +82,34 @@ public final class CompanionRuntimeCoordinator {
 
     public func setManualState(_ state: CompanionState?) {
         if let state {
-            arbitration.submit(state, from: .manual, at: elapsed)
+            arbitration.submit(state, from: .manual, at: elapsed())
         } else {
-            arbitration.clear(.manual, at: elapsed)
+            arbitration.clear(.manual, at: elapsed())
         }
         reconcile()
+    }
+
+    /// Default off. This does not register a transport or authorize actions.
+    public func setLocalEventsEnabled(_ enabled: Bool) {
+        localEventsEnabled = enabled
+        reconcile()
+    }
+
+    /// nil means inactive, disabled or obsolete transport session.
+    @discardableResult
+    public func receiveLocalEvent(
+        session: UUID, kind: CompanionLocalEventIngress.Kind, payload: Data
+    ) -> CompanionLocalEventIngress.Outcome? {
+        guard active, localEventsEnabled, localEventSession == session else { return nil }
+        let priorState = arbitration.state
+        let priorDeadline = arbitration.nextDeadline
+        let outcome = localIngress.receive(
+            kind: kind, payload: payload, at: elapsed(), arbitration: &arbitration
+        )
+        if arbitration.state != priorState || arbitration.nextDeadline != priorDeadline {
+            reconcile()
+        }
+        return outcome
     }
 
     public func beginCPURequest() -> CompanionCPUInput.Request? {
@@ -89,12 +138,21 @@ public final class CompanionRuntimeCoordinator {
     }
 
     private func reconcile() {
+        let now = elapsed()
+        localIngress.advance(to: now, arbitration: &arbitration)
+        if active && localEventsEnabled {
+            if localEventSession == nil { localEventSession = UUID() }
+        } else if localEventSession != nil {
+            localEventSession = nil
+            localIngress.revokeLocalState(at: now, arbitration: &arbitration)
+        }
         input.setMode(active && !reduceMotion ? preferredMode : .disabled)
         if let reaction = input.reaction {
-            arbitration.submit(reaction.state, from: .cpu, at: elapsed)
+            arbitration.submit(reaction.state, from: .cpu, at: now)
         } else {
-            arbitration.clear(.cpu, at: elapsed)
+            arbitration.clear(.cpu, at: now)
         }
+        scheduleDeadline(active ? arbitration.nextDeadline : nil, at: now)
         guard active, let catalog else {
             renderer.stop()
             return
@@ -103,5 +161,24 @@ public final class CompanionRuntimeCoordinator {
         renderer.setReduceMotion(reduceMotion)
         renderer.setRate(input.rate)
         renderer.install(catalog.asset(for: arbitration.state))
+    }
+
+    /// One-shot expiry, independent of CPU polling. Reconcile the current
+    /// arbitration value, not a captured channel or an outdated deadline.
+    private func scheduleDeadline(_ next: Duration?, at now: Duration) {
+        guard scheduledDeadline != next else { return }
+        deadlineTask?.cancel()
+        deadlineTask = nil
+        scheduledDeadline = next
+        deadlineGeneration = UUID()
+        guard let next else { return }
+        let generation = deadlineGeneration
+        deadlineTask = deadlineScheduler(max(.zero, next - now)) { [weak self] in
+            guard let self, self.deadlineGeneration == generation else { return }
+            self.deadlineGeneration = UUID()
+            self.scheduledDeadline = nil
+            self.deadlineTask = nil
+            self.reconcile()
+        }
     }
 }

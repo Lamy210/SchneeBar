@@ -57,6 +57,16 @@ public struct CompanionLocalEventIngress: Sendable {
         return true
     }
 
+    /// Revoke local state while retaining admission budgets and quarantine.
+    @discardableResult
+    public mutating func revokeLocalState(at now: Duration, arbitration: inout CompanionArbitration) -> Bool {
+        guard advance(to: now, arbitration: &arbitration) else { return false }
+        arbitration.clearLocal(at: now)
+        channels.removeAll()
+        buildDeadline = nil
+        return true
+    }
+
     /// Call at entry to a serialized listener, before allocating a JSON object.
     /// Data is already received by the caller; the 4096-byte limit is not an
     /// OS transport allocation limit. Every attempt, including malformed data,

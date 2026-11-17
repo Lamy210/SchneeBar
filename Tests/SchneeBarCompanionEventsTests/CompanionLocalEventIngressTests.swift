@@ -131,3 +131,16 @@ private struct Fixture {
     f.advance(5)
     #expect(f.arbitration.state == .run)
 }
+
+@Test func lifecycleRevocationPreservesTrustedStateAndAdmissionBudget() {
+    var f = Fixture()
+    let cpu = f.arbitration.submit(.walk, from: .cpu, at: .zero)
+    #expect(cpu)
+    for i in 0..<12 { #expect(f.set("c\(i)") == .accepted) }
+    let revoked = f.ingress.revokeLocalState(at: .zero, arbitration: &f.arbitration)
+    #expect(revoked)
+    #expect(f.ingress.activeLocalCount == 0)
+    #expect(f.arbitration.state == .walk)
+    #expect(f.set("new", at: 0.5) == .updateLimited)
+    #expect(f.set("new", at: 1) == .accepted)
+}

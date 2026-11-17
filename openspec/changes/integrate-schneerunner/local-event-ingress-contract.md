@@ -21,3 +21,9 @@ Scope: synchronous data-to-domain adapter only. Runner baseline c925816d4f7ec4e0
 | dropped update, time regression, renewal | no lease extension from rejected update, no resurrection, stable live identity |
 
 Next: test Darwin Foundation parsing/notification wrapper, bounded callback admission before any String-to-Data conversion, lifecycle generation, expiration wakeup and preview opt-in with real-Mac measurements. No production activation or additional release.
+
+## D1b: runtime composition and monotonic expiry
+
+Merge the #393 integration commit 8710d727 into this branch, preserving preview and import targets. CompanionFeature depends on Events (which depends only on Core). Runtime default off, explicit opt-in plus active presentation yields an opaque session UUID. Hide, sleep, catalog removal, disable or opt-out revoke local entries and invalidate that session; budget and quarantine remain intact. Waking still opted in creates a distinct session. Reduce Motion can select a static local state without CPU polling. No transport listener exists yet.
+
+At most one one-shot monotonic expiry task captures the runtime weakly, checks a schedule generation and reconciles current arbitration. Stale/duplicate callbacks cannot clear renewed leases. Avoid render reconciliation on rejected events unless state/deadline changed. This is not a hard real-time guarantee. Host must register and revoke observers using the current session and react to runtime state changes when wiring UI. Add three tests for budget retention, expiry/renewal and lifecycle fencing. Existing Linux 7/7 evidence applies to original D1 only; latest native CI and tests remain required. No production activation or distribution.

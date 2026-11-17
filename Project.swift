@@ -75,6 +75,7 @@ let project = Project(
             deploymentTargets: deploymentTarget,
             sources: ["Sources/SchneeBarCompanionFeature/**"],
             dependencies: [
+                .target(name: "SchneeBarCompanionEvents"),
                 .target(name: "SchneeBarCompanionCore"),
                 .target(name: "SchneeBarCompanionAssets"),
                 .target(name: "SchneeBarDesignSystem"),
@@ -100,6 +101,7 @@ let project = Project(
             deploymentTargets: deploymentTarget,
             sources: ["Tests/SchneeBarCompanionFeatureTests/**"],
             dependencies: [
+                .target(name: "SchneeBarCompanionEvents"),
                 .target(name: "SchneeBarCompanionFeature"),
                 .target(name: "SchneeBarCompanionAssets"),
                 .target(name: "SchneeBarCompanionCore"),
@@ -270,6 +272,38 @@ let project = Project(
                     "ASSETCATALOG_COMPILER_APPICON_NAME": "AppIcon",
                 ]
             )
+        ),
+        .target(
+            name: "SchneeBarCompanionPreview",
+            destinations: .macOS,
+            product: .app,
+            bundleId: "dev.lamy.schneebar.companion-preview",
+            deploymentTargets: deploymentTarget,
+            infoPlist: .extendingDefault(with: [
+                "CFBundleDisplayName": "SchneeBar Companion Preview",
+            ]),
+            sources: ["Sources/SchneeBarCompanionPreview/**"],
+            dependencies: [
+                .target(name: "SchneeBarCompanionCore"),
+                .target(name: "SchneeBarCompanionAssets"),
+                .target(name: "SchneeBarCompanionFeature"),
+                .target(name: "SchneeBarSystemProvider"),
+                .target(name: "SchneeBarCore"),
+                .target(name: "SchneeBarDesignSystem"),
+            ]
+        ),
+        .target(
+            name: "SchneeBarCompanionPreviewTests",
+            destinations: .macOS,
+            product: .unitTests,
+            bundleId: "dev.lamy.schneebar.companion-preview-tests",
+            deploymentTargets: deploymentTarget,
+            sources: ["Tests/SchneeBarCompanionPreviewTests/**"],
+            dependencies: [
+                .target(name: "SchneeBarCompanionPreview"),
+                .target(name: "SchneeBarCompanionCore"),
+                .target(name: "SchneeBarSystemProvider"),
+            ]
         ),
         .target(
             name: "SchneeBarVisualHarness",
