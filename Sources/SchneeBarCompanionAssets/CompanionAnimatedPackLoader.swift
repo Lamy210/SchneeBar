@@ -6,8 +6,8 @@ public enum CompanionAnimatedPackError: Error, Equatable {
     case formatMismatch, invalidLimits
 }
 
-/// First pack decoding slice: GIF/APNG/WebP only. Static procedural images,
-/// sprite sheets and directory sequences need their own bounded planners.
+/// Pack decoding for animated files and static PNG-derived clips.
+/// Directory sequences require a separately bounded enumeration planner.
 /// No copying, persistence, UI, or archive extraction.
 public enum CompanionAnimatedPackLoader {
     public static let maximumEncodedBytes = 32 * 1024 * 1024
@@ -44,7 +44,7 @@ public enum CompanionAnimatedPackLoader {
         var remainingBytes = limits.bytes
         var remainingFrames = limits.frames
         var remainingMetadataPixels = limits.pixels
-        var prepared: [(CompanionState, CompanionImageDecoder.Prepared)] = []
+        var prepared: [(CompanionPackManifest.Clip, CompanionImageDecoder.Prepared)] = []
 
         // Read once per declared clip, including aliases, retaining its source
         // for a second phase. ALL metadata must fit before explicit decoding.
@@ -62,30 +62,47 @@ public enum CompanionAnimatedPackLoader {
             guard candidate.format == expectedFormat(entry.kind) else {
                 throw CompanionAnimatedPackError.formatMismatch
             }
-            guard candidate.frameCount >= 2,
-                  candidate.frameCount <= remainingFrames else {
-                throw CompanionAnimatedPackError.frameBudget
-            }
-            guard candidate.metadataPixels <= remainingMetadataPixels else {
-                throw CompanionAnimatedPackError.pixelBudget
-            }
-            remainingFrames -= candidate.frameCount
-            remainingMetadataPixels -= candidate.metadataPixels
-            prepared.append((entry.state, candidate))
+            let staticKind = isStatic(entry.kind)
+            guard staticKind ? candidate.frameCount == 1 : candidate.frameCount >= 2
+            else { throw CompanionAnimatedPackError.frameBudget }
+            let frames = staticKind ? CompanionStaticPackClip.frameCount : candidate.frameCount
+            let generatedPixels = staticKind
+                ? try CompanionStaticPackClip.outputPixels(entry.kind, width: candidate.firstWidth,
+                                                          height: candidate.firstHeight)
+                : 0
+            guard frames <= remainingFrames else { throw CompanionAnimatedPackError.frameBudget }
+            guard candidate.metadataPixels <= remainingMetadataPixels,
+                  generatedPixels <= remainingMetadataPixels - candidate.metadataPixels
+            else { throw CompanionAnimatedPackError.pixelBudget }
+            remainingFrames -= frames
+            remainingMetadataPixels -= candidate.metadataPixels + generatedPixels
+            prepared.append((entry, candidate))
         }
 
         var assets: [CompanionState: CompanionDecodedClip] = [:]
         var remainingDecodedPixels = limits.pixels
-        for (state, candidate) in prepared {
+        for (entry, candidate) in prepared {
             try Task.checkCancellation()
-            let decoded = try CompanionImageDecoder.decodePrepared(candidate, pixelLimit: remainingDecodedPixels)
-            // decodePrepared checks the remaining budget before normalizing
-            // each frame; this second calculation tracks actual retained cost.
-            for frame in decoded.frames { remainingDecodedPixels -= frame.width * frame.height }
-            assets[state] = decoded
+            if isStatic(entry.kind) {
+                let result = try CompanionStaticPackClip.make(candidate, kind: entry.kind,
+                                                              pixelLimit: remainingDecodedPixels)
+                remainingDecodedPixels -= result.chargedPixels
+                assets[entry.state] = result.clip
+            } else {
+                let decoded = try CompanionImageDecoder.decodePrepared(candidate, pixelLimit: remainingDecodedPixels)
+                for frame in decoded.frames { remainingDecodedPixels -= frame.width * frame.height }
+                assets[entry.state] = decoded
+            }
         }
         try Task.checkCancellation()
         return try CompanionAssetCatalog(assets: assets, defaultState: manifest.defaultState)
+    }
+
+    private static func isStatic(_ kind: CompanionPackManifest.Kind) -> Bool {
+        switch kind {
+        case .singleImage, .spriteSheet4x2: true
+        default: false
+        }
     }
 
     private static func expectedFormat(_ kind: CompanionPackManifest.Kind) -> CompanionImageDecoder.Format? {
@@ -93,7 +110,8 @@ public enum CompanionAnimatedPackLoader {
         case .gif: .gif
         case .apng: .png
         case .webP: .webp
-        case .singleImage, .spriteSheet4x2, .pngSequence: nil
+        case .singleImage, .spriteSheet4x2: .png
+        case .pngSequence: nil
         }
     }
 }
