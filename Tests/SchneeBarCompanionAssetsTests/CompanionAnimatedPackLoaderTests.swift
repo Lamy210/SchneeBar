@@ -70,7 +70,7 @@ private let webpEntry = #"{"state":"idle","kind":"webP","path":"idle.webp"}"#
     }
 }
 
-@Test func animatedPackRejectsMismatchedKindAndUnsupportedMixedPack() throws {
+@Test func animatedPackRejectsMismatchedKindAndMissingSequence() throws {
     try withAnimatedPack { url in
         try writeManifest(#"{"state":"run","kind":"apng","path":"run.gif"}"#, to: url)
         #expect(throws: CompanionAnimatedPackError.formatMismatch) {
@@ -78,7 +78,7 @@ private let webpEntry = #"{"state":"idle","kind":"webP","path":"idle.webp"}"#
         }
         let unsupported = #"{"state":"walk","kind":"pngSequence","path":"nonexistent"}"#
         try writeManifest(gifEntry + "," + unsupported, to: url)
-        #expect(throws: CompanionAnimatedPackError.unsupportedKind) {
+        #expect(throws: CompanionPackError.openFailed) {
             try CompanionAnimatedPackLoader.load(url)
         }
     }
