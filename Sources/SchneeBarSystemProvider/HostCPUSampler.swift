@@ -27,16 +27,23 @@ public struct HostCPUSample: Equatable, Sendable {
 public struct HostCPURefreshPlan: Equatable, Sendable {
     public let consumers: Set<HostCPUConsumer>
     public let acquisitionDelay: Duration?
+    /// Current leases that have not yet consumed the fresh cached result.
+    public let pendingDelivery: Set<HostCPUConsumer>
 
     /// nil acquisitionDelay means no demand. The ordinary widget floor
     /// must not delay a subsecond CPU remainder.
     public func nextHostDelay(otherWidgetsSeconds: Double) -> Duration {
-        max(.milliseconds(50), min(.seconds(max(1, otherWidgetsSeconds)),
-                                  acquisitionDelay ?? .seconds(30)))
+        let cpuDelay = pendingDelivery.isEmpty ? (acquisitionDelay ?? .seconds(30)) : .zero
+        return max(.milliseconds(50), min(.seconds(max(1, otherWidgetsSeconds)), cpuDelay))
     }
 
     public func isDue(_ consumer: HostCPUConsumer) -> Bool {
         consumers.contains(consumer) && acquisitionDelay == .zero
+    }
+
+    /// A consumer may need a cached result without another counter read.
+    public func requiresRefresh(_ consumer: HostCPUConsumer) -> Bool {
+        isDue(consumer) || pendingDelivery.contains(consumer)
     }
 }
 
@@ -50,8 +57,10 @@ public actor HostCPUSampler {
     }
 
     private struct Cached {
+        let id: UUID
         let at: ContinuousClock.Instant
         let result: Result<HostCPUSample, Error>
+        var delivered: [HostCPUConsumer: HostCPUConsumerLease] = [:]
     }
 
     private let readCounters: @Sendable () throws -> CPUCounters
@@ -145,9 +154,19 @@ public actor HostCPUSampler {
     /// read avoids inconsistent separate deadline/lease observations.
     public func refreshPlan() -> HostCPURefreshPlan {
         guard !suspended, !leases.isEmpty else {
-            return HostCPURefreshPlan(consumers: [], acquisitionDelay: nil)
+            return HostCPURefreshPlan(consumers: [], acquisitionDelay: nil, pendingDelivery: [])
         }
-        return HostCPURefreshPlan(consumers: Set(leases.keys), acquisitionDelay: acquisitionDelay())
+        let delay = acquisitionDelay()
+        let pending: Set<HostCPUConsumer>
+        if delay > .zero, let cached {
+            pending = Set(leases.compactMap { consumer, lease in
+                cached.delivered[consumer] == lease ? nil : consumer
+            })
+        } else {
+            pending = []
+        }
+        return HostCPURefreshPlan(consumers: Set(leases.keys), acquisitionDelay: delay,
+                                  pendingDelivery: pending)
     }
 
     private func acquisitionDelay() -> Duration {
@@ -171,6 +190,7 @@ public actor HostCPUSampler {
         if let cached {
             let age = cached.at.duration(to: now())
             if age >= .zero && age < .seconds(5) {
+                markDelivered(lease, cacheID: cached.id)
                 return try cached.result.get()
             }
         }
@@ -197,11 +217,19 @@ public actor HostCPUSampler {
             case let .success(sample): capturedAt = sample.capturedAt
             case .failure: capturedAt = now()
             }
-            cached = Cached(at: capturedAt, result: result)
+            cached = Cached(id: flight.id, at: capturedAt, result: result)
         }
         try Task.checkCancellation()
         guard leases[lease.consumer] == lease else { throw CancellationError() }
+        markDelivered(lease, cacheID: flight.id)
         return try result.get()
+    }
+
+    /// Mark consumption only for the current cached observation and lease.
+    /// A cancelled or obsolete waiter cannot acknowledge its replacement.
+    private func markDelivered(_ lease: HostCPUConsumerLease, cacheID: UUID) {
+        guard cached?.id == cacheID, leases[lease.consumer] == lease else { return }
+        cached?.delivered[lease.consumer] = lease
     }
 
     private func invalidate() {
