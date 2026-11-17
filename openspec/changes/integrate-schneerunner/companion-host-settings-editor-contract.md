@@ -1,0 +1,7 @@
+# C3e draft: isolated host preference editor
+
+Depends on #410. New CompanionFeature model and SwiftUI form are not connected to the shipping app or preview target. Settings edit only local intent, never release approval, ownership, catalogue, runtime, CPU, notifications, or authentication. Initial load and draft edits make no writes; explicit Save and read-back are required. Reload or Discard replaces unsaved edits; no persistence occurs for unchanged settings. A detected change to the decoded record status/value cancels Save or Reset, reloads current values and requires a new user action.
+
+Unreadable/future-version records disable ordinary editing and saving. A separate destructive confirmation with a one-use token allows scoped reset only when recovery is required. Cancel, reload and stale tokens cannot reset. Re-check is based on the decoded status/value, not a byte-exact CAS: two malformed records or different bytes at the same unsupported version are not distinguished. Intended one main-actor owner only; no cross-process consistency or durable disk acknowledgement. Explicit reset removes only the preference key; not artwork, library, or other settings.
+
+Four model tests cover draft/discard/save, external valid value change, canceled/stale reset and recovery status change. Native CI, UI hosting, keyboard/VoiceOver, Japanese localization, confirmation interaction, unsaved navigation UX and actual app composition remain pending. No original OpenSpec task closed; no production activation, distribution, or approval change.
