@@ -6,6 +6,7 @@ public enum CompanionOwnedPackError: Error, Equatable {
     case unsafeRoot, createFailed, writeFailed, publishFailed, cleanupFailed
     case busy, inventoryLimit, recoveryRequired, packLimit, missingPack
     case unsafeCleanup, moveFailed
+    case invalidSelection, selectionWriteFailed
 }
 
 /// A single import transaction. Caller supplies an existing app-owned,
@@ -174,7 +175,7 @@ public enum CompanionOwnedPackStore {
             && (info.st_mode & mode_t(0o077)) == 0
     }
 
-    private static func createFile(parent: Int32, name: String, data: Data,
+    static func createFile(parent: Int32, name: String, data: Data,
                                    created: () -> Void) throws {
         try Task.checkCancellation()
         let fd = name.withCString {

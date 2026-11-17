@@ -80,7 +80,12 @@ extension CompanionOwnedPackStore {
         var result = Scan()
         for candidate in try listNames(root, maximum: 128) {
             guard let name = candidate else { result.unknown += 1; continue }
-            if name.hasSuffix(".schneerunner"),
+            if name == selectionName {
+                // The fixed preference file is not a package slot. Unsafe
+                // file types are counted as unknown; never follow a link.
+                do { _ = try selectionFileInfo(root, name: name) }
+                catch { result.unknown += 1 }
+            } else if name.hasSuffix(".schneerunner"),
                let id = UUID(uuidString: String(name.dropLast(".schneerunner".count))),
                name == packName(id) {
                 result.ids.append(id)
@@ -142,7 +147,7 @@ extension CompanionOwnedPackStore {
     static func stageName(_ id: UUID) -> String { ".stage-" + id.uuidString.lowercased() }
     static func trashName(_ id: UUID) -> String { ".trash-" + id.uuidString.lowercased() }
 
-    private static func openPack(_ id: UUID, root: Int32) throws -> CompanionPackDirectory {
+    static func openPack(_ id: UUID, root: Int32) throws -> CompanionPackDirectory {
         try CompanionPackDirectory(ownedDescriptor: openPrivateChild(packName(id), root: root))
     }
 
