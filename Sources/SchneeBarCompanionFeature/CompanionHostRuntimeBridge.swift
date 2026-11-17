@@ -77,6 +77,13 @@ public final class CompanionHostRuntimeBridge {
         return true
     }
 
+    /// Cancel only the matching pending publication, preserving any previously
+    /// admitted catalogue. Lifecycle revocation still clears the catalogue.
+    public func cancelAssetRequest(_ request: AssetRequest) {
+        guard pendingAsset == request else { return }
+        pendingAsset = nil
+    }
+
     /// Close the surface and revoke every outstanding asset publication.
     public func stop() {
         environment = .init()

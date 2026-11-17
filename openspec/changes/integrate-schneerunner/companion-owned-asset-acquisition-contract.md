@@ -1,0 +1,7 @@
+# C3j draft: bounded installed asset acquisition
+
+Based on merged #414. Reuse CompanionImportQueue and CompanionOwnedPackStore.load(id:from:) (read-only, pinned private directory, shared root lock, existing decode limits). Accept an installed UUID only. Do not import, restore a persisted selection, change selection, delete files, or access the Runner store. Built-in catalogue selection remains a host responsibility. Only the host owns the app-private root.
+
+The adapter owns one queue per host. All committed preferences and environment transitions must route through it. Request a host publication ticket before queuing, reject requests while blocked, and on disable/sleep/hide/ownership or release revocation cancel both active and pending publication. A replacement keeps at most one pending input; non-cooperative work holds the active slot until return. Matching explicit cancel preserves the previously admitted catalogue. A current failed load clears it, and a stale result cannot publish. Stop before releasing the surface. No promise of immediate native decoder cancellation, global process memory limit, or autonomous retry.
+
+Two bounded asynchronous regression tests simulate non-cooperative worker cancellation, latest-only publication, failure/retry, explicit cancel and committed disable. No real on-disk pack or production/preview composition is added by this slice; existing store validation tests and later real-Mac integration remain necessary. ADR/rights, selection persistence recovery, app lifecycle wiring and main promotion remain pending.
