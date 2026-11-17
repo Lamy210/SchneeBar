@@ -93,3 +93,59 @@ import Testing
     #expect(defaults.data(forKey: key) == future)
     #expect(model.resetConfirmation == nil)
 }
+
+@MainActor
+@Test func hostEditorResetRejectsReplacementWithinSameRecoveryCategory() throws {
+    let name = "SchneeBarTests.hostEditor.\(UUID())"
+    let defaults = try #require(UserDefaults(suiteName: name))
+    defer { defaults.removePersistentDomain(forName: name) }
+    let key = CompanionHostPreferenceStore.storageKey
+    let store = CompanionHostPreferenceStore(defaults: defaults)
+    let pairs: [(Data, Data)] = [
+        (Data("invalid-a".utf8), Data("invalid-b".utf8)),
+        (Data(#"{"version":2,"value":"a"}"#.utf8), Data(#"{"version":2,"value":"b"}"#.utf8))
+    ]
+    for (original, replacement) in pairs {
+        defaults.set(original, forKey: key)
+        let model = CompanionHostSettingsModel(store: store)
+        model.requestReset()
+        let token = try #require(model.resetConfirmation)
+        defaults.set(replacement, forKey: key)
+        model.confirmReset(token)
+        #expect(model.notice == .changedExternally)
+        #expect(defaults.data(forKey: key) == replacement)
+        #expect(model.resetConfirmation == nil)
+        model.requestReset()
+        model.confirmReset(try #require(model.resetConfirmation))
+        #expect(store.load() == .missing)
+    }
+    defaults.set("invalid-a", forKey: key)
+    let model = CompanionHostSettingsModel(store: store)
+    model.requestReset()
+    let token = try #require(model.resetConfirmation)
+    defaults.set("invalid-b", forKey: key)
+    model.confirmReset(token)
+    #expect(model.notice == .changedExternally)
+    #expect(defaults.string(forKey: key) == "invalid-b")
+}
+
+@MainActor
+@Test func hostEditorSaveRejectsChangedBytesEvenWhenDecodedIntentMatches() throws {
+    let name = "SchneeBarTests.hostEditor.\(UUID())"
+    let defaults = try #require(UserDefaults(suiteName: name))
+    defer { defaults.removePersistentDomain(forName: name) }
+    let key = CompanionHostPreferenceStore.storageKey
+    let store = CompanionHostPreferenceStore(defaults: defaults)
+    try store.save(.init())
+    let model = CompanionHostSettingsModel(store: store)
+    model.draft.enabled = true
+    let original = try #require(defaults.data(forKey: key))
+    var replacement = original
+    replacement.append(0x20)
+    defaults.set(replacement, forKey: key)
+    #expect(store.load() == .valid(.init()))
+    model.save()
+    #expect(model.notice == .changedExternally)
+    #expect(defaults.data(forKey: key) == replacement)
+    #expect(!model.committedPreferences.enabled)
+}
