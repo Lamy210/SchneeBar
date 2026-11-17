@@ -17,11 +17,13 @@ extension CompanionOwnedPackStore {
 
     public struct Inventory: Sendable {
         public let entries: [Entry]
-        public let abandonedStageCount: Int
+        public let abandonedStageIDs: [UUID]
+        public let trashedIDs: [UUID]
+        public var abandonedStageCount: Int { abandonedStageIDs.count }
         public let unknownEntryCount: Int
         public var canInstall: Bool {
             abandonedStageCount == 0 && unknownEntryCount == 0 &&
-                entries.count < CompanionOwnedPackStore.maximumInstalledPacks
+                entries.count + trashedIDs.count < CompanionOwnedPackStore.maximumInstalledPacks
         }
     }
 
@@ -43,8 +45,8 @@ extension CompanionOwnedPackStore {
                 entries.append(Entry(id: id, name: nil, clipCount: nil))
             }
         }
-        return Inventory(entries: entries, abandonedStageCount: snapshot.staged,
-                         unknownEntryCount: snapshot.unknown)
+        return Inventory(entries: entries, abandonedStageIDs: snapshot.staged,
+                         trashedIDs: snapshot.trashed, unknownEntryCount: snapshot.unknown)
     }
 
     /// Selection accepts only a UUID and revalidates all encoded content.
@@ -67,13 +69,42 @@ extension CompanionOwnedPackStore {
 
     struct Scan {
         var ids: [UUID] = []
-        var staged = 0
+        var staged: [UUID] = []
+        var trashed: [UUID] = []
         var unknown = 0
     }
 
     /// Maximum 128 raw entries, including hidden entries and dot entries.
     /// Unknowns and stage remnants are reported, never implicitly deleted.
     static func scan(_ root: Int32) throws -> Scan {
+        var result = Scan()
+        for candidate in try listNames(root, maximum: 128) {
+            guard let name = candidate else { result.unknown += 1; continue }
+            if name.hasSuffix(".schneerunner"),
+               let id = UUID(uuidString: String(name.dropLast(".schneerunner".count))),
+               name == packName(id) {
+                result.ids.append(id)
+            } else if name.hasPrefix(".stage-"),
+                      let id = UUID(uuidString: String(name.dropFirst(".stage-".count))),
+                      name == stageName(id) {
+                result.staged.append(id)
+            } else if name.hasPrefix(".trash-"),
+                      let id = UUID(uuidString: String(name.dropFirst(".trash-".count))),
+                      name == trashName(id) {
+                result.trashed.append(id)
+            } else {
+                result.unknown += 1
+            }
+        }
+        result.ids.sort { $0.uuidString < $1.uuidString }
+        result.staged.sort { $0.uuidString < $1.uuidString }
+        result.trashed.sort { $0.uuidString < $1.uuidString }
+        return result
+    }
+
+    /// Include dot entries in the scan cap, never silently discard malformed
+    /// names. A nil entry means a name could not be represented as UTF-8.
+    static func listNames(_ root: Int32, maximum: Int) throws -> [String?] {
         let listing = Darwin.openat(root, ".", O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
         guard listing >= 0 else { throw CompanionOwnedPackError.unsafeRoot }
         guard let stream = fdopendir(listing) else {
@@ -81,7 +112,7 @@ extension CompanionOwnedPackStore {
             throw CompanionOwnedPackError.unsafeRoot
         }
         defer { _ = closedir(stream) }
-        var result = Scan()
+        var result: [String?] = []
         var count = 0
         while true {
             try Task.checkCancellation()
@@ -91,28 +122,16 @@ extension CompanionOwnedPackStore {
                 break
             }
             count += 1
-            guard count <= 128 else { throw CompanionOwnedPackError.inventoryLimit }
+            guard count <= maximum else { throw CompanionOwnedPackError.inventoryLimit }
             let length = Int(item.pointee.d_namlen)
             let name: String? = withUnsafeBytes(of: &item.pointee.d_name) { raw in
                 guard length > 0, length <= 255, length < raw.count,
                       raw[length] == 0, !raw.prefix(length).contains(0) else { return nil }
                 return String(bytes: raw.prefix(length), encoding: .utf8)
             }
-            guard let name else { result.unknown += 1; continue }
             if name == "." || name == ".." { continue }
-            if name.hasSuffix(".schneerunner"),
-               let id = UUID(uuidString: String(name.dropLast(".schneerunner".count))),
-               name == packName(id) {
-                result.ids.append(id)
-            } else if name.hasPrefix(".stage-"),
-                      let id = UUID(uuidString: String(name.dropFirst(".stage-".count))),
-                      name == ".stage-" + id.uuidString.lowercased() {
-                result.staged += 1
-            } else {
-                result.unknown += 1
-            }
+            result.append(name)
         }
-        result.ids.sort { $0.uuidString < $1.uuidString }
         return result
     }
 
@@ -120,8 +139,15 @@ extension CompanionOwnedPackStore {
         id.uuidString.lowercased() + ".schneerunner"
     }
 
+    static func stageName(_ id: UUID) -> String { ".stage-" + id.uuidString.lowercased() }
+    static func trashName(_ id: UUID) -> String { ".trash-" + id.uuidString.lowercased() }
+
     private static func openPack(_ id: UUID, root: Int32) throws -> CompanionPackDirectory {
-        let fd = packName(id).withCString {
+        try CompanionPackDirectory(ownedDescriptor: openPrivateChild(packName(id), root: root))
+    }
+
+    static func openPrivateChild(_ name: String, root: Int32) throws -> Int32 {
+        let fd = name.withCString {
             Darwin.openat(root, $0, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC | O_NONBLOCK)
         }
         guard fd >= 0 else { throw CompanionOwnedPackError.missingPack }
@@ -132,6 +158,6 @@ extension CompanionOwnedPackStore {
             _ = Darwin.close(fd)
             throw CompanionOwnedPackError.unsafeRoot
         }
-        return try CompanionPackDirectory(ownedDescriptor: fd)
+        return fd
     }
 }

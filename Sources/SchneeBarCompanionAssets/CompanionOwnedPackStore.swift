@@ -5,6 +5,7 @@ import SchneeBarCompanionCore
 public enum CompanionOwnedPackError: Error, Equatable {
     case unsafeRoot, createFailed, writeFailed, publishFailed, cleanupFailed
     case busy, inventoryLimit, recoveryRequired, packLimit, missingPack
+    case unsafeCleanup, moveFailed
 }
 
 /// A single import transaction. Caller supplies an existing app-owned,
@@ -32,14 +33,14 @@ public enum CompanionOwnedPackStore {
         defer { _ = Darwin.close(root) }
         try lockRoot(root, exclusive: true)
         let inventory = try scan(root)
-        guard inventory.staged == 0, inventory.unknown == 0 else {
+        guard inventory.staged.isEmpty, inventory.unknown == 0 else {
             throw CompanionOwnedPackError.recoveryRequired
         }
-        guard inventory.ids.count < maximumPacks else { throw CompanionOwnedPackError.packLimit }
+        guard inventory.ids.count + inventory.trashed.count < maximumPacks else { throw CompanionOwnedPackError.packLimit }
         let capture = try CompanionAnimatedPackLoader.capture(source)
         let id = UUID()
-        let final = id.uuidString.lowercased() + ".schneerunner"
-        let staging = ".stage-" + UUID().uuidString.lowercased()
+        let final = packName(id)
+        let staging = stageName(UUID())
         guard staging.withCString({ mkdirat(root, $0, 0o700) }) == 0 else {
             throw CompanionOwnedPackError.createFailed
         }
