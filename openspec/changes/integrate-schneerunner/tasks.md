@@ -109,3 +109,10 @@ All tasks are pending; the [implementation and parity contract](implementation-p
 - [ ] 13.2 Verify CompanionCPUInput newest-request/session fence, cached sample deduplication, unavailable/reset and manual/automatic transitions.
 - [ ] 13.3 Connect actual opt-in Companion renderer/settings to managed demand and existing scheduler, preserving a single owner and no polling when disabled. Not included in B2a.
 - [ ] 13.4 Execute macOS tests and real-device lifecycle/power checks; record CI/test counts, remaining compatibility exceptions and approval.
+
+## 14. Asset and renderer slices
+
+- [ ] 14.1 C2a: verify bounded Data-only decoding, format check, aggregate budget and generated fixtures on macOS; review decoder memory limits.
+- [ ] 14.2 C2b/C2c: file/pack import, owned staging, traversal/symlink/TOCTOU, all-format fixtures, export and catalogue resource limits as specified in companion-assets-renderer-contract.md.
+- [ ] 14.3 C3a: verify isolated frame driver and static fixture, deterministic async cancellation/Reduce Motion integration before app connection.
+- [ ] 14.4 C3b: approved opt-in UI, application-owned status item, CPU demand/renderer lifecycle, accessible fallback and disable/recovery evidence.
