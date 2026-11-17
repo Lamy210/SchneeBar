@@ -34,7 +34,7 @@ public enum CompanionImageDecoder {
     public static let maximumDimension = 4096
     public static let maximumTotalPixels = 16_000_000
 
-    private enum Format {
+    enum Format: Equatable {
         case png, gif, webp
 
         var timingKeys: (CFString, CFString, CFString) {
@@ -52,6 +52,20 @@ public enum CompanionImageDecoder {
     /// Synchronous, bounded application-side admission. Platform decoders may
     /// still allocate internally; schedule off the UI path before production use.
     public static func decode(_ data: Data) throws -> CompanionDecodedClip {
+        try decodePrepared(prepare(data))
+    }
+
+    /// Only used synchronously in one worker. Retains the exact ImageIO
+    /// source inspected during preflight; never reopen an untrusted URL.
+    struct Prepared {
+        fileprivate let source: CGImageSource
+        fileprivate let clip: CompanionClip
+        let format: Format
+        let metadataPixels: Int
+        var frameCount: Int { clip.durations.count }
+    }
+
+    static func prepare(_ data: Data) throws -> Prepared {
         try Task.checkCancellation()
         guard !data.isEmpty, data.count <= maximumBytes else {
             throw CompanionImageError.invalidPayload
@@ -92,7 +106,16 @@ public enum CompanionImageDecoder {
             durations.append(frameDuration(properties, format: format))
         }
         let clip = try CompanionClip(revision: UUID(), durations: durations)
+        return Prepared(source: source, clip: clip, format: format, metadataPixels: metadataPixels)
+    }
 
+    static func decodePrepared(_ prepared: Prepared, pixelLimit: Int = maximumTotalPixels) throws -> CompanionDecodedClip {
+        try Task.checkCancellation()
+        guard (1...maximumTotalPixels).contains(pixelLimit),
+              prepared.metadataPixels <= pixelLimit else { throw CompanionImageError.pixelBudget }
+        let source = prepared.source
+        let clip = prepared.clip
+        let count = prepared.frameCount
         var decodedPixels = 0
         var frames: [CGImage] = []
         frames.reserveCapacity(count)
@@ -104,7 +127,7 @@ public enum CompanionImageDecoder {
                   ) else {
                 throw CompanionImageError.decodeFailed
             }
-            try account(width: image.width, height: image.height, total: &decodedPixels)
+            try account(width: image.width, height: image.height, total: &decodedPixels, limit: pixelLimit)
             // Bound the retained representation to RGBA8, including unusual
             // source bit depth/color spaces. Do not expose the source image.
             guard let context = CGContext(
@@ -123,13 +146,14 @@ public enum CompanionImageDecoder {
         return CompanionDecodedClip(clip: clip, frames: frames)
     }
 
-    static func account(width: Int, height: Int, total: inout Int) throws {
+    static func account(width: Int, height: Int, total: inout Int, limit: Int = maximumTotalPixels) throws {
         guard (1...maximumDimension).contains(width), (1...maximumDimension).contains(height) else {
             throw CompanionImageError.invalidDimensions
         }
         // Both dimensions are validated before multiplying.
         let pixels = width * height
-        guard pixels <= maximumTotalPixels - total else {
+        guard (0...maximumTotalPixels).contains(limit), (0...limit).contains(total),
+              pixels <= limit - total else {
             throw CompanionImageError.pixelBudget
         }
         total += pixels
