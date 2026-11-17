@@ -434,3 +434,88 @@ private final class PreviewImportGate: @unchecked Sendable {
     model.refreshLibrary()
     try await waitForPreview { !model.libraryBusy && model.libraryInventory != nil }
 }
+
+@Test @MainActor func previewTrashRestorePurgeAndStaleConfirmation() async throws {
+    let tmp = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+    let source = tmp.appendingPathComponent("fixture.schneerunner", isDirectory: true)
+    let root = tmp.appendingPathComponent("owned", isDirectory: true)
+    try FileManager.default.createDirectory(at: source, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: tmp) }
+    let gif = try #require(Data(base64Encoded: "R0lGODlhBAACAIEAAECA/wAAAAAAAAAAACH/C05FVFNDQVBFMi4wAwEAAAAh+QQACgAAACwAAAAABAACAAAIBwABCBwoMCAAIfkEARQAAQAsAAAAAAQAAgCB/0AAAAAAAAAAAAAACAcAAQgcKDAgADs="))
+    try gif.write(to: source.appendingPathComponent("run.gif"))
+    try Data(#"{"formatVersion":1,"name":"Trash fixture","defaultState":"run","clips":[{"state":"run","kind":"gif","path":"run.gif"}]}"#.utf8)
+        .write(to: source.appendingPathComponent("character.json"))
+    let model = CompanionPreviewModel(conflictingApplication: { nil }, makeStatusItem: { nil },
+        systemReduceMotion: { true }, allowHeadlessPresentation: true, libraryRoot: root)
+    model.start()
+    defer { model.stop() }
+    try await waitForPreview { !model.libraryBusy && model.libraryInventory != nil }
+    model.importPack(source)
+    try await waitForPreview { !model.libraryBusy }
+    let id = try #require(model.libraryInventory?.entries.first?.id)
+    model.selectPack(id)
+    try await waitForPreview { !model.libraryBusy }
+    #expect(model.imageSource == .installedPack(id))
+    let stale = try #require(model.recoveryConfirmation(.trash(id)))
+    model.showCharacter = false
+    model.showCharacter = true
+    model.confirmRecovery(stale)
+    #expect(!model.libraryBusy)
+    #expect(model.imageSource == .installedPack(id))
+    let confirmation = try #require(model.recoveryConfirmation(.trash(id)))
+    model.confirmRecovery(confirmation)
+    #expect(model.imageSource == .builtIn)
+    try await waitForPreview { !model.libraryBusy }
+    #expect(model.libraryInventory?.trashedIDs == [id])
+    #expect(model.recoveryConfirmation(.trash(id)) == nil)
+    let restore = try #require(model.recoveryConfirmation(.restore(id)))
+    model.confirmRecovery(restore)
+    try await waitForPreview { !model.libraryBusy }
+    #expect(model.imageSource == .builtIn)
+    model.restoreSavedChoice()
+    try await waitForPreview { !model.libraryBusy }
+    #expect(model.imageSource == .builtIn)
+    model.confirmRecovery(try #require(model.recoveryConfirmation(.trash(id))))
+    try await waitForPreview { !model.libraryBusy }
+    model.confirmRecovery(try #require(model.recoveryConfirmation(.purge(id))))
+    try await waitForPreview { !model.libraryBusy }
+    #expect(model.libraryInventory?.trashedIDs.isEmpty == true)
+    #expect(model.libraryInventory?.entries.isEmpty == true)
+    #expect(try Data(contentsOf: source.appendingPathComponent("run.gif")) == gif)
+}
+
+@Test @MainActor func previewRecoveryOnlyDiscardsConfirmedGeneratedEntries() async throws {
+    let tmp = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+    let root = tmp.appendingPathComponent("owned", isDirectory: true)
+    let fm = FileManager.default
+    try fm.createDirectory(at: tmp, withIntermediateDirectories: false)
+    defer { try? fm.removeItem(at: tmp) }
+    let model = CompanionPreviewModel(conflictingApplication: { nil }, makeStatusItem: { nil },
+        systemReduceMotion: { true }, allowHeadlessPresentation: true, libraryRoot: root)
+    model.start()
+    defer { model.stop() }
+    try await waitForPreview { !model.libraryBusy && model.libraryInventory != nil }
+    let id = UUID()
+    let stage = root.appendingPathComponent(".stage-" + id.uuidString.lowercased(), isDirectory: true)
+    try fm.createDirectory(at: stage, withIntermediateDirectories: false,
+                           attributes: [.posixPermissions: NSNumber(value: 0o700)])
+    let pending = root.appendingPathComponent(".selection-pending")
+    try #require(fm.createFile(atPath: pending.path, contents: Data([1]),
+                              attributes: [.posixPermissions: NSNumber(value: 0o600)]))
+    let unknown = root.appendingPathComponent("unrelated")
+    try Data([9]).write(to: unknown)
+    model.refreshLibrary()
+    try await waitForPreview { !model.libraryBusy }
+    #expect(model.libraryInventory?.pendingSelectionRecovery == true)
+    #expect(model.libraryInventory?.unknownEntryCount == 1)
+    #expect(model.libraryInventory?.canInstall == false)
+    model.confirmRecovery(try #require(model.recoveryConfirmation(.discardStage(id))))
+    try await waitForPreview { !model.libraryBusy }
+    #expect(!fm.fileExists(atPath: stage.path))
+    #expect(fm.fileExists(atPath: pending.path))
+    model.confirmRecovery(try #require(model.recoveryConfirmation(.discardPendingSelection)))
+    try await waitForPreview { !model.libraryBusy }
+    #expect(!fm.fileExists(atPath: pending.path))
+    #expect(try Data(contentsOf: unknown) == Data([9]))
+    #expect(model.libraryInventory?.canInstall == false)
+}

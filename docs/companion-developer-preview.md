@@ -19,3 +19,7 @@ Opt in with "Listen to local Runner events" only after starting the isolated pre
 ## Draft persistent character library
 
 After explicit Start, the preview uses its fixed Application Support child `dev.lamy.schneebar.companion-preview-packs-v1`, not Runner or shipping Bar storage. Only the final directory is created (0700). Start restores the saved UUID after validation. Import saves a copy without selecting it; select explicitly to save the choice. "Session default" and single-file images are transient; "Use built-in" clears persistent choice. "Restore saved" revalidates it. Stop/hide/sleep fence UI publication; a started durable operation may commit even after Stop. Restart is blocked until the worker exits. No trash/purge/recovery UI yet. Real picker, root permissions, sleep/quit, accessibility and memory acceptance remain required.
+
+## Draft trash and recovery controls
+
+Use a pack's trash button, then confirm the full UUID. Trash and stage IDs are visible in Trash and recovery. Restore never selects; permanent delete and stage/pending discard require explicit confirmation. Selection is cleared on the store before moving a selected pack, while the preview switches to built-in before starting the worker. If the move fails, restore explicitly to reconcile the persisted choice. Unknown entries are not eligible for automatic cleanup. The Quit button is disabled during a library operation (OS termination can still interrupt it). Check stale dialogs after hide/sleep/stop, failed rename/unsafe content, restart and source preservation on a real Mac.

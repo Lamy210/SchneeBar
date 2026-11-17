@@ -34,7 +34,7 @@ public enum CompanionOwnedPackStore {
         defer { _ = Darwin.close(root) }
         try lockRoot(root, exclusive: true)
         let inventory = try scan(root)
-        guard inventory.staged.isEmpty, inventory.unknown == 0 else {
+        guard inventory.staged.isEmpty, !inventory.pendingSelection, inventory.unknown == 0 else {
             throw CompanionOwnedPackError.recoveryRequired
         }
         guard inventory.ids.count + inventory.trashed.count < maximumPacks else { throw CompanionOwnedPackError.packLimit }

@@ -20,9 +20,10 @@ extension CompanionOwnedPackStore {
         public let abandonedStageIDs: [UUID]
         public let trashedIDs: [UUID]
         public var abandonedStageCount: Int { abandonedStageIDs.count }
+        public let pendingSelectionRecovery: Bool
         public let unknownEntryCount: Int
         public var canInstall: Bool {
-            abandonedStageCount == 0 && unknownEntryCount == 0 &&
+            abandonedStageCount == 0 && !pendingSelectionRecovery && unknownEntryCount == 0 &&
                 entries.count + trashedIDs.count < CompanionOwnedPackStore.maximumInstalledPacks
         }
     }
@@ -46,7 +47,8 @@ extension CompanionOwnedPackStore {
             }
         }
         return Inventory(entries: entries, abandonedStageIDs: snapshot.staged,
-                         trashedIDs: snapshot.trashed, unknownEntryCount: snapshot.unknown)
+                         trashedIDs: snapshot.trashed, pendingSelectionRecovery: snapshot.pendingSelection,
+                         unknownEntryCount: snapshot.unknown)
     }
 
     /// Selection accepts only a UUID and revalidates all encoded content.
@@ -71,6 +73,7 @@ extension CompanionOwnedPackStore {
         var ids: [UUID] = []
         var staged: [UUID] = []
         var trashed: [UUID] = []
+        var pendingSelection = false
         var unknown = 0
     }
 
@@ -85,6 +88,12 @@ extension CompanionOwnedPackStore {
                 // file types are counted as unknown; never follow a link.
                 do { _ = try selectionFileInfo(root, name: name) }
                 catch { result.unknown += 1 }
+            } else if name == selectionStageName {
+                // Only a safe private pending record is eligible for explicit recovery.
+                do {
+                    if try selectionFileInfo(root, name: name) != nil { result.pendingSelection = true }
+                    else { result.unknown += 1 }
+                } catch { result.unknown += 1 }
             } else if name.hasSuffix(".schneerunner"),
                let id = UUID(uuidString: String(name.dropLast(".schneerunner".count))),
                name == packName(id) {

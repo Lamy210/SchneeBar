@@ -18,6 +18,7 @@ struct SchneeBarCompanionPreviewApp: App {
 @MainActor
 private struct CompanionPreviewView: View {
     @StateObject private var model = CompanionPreviewModel()
+    @State private var recoveryConfirmation: CompanionPreviewModel.RecoveryConfirmation?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -84,6 +85,7 @@ private struct CompanionPreviewView: View {
                     model.stop()
                     NSApp.terminate(nil)
                 }
+                .disabled(model.libraryBusy)
             }
             if !model.message.isEmpty {
                 Text(model.message).font(.caption).foregroundStyle(.secondary)
@@ -91,7 +93,23 @@ private struct CompanionPreviewView: View {
         }
         .padding(20)
         .frame(width: 440)
-        .onDisappear { model.stop() }
+        .alert(item: $recoveryConfirmation) { confirmation in
+            Alert(
+                title: Text(confirmation.action.title),
+                message: Text(confirmation.action.detail),
+                primaryButton: .destructive(Text(confirmation.action.title)) {
+                    model.confirmRecovery(confirmation)
+                },
+                secondaryButton: .cancel()
+            )
+        }
+        .onDisappear {
+            recoveryConfirmation = nil
+            model.stop()
+        }
+        .onChange(of: model.imageSelectionSession) { _, _ in
+            recoveryConfirmation = nil
+        }
         .onReceive(NSWorkspace.shared.notificationCenter.publisher(
             for: NSWorkspace.willSleepNotification
         )) { _ in model.setSleeping(true) }
@@ -113,7 +131,7 @@ private struct CompanionPreviewView: View {
                 if let library = model.libraryInventory {
                     Text("\(library.entries.count + library.trashedIDs.count) / \(CompanionOwnedPackStore.maximumInstalledPacks) slots (including trash)")
                         .font(.caption).foregroundStyle(.secondary)
-                    if library.abandonedStageCount > 0 || library.unknownEntryCount > 0 {
+                    if library.abandonedStageCount > 0 || library.pendingSelectionRecovery || library.unknownEntryCount > 0 {
                         Label("Recovery needed before importing.", systemImage: "exclamationmark.triangle")
                             .font(.caption)
                     }
@@ -135,12 +153,57 @@ private struct CompanionPreviewView: View {
                                             model.selectPack(entry.id)
                                         }
                                         .disabled(entry.name == nil || model.imageSource == .installedPack(entry.id))
+                                        Button {
+                                            recoveryConfirmation = model.recoveryConfirmation(.trash(entry.id))
+                                        } label: {
+                                            Image(systemName: "trash")
+                                        }
+                                        .accessibilityLabel("Move \(entry.name ?? "unavailable pack") to trash")
                                     }
                                 }
                             }
                         }.frame(maxHeight: 120)
                     }
                     Button("Import pack…") { model.choosePack() }.disabled(!library.canInstall)
+                    if !library.trashedIDs.isEmpty || library.abandonedStageCount > 0 ||
+                        library.pendingSelectionRecovery || library.unknownEntryCount > 0 {
+                        DisclosureGroup("Trash and recovery") {
+                            ScrollView {
+                                VStack(alignment: .leading, spacing: 8) {
+                                    ForEach(library.trashedIDs, id: \.self) { id in
+                                        VStack(alignment: .leading) {
+                                            Text("Trash: " + id.uuidString).font(.caption).textSelection(.enabled)
+                                            HStack {
+                                                Button("Restore") {
+                                                    recoveryConfirmation = model.recoveryConfirmation(.restore(id))
+                                                }
+                                                Button("Delete permanently", role: .destructive) {
+                                                    recoveryConfirmation = model.recoveryConfirmation(.purge(id))
+                                                }
+                                            }
+                                        }
+                                    }
+                                    ForEach(library.abandonedStageIDs, id: \.self) { id in
+                                        VStack(alignment: .leading) {
+                                            Text("Incomplete import: " + id.uuidString).font(.caption).textSelection(.enabled)
+                                            Button("Discard incomplete import", role: .destructive) {
+                                                recoveryConfirmation = model.recoveryConfirmation(.discardStage(id))
+                                            }
+                                        }
+                                    }
+                                    if library.pendingSelectionRecovery {
+                                        Button("Discard uncommitted selection", role: .destructive) {
+                                            recoveryConfirmation = model.recoveryConfirmation(.discardPendingSelection)
+                                        }
+                                    }
+                                    if library.unknownEntryCount > 0 {
+                                        Text("\(library.unknownEntryCount) unknown entries. No automatic removal; inspect the dedicated preview library before importing.")
+                                            .font(.caption).foregroundStyle(.secondary)
+                                    }
+                                }
+                            }.frame(maxHeight: 150)
+                        }
+                    }
                 }
                 HStack {
                     Button("Refresh") { model.refreshLibrary() }
