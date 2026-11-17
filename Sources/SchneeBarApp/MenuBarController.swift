@@ -282,14 +282,14 @@ final class MenuBarController: NSObject {
                 let otherDelay = await engine.secondsUntilNextRefresh(
                     maximum: 30, excluding: [cpuProvider.descriptor.id]
                 )
-                let cpuDelay = await cpuSampler.delayUntilNextAcquisition(for: .widget)
+                let cpuPlan = await cpuSampler.refreshPlan()
                 guard isCurrentRuntime(generation), !Task.isCancelled else { return }
                 guard configurationRevision == revision else { continue }
                 // Keep the existing one-second floor for ordinary widgets;
                 // allow the CPU's subsecond remainder after a bootstrap.
-                let delay = min(.seconds(max(1, otherDelay)), cpuDelay ?? .seconds(30))
+                let delay = cpuPlan.nextHostDelay(otherWidgetsSeconds: otherDelay)
                 let sleeper = Task<Void, Never> {
-                    do { try await Task.sleep(for: max(.milliseconds(50), delay)) }
+                    do { try await Task.sleep(for: delay) }
                     catch { /* Configuration change interrupts the wait. */ }
                 }
                 refreshSleepTask = sleeper
@@ -310,7 +310,7 @@ final class MenuBarController: NSObject {
               !Task.isCancelled else { return }
         let cpuID = cpuProvider.descriptor.id
         if cpuDemandEnabled,
-           await cpuSampler.delayUntilNextAcquisition(for: .widget) == .zero,
+           await cpuSampler.refreshPlan().isDue(.widget),
            isCurrentRuntime(generation), configurationRevision == revision, !Task.isCancelled {
             _ = await widgetEngine.refreshIfEnabled(id: cpuID)
         }
