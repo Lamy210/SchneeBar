@@ -24,7 +24,7 @@ private func modelFixture() -> (CompanionPreviewModel, HostCPUSampler) {
     )
     return (CompanionPreviewModel(
         sampler: sampler, isBarRunning: { false }, makeStatusItem: { nil },
-        systemReduceMotion: { false }
+        systemReduceMotion: { false }, allowHeadlessPresentation: true
     ), sampler)
 }
 
@@ -73,7 +73,7 @@ private func waitForPreview(_ condition: @MainActor () async -> Bool) async thro
     )
     var model: CompanionPreviewModel? = CompanionPreviewModel(
         sampler: sampler, isBarRunning: { false }, makeStatusItem: { nil },
-        systemReduceMotion: { false }
+        systemReduceMotion: { false }, allowHeadlessPresentation: true
     )
     weak var released = model
     model?.start()
@@ -85,4 +85,87 @@ private func waitForPreview(_ condition: @MainActor () async -> Bool) async thro
         await sampler.delayUntilNextAcquisition(for: .companion) == nil
     }
     #expect(released == nil)
+}
+
+/// Monotonic clock and requested delays are controlled independently of the
+/// host's real CPU ticks. The sleeper records each deadline then suspends
+/// with a cancellation-cooperative sleep; tests never wait five real seconds.
+private final class PreviewDeadlineFixture: @unchecked Sendable {
+    private let lock = NSLock()
+    private var instant = ContinuousClock.now
+    private var waits: [Duration] = []
+
+    func now() -> ContinuousClock.Instant {
+        lock.lock()
+        defer { lock.unlock() }
+        return instant
+    }
+
+    func advance(_ duration: Duration) {
+        lock.lock()
+        defer { lock.unlock() }
+        instant = instant.advanced(by: duration)
+    }
+
+    func record(_ duration: Duration) {
+        lock.lock()
+        defer { lock.unlock() }
+        waits.append(duration)
+    }
+
+    func recorded() -> [Duration] {
+        lock.lock()
+        defer { lock.unlock() }
+        return waits
+    }
+}
+
+@Test @MainActor func previewVisibilityChangeSchedulesOnlyRemainingCacheWindow() async throws {
+    let counters = PreviewCounterFixture()
+    let clock = PreviewDeadlineFixture()
+    let sampler = HostCPUSampler(
+        readCounters: { counters.read() },
+        bootstrapDelay: { clock.advance(.milliseconds(500)) },
+        now: { clock.now() }
+    )
+    let model = CompanionPreviewModel(
+        sampler: sampler, isBarRunning: { false }, makeStatusItem: { nil },
+        systemReduceMotion: { false }, allowHeadlessPresentation: true,
+        waitForNextPoll: { duration in
+            clock.record(duration)
+            try await Task.sleep(for: .seconds(60))
+        }
+    )
+    model.start()
+    defer { model.stop() }
+    try await waitForPreview { clock.recorded().count == 1 }
+    #expect(clock.recorded() == [.seconds(5)])
+    clock.advance(.milliseconds(4500))
+    model.showCPU = true
+    try await waitForPreview { clock.recorded().count == 2 }
+    #expect(clock.recorded() == [.seconds(5), .milliseconds(500)])
+    #expect(model.state == .sprint)
+    model.stop()
+    try await waitForPreview {
+        let widget = await sampler.delayUntilNextAcquisition(for: .widget)
+        let companion = await sampler.delayUntilNextAcquisition(for: .companion)
+        return widget == nil && companion == nil
+    }
+}
+
+@Test @MainActor func failedStatusSurfaceDoesNotStartOrAcquire() async throws {
+    let counters = PreviewCounterFixture()
+    let sampler = HostCPUSampler(
+        readCounters: { counters.read() }, bootstrapDelay: {},
+        now: { ContinuousClock.now }
+    )
+    let model = CompanionPreviewModel(
+        sampler: sampler, isBarRunning: { false }, makeStatusItem: { nil },
+        systemReduceMotion: { false }
+    )
+    model.start()
+    #expect(!model.started)
+    #expect(!model.message.isEmpty)
+    #expect(await sampler.delayUntilNextAcquisition(for: .widget) == nil)
+    #expect(await sampler.delayUntilNextAcquisition(for: .companion) == nil)
 }

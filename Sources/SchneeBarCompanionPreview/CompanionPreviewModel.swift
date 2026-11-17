@@ -24,6 +24,8 @@ final class CompanionPreviewModel: NSObject, ObservableObject {
     private let isBarRunning: @MainActor () -> Bool
     private let makeStatusItem: @MainActor () -> NSStatusItem?
     private let systemReduceMotion: @MainActor () -> Bool
+    private let allowHeadlessPresentation: Bool
+    private let waitForNextPoll: @Sendable (Duration) async throws -> Void
     private var item: NSStatusItem?
     private var fallback: NSImage? {
         NSImage(systemSymbolName: "snowflake", accessibilityDescription: "SchneeBar Preview")
@@ -50,12 +52,18 @@ final class CompanionPreviewModel: NSObject, ObservableObject {
         },
         systemReduceMotion: @escaping @MainActor () -> Bool = {
             NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        },
+        allowHeadlessPresentation: Bool = false,
+        waitForNextPoll: @escaping @Sendable (Duration) async throws -> Void = {
+            try await Task.sleep(for: $0)
         }
     ) {
         self.sampler = sampler
         self.isBarRunning = isBarRunning
         self.makeStatusItem = makeStatusItem
         self.systemReduceMotion = systemReduceMotion
+        self.allowHeadlessPresentation = allowHeadlessPresentation
+        self.waitForNextPoll = waitForNextPoll
         super.init()
     }
 
@@ -71,8 +79,15 @@ final class CompanionPreviewModel: NSObject, ObservableObject {
             message = "Unable to create preview assets."
             return
         }
-        // The injectable surface may be absent in headless model tests.
         let statusItem = makeStatusItem()
+        // In the real preview a failed status surface must not leave a
+        // headless polling/animation loop. Only tests opt into that mode.
+        guard allowHeadlessPresentation || statusItem?.button != nil else {
+            if let statusItem { NSStatusBar.system.removeStatusItem(statusItem) }
+            runtime.setCatalog(nil)
+            message = "Unable to create preview status item."
+            return
+        }
         item = statusItem
         statusItem?.button?.image = fallback
         statusItem?.button?.imagePosition = .imageOnly
@@ -134,6 +149,7 @@ final class CompanionPreviewModel: NSObject, ObservableObject {
         if !widget { cpuText = "" }
         updatePresentation()
         let sampler = sampler
+        let waitForNextPoll = waitForNextPoll
         transition = Task { @MainActor [weak self] in
             await old?.value
             await sampler.reconcileDemand(widget: widget, companion: companion, sleeping: asleep)
@@ -144,8 +160,15 @@ final class CompanionPreviewModel: NSObject, ObservableObject {
                     guard self?.revision == expected else { return }
                     await self?.refreshOnce(widget: widget, companion: companion, revision: expected)
                     guard !Task.isCancelled, self?.revision == expected else { return }
-                    // Do not bind self strongly across the idle wait.
-                    do { try await Task.sleep(for: .seconds(5)) } catch { return }
+                    // Match the cache's monotonic deadline even if this
+                    // generation started with a cached observation.
+                    let consumer: HostCPUConsumer = widget ? .widget : .companion
+                    let delay = await sampler.delayUntilNextAcquisition(for: consumer)
+                    guard !Task.isCancelled, self?.revision == expected,
+                          let delay else { return }
+                    // Do not bind self strongly across deadline query or idle wait.
+                    do { try await waitForNextPoll(max(.milliseconds(50), delay)) }
+                    catch { return }
                 }
             }
         }
