@@ -53,6 +53,11 @@ public final class CompanionStatusImageSurface {
         return true
     }
 
+    /// Recheck the actual slot even before the next animation frame.
+    public func owns(_ token: Session) -> Bool {
+        currentButton(for: token) != nil
+    }
+
     public func end(_ token: Session) {
         guard session == token else { return }
         stop()
