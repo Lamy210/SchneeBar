@@ -15,6 +15,9 @@ public final class CompanionOwnedAssetAcquisition {
     private let queue: CompanionImportQueue<UUID, CompanionAssetCatalog>
     private var pending: CompanionHostRuntimeBridge.AssetRequest?
     public private(set) var status: Status = .idle
+    /// The owner observes the final adopted result, not intermediate queue
+    /// state. Must not synchronously reenter the acquisition adapter.
+    var onCompletion: (@MainActor () -> Void)?
 
     public convenience init(bridge: CompanionHostRuntimeBridge, privateRoot: URL) {
         self.init(bridge: bridge, load: { id in
@@ -62,6 +65,7 @@ public final class CompanionOwnedAssetAcquisition {
                 self.status = self.bridge.completeAssetRequest(ticket, catalogue: nil)
                     ? .failed(id) : .idle
             }
+            self.onCompletion?()
         }
         return true
     }
