@@ -129,3 +129,9 @@ All tasks are pending; the [implementation and parity contract](implementation-p
 - [ ] 16.1 Build independent preview target; verify original five-state procedural catalogue and two-frame animation; no dependency from shipping app.
 - [ ] 16.2 Real Mac checklist: explicit start/stop, single preview status item, existing Bar conflict, show/hide and fallback, CPU-only/automatic/manual/both-disabled, Reduce Motion, sleep/wake, window close and quit, stale callback and power measurements.
 - [ ] 16.3 Complete production approval and integration separately; no preview artefact distribution or imported assets.
+
+## 17. Single-file import composition
+
+- [ ] 17.1 Verify one active worker and one latest pending request, cancel without early slot release, latest-only callbacks, failure/retry and owner lifecycle.
+- [ ] 17.2 Verify file reader → decoder → immutable default catalogue, fallback alias, malformed and symlink failure without replacing prior artwork.
+- [ ] 17.3 Before preview picker or production hookup, verify macOS format corpus, permission/security-scoped access, peak old-plus-new memory, queue ownership through stop/restart, and real-device performance. No pack/persistence enablement.

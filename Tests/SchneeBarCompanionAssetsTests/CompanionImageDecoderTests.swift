@@ -134,3 +134,43 @@ private func fixture(type: UTType, durations: [Double]) throws -> Data {
         }
     }
 }
+
+@Test @MainActor func singleFileImporterComposesReaderDecoderAndCatalogWithoutReplacingOnFailure() async throws {
+    let directory = FileManager.default.temporaryDirectory
+        .appendingPathComponent("companion-import-\(UUID().uuidString)", isDirectory: true)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false)
+    defer { try? FileManager.default.removeItem(at: directory) }
+
+    let valid = directory.appendingPathComponent("valid.png")
+    try fixture(type: .png, durations: [0.1]).write(to: valid)
+    let malformed = directory.appendingPathComponent("broken.png")
+    try Data([1, 2, 3, 4]).write(to: malformed)
+    let link = directory.appendingPathComponent("link.png")
+    try FileManager.default.createSymbolicLink(at: link, withDestinationURL: valid)
+
+    let queue = CompanionSingleFileImporter.makeQueue()
+    defer { queue.cancel() }
+    var installed: CompanionAssetCatalog?
+    var errors = 0
+    for url in [valid, malformed, link] {
+        queue.submit(url) { result in
+            switch result {
+            case let .success(catalogue): installed = catalogue
+            case .failure: errors += 1
+            }
+        }
+        let deadline = ContinuousClock.now.advanced(by: .seconds(3))
+        while queue.isBusy {
+            guard ContinuousClock.now < deadline else { throw CancellationError() }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        let current = try #require(installed)
+        let asset = current.asset(for: .run)
+        try #require(asset.frames.count == 1)
+        #expect(asset.frames[0].width == 4)
+        #expect(asset.frames[0].height == 2)
+        #expect(current.asset(for: .sprint).clip.revision == asset.clip.revision)
+        if url == valid { #expect(errors == 0) }
+    }
+    #expect(errors == 2)
+}

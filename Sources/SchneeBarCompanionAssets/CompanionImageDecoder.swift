@@ -16,7 +16,9 @@ public enum CompanionImageError: Error, Equatable {
 
 /// A validated in-memory clip; callers cannot construct mismatched frames/timing.
 /// No file-system or URL authority enters this module.
-public struct CompanionDecodedClip {
+// The only constructors create fully materialized, immutable CoreGraphics
+// images backed by owned bitmap storage. No mutable context escapes.
+public struct CompanionDecodedClip: @unchecked Sendable {
     public let clip: CompanionClip
     public let frames: [CGImage]
 
@@ -50,6 +52,7 @@ public enum CompanionImageDecoder {
     /// Synchronous, bounded application-side admission. Platform decoders may
     /// still allocate internally; schedule off the UI path before production use.
     public static func decode(_ data: Data) throws -> CompanionDecodedClip {
+        try Task.checkCancellation()
         guard !data.isEmpty, data.count <= maximumBytes else {
             throw CompanionImageError.invalidPayload
         }
@@ -79,6 +82,7 @@ public enum CompanionImageDecoder {
         // Validate all metadata before any explicit frame decode or allocation
         // of decoded frame storage. Recheck actual dimensions after decoding.
         for index in 0..<count {
+            try Task.checkCancellation()
             guard let properties = CGImageSourceCopyPropertiesAtIndex(source, index, options) as? [CFString: Any],
                   let width = (properties[kCGImagePropertyPixelWidth] as? NSNumber)?.intValue,
                   let height = (properties[kCGImagePropertyPixelHeight] as? NSNumber)?.intValue else {
@@ -93,6 +97,7 @@ public enum CompanionImageDecoder {
         var frames: [CGImage] = []
         frames.reserveCapacity(count)
         for index in 0..<count {
+            try Task.checkCancellation()
             guard CGImageSourceGetStatusAtIndex(source, index) == .statusComplete,
                   let image = CGImageSourceCreateImageAtIndex(
                     source, index, [kCGImageSourceShouldCacheImmediately: true] as CFDictionary
@@ -114,6 +119,7 @@ public enum CompanionImageDecoder {
             }
             frames.append(normalized)
         }
+        try Task.checkCancellation()
         return CompanionDecodedClip(clip: clip, frames: frames)
     }
 
