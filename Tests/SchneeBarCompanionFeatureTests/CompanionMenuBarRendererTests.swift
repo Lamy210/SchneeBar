@@ -4,6 +4,7 @@ import Foundation
 import ImageIO
 import SchneeBarCompanionAssets
 import SchneeBarCompanionCore
+import SchneeBarCompanionEvents
 @testable import SchneeBarCompanionFeature
 import Testing
 import UniformTypeIdentifiers
@@ -194,4 +195,87 @@ private final class ManualFrameScheduler {
     let previousCount = frames
     fake.fire(1)
     #expect(frames == previousCount)
+}
+
+@MainActor
+private final class LocalDeadlineFixture {
+    var now: Duration = .zero
+    private(set) var delays: [Duration] = []
+    private var callbacks: [@MainActor () -> Void] = []
+
+    func schedule(_ delay: Duration, _ callback: @escaping @MainActor () -> Void) -> Task<Void, Never> {
+        delays.append(delay)
+        callbacks.append(callback)
+        return Task {}
+    }
+
+    func fire(_ index: Int) {
+        guard callbacks.indices.contains(index) else {
+            Issue.record("Missing deadline callback")
+            return
+        }
+        callbacks[index]()
+    }
+}
+
+@Test @MainActor func localEventsOptInRenewAndExpireWithoutCPUPolling() throws {
+    let clock = LocalDeadlineFixture()
+    let renderer = CompanionMenuBarRenderer(onFrame: { _ in }, onClear: {})
+    let runtime = CompanionRuntimeCoordinator(renderer: renderer, elapsed: { clock.now },
+        deadlineScheduler: { clock.schedule($0, $1) })
+    let asset = try renderFixture()
+    runtime.setCatalog(try CompanionAssetCatalog(assets: [.run: asset], defaultState: .run))
+    runtime.setPresentation(enabled: true, visible: true, awake: true, reduceMotion: true)
+    #expect(!runtime.wantsHostCPU)
+    #expect(runtime.localEventSession == nil)
+    let payload = Data("{\"phase\":\"succeeded\"}".utf8)
+    #expect(runtime.receiveLocalEvent(session: UUID(), kind: .build, payload: payload) == nil)
+    runtime.setLocalEventsEnabled(true)
+    let session = try #require(runtime.localEventSession)
+    #expect(runtime.receiveLocalEvent(session: session, kind: .build, payload: payload) == .accepted)
+    #expect(runtime.state == .sprint)
+    #expect(clock.delays == [.seconds(2)])
+    clock.now = .seconds(1)
+    #expect(runtime.receiveLocalEvent(session: session, kind: .build, payload: payload) == .accepted)
+    #expect(clock.delays == [.seconds(2), .seconds(2)])
+    clock.now = .seconds(2)
+    clock.fire(0)
+    #expect(runtime.state == .sprint)
+    clock.now = .seconds(3)
+    clock.fire(1)
+    #expect(runtime.state == .run)
+    clock.fire(1)
+    #expect(runtime.state == .run)
+    #expect(clock.delays.count == 2)
+}
+
+@Test @MainActor func localEventSessionFencesSleepDisableAndPreservesManualState() throws {
+    let clock = LocalDeadlineFixture()
+    let renderer = CompanionMenuBarRenderer(onFrame: { _ in }, onClear: {})
+    let runtime = CompanionRuntimeCoordinator(renderer: renderer, elapsed: { clock.now },
+        deadlineScheduler: { clock.schedule($0, $1) })
+    let asset = try renderFixture()
+    runtime.setCatalog(try CompanionAssetCatalog(assets: [.run: asset], defaultState: .run))
+    runtime.setPresentation(enabled: true, visible: true, awake: true, reduceMotion: true)
+    runtime.setLocalEventsEnabled(true)
+    let first = try #require(runtime.localEventSession)
+    let payload = Data("{\"phase\":\"started\"}".utf8)
+    #expect(runtime.receiveLocalEvent(session: first, kind: .build, payload: payload) == .accepted)
+    runtime.setManualState(.idle)
+    #expect(runtime.state == .idle)
+    runtime.setPresentation(enabled: true, visible: true, awake: false, reduceMotion: true)
+    #expect(runtime.localEventSession == nil)
+    clock.fire(0)
+    #expect(runtime.state == .idle)
+    runtime.setPresentation(enabled: true, visible: true, awake: true, reduceMotion: true)
+    let second = try #require(runtime.localEventSession)
+    #expect(second != first)
+    runtime.setManualState(nil)
+    #expect(runtime.state == .run)
+    #expect(runtime.receiveLocalEvent(session: first, kind: .build, payload: payload) == nil)
+    #expect(runtime.receiveLocalEvent(session: second, kind: .build, payload: payload) == .accepted)
+    runtime.setLocalEventsEnabled(false)
+    #expect(runtime.state == .run)
+    #expect(runtime.localEventSession == nil)
+    #expect(runtime.receiveLocalEvent(session: second, kind: .build, payload: payload) == nil)
 }
