@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 @testable import SchneeBarCompanionAssets
 import Testing
@@ -58,5 +59,87 @@ private func withStore(_ body: (URL, URL) throws -> Void) throws {
             try CompanionOwnedPackStore.install(from: source, into: target)
         }
         #expect(try FileManager.default.contentsOfDirectory(atPath: target.path).isEmpty)
+    }
+}
+
+@Test func ownedInventoryListsMetadataAndReloadsByID() throws {
+    try withStore { source, target in
+        let install = try CompanionOwnedPackStore.install(from: source, into: target)
+        let inventory = try CompanionOwnedPackStore.inventory(in: target)
+        #expect(inventory.entries.count == 1)
+        #expect(inventory.entries.first?.id == install.id)
+        #expect(inventory.entries.first?.name == "Original")
+        #expect(inventory.entries.first?.clipCount == 1)
+        #expect(inventory.canInstall)
+        let loaded = try CompanionOwnedPackStore.load(id: install.id, from: target)
+        #expect(loaded.asset(for: .run).clip.durations == install.catalogue.asset(for: .run).clip.durations)
+        #expect(throws: CompanionOwnedPackError.missingPack) {
+            try CompanionOwnedPackStore.load(id: UUID(), from: target)
+        }
+    }
+}
+
+@Test func ownedInventoryReportsCorruptManifestAndRejectsSymlinkSelection() throws {
+    try withStore { source, target in
+        let installed = try CompanionOwnedPackStore.install(from: source, into: target)
+        let original = target.appendingPathComponent(CompanionOwnedPackStore.packName(installed.id))
+        try Data([1]).write(to: original.appendingPathComponent("character.json"))
+        let alias = UUID()
+        try FileManager.default.createSymbolicLink(
+            at: target.appendingPathComponent(CompanionOwnedPackStore.packName(alias)),
+            withDestinationURL: source)
+        let invalid = try CompanionOwnedPackStore.inventory(in: target)
+        #expect(invalid.entries.count == 2)
+        #expect(invalid.entries.allSatisfy { $0.name == nil && $0.clipCount == nil })
+        #expect(throws: CompanionOwnedPackError.missingPack) {
+            try CompanionOwnedPackStore.load(id: alias, from: target)
+        }
+        #expect(throws: (any Error).self) {
+            try CompanionOwnedPackStore.load(id: installed.id, from: target)
+        }
+    }
+}
+
+@Test func ownedInstallQuotaAndStaleStageFailClosedWithoutDeletingFiles() throws {
+    try withStore { source, target in
+        let installed = try CompanionOwnedPackStore.install(from: source, into: target)
+        #expect(throws: CompanionOwnedPackError.packLimit) {
+            try CompanionOwnedPackStore.install(from: source, into: target, maximumPacks: 1) {}
+        }
+        let stage = target.appendingPathComponent(".stage-" + UUID().uuidString.lowercased())
+        try FileManager.default.createDirectory(at: stage, withIntermediateDirectories: false)
+        let other = target.appendingPathComponent("unrecognized")
+        try Data([9]).write(to: other)
+        let inventory = try CompanionOwnedPackStore.inventory(in: target)
+        #expect(inventory.abandonedStageCount == 1)
+        #expect(inventory.unknownEntryCount == 1)
+        #expect(!inventory.canInstall)
+        #expect(throws: CompanionOwnedPackError.recoveryRequired) {
+            try CompanionOwnedPackStore.install(from: source, into: target)
+        }
+        #expect(FileManager.default.fileExists(atPath: stage.path))
+        #expect(try Data(contentsOf: other) == Data([9]))
+        #expect(inventory.entries.first?.id == installed.id)
+    }
+}
+
+@Test func ownedInventoryScanLimitAndLockContentionFailClosed() throws {
+    try withStore { source, target in
+        let fd = try CompanionOwnedPackStore.openRoot(target)
+        defer { _ = Darwin.close(fd) }
+        try CompanionOwnedPackStore.lockRoot(fd, exclusive: true)
+        #expect(throws: CompanionOwnedPackError.busy) {
+            try CompanionOwnedPackStore.inventory(in: target)
+        }
+        #expect(throws: CompanionOwnedPackError.busy) {
+            try CompanionOwnedPackStore.install(from: source, into: target)
+        }
+        try #require(flock(fd, LOCK_UN) == 0)
+        for i in 0..<129 {
+            try Data([0]).write(to: target.appendingPathComponent(".unknown-\(i)"))
+        }
+        #expect(throws: CompanionOwnedPackError.inventoryLimit) {
+            try CompanionOwnedPackStore.inventory(in: target)
+        }
     }
 }

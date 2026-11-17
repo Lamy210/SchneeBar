@@ -4,11 +4,12 @@ import SchneeBarCompanionCore
 
 public enum CompanionOwnedPackError: Error, Equatable {
     case unsafeRoot, createFailed, writeFailed, publishFailed, cleanupFailed
+    case busy, inventoryLimit, recoveryRequired, packLimit, missingPack
 }
 
 /// A single import transaction. Caller supplies an existing app-owned,
 /// private local directory, not a user-selected destination or Runner store.
-/// No UI, index, deletion, migration, or background work is started here.
+/// No UI, deletion, migration, or background work is started here.
 public enum CompanionOwnedPackStore {
     public struct Installed: Sendable {
         public let id: UUID
@@ -21,10 +22,20 @@ public enum CompanionOwnedPackStore {
 
     // Internal fault injection seam, invoked only before the commit point.
     static func install(from source: URL, into privateRoot: URL,
+                        maximumPacks: Int = maximumInstalledPacks,
                         beforePublish: () throws -> Void) throws -> Installed {
         try Task.checkCancellation()
+        guard (1...maximumInstalledPacks).contains(maximumPacks) else {
+            throw CompanionOwnedPackError.packLimit
+        }
         let root = try openRoot(privateRoot)
         defer { _ = Darwin.close(root) }
+        try lockRoot(root, exclusive: true)
+        let inventory = try scan(root)
+        guard inventory.staged == 0, inventory.unknown == 0 else {
+            throw CompanionOwnedPackError.recoveryRequired
+        }
+        guard inventory.ids.count < maximumPacks else { throw CompanionOwnedPackError.packLimit }
         let capture = try CompanionAnimatedPackLoader.capture(source)
         let id = UUID()
         let final = id.uuidString.lowercased() + ".schneerunner"
@@ -138,7 +149,7 @@ public enum CompanionOwnedPackStore {
         }
     }
 
-    private static func openRoot(_ url: URL) throws -> Int32 {
+    static func openRoot(_ url: URL) throws -> Int32 {
         guard url.isFileURL, url.path.hasPrefix("/"),
               url.host == nil || url.host == "" || url.host == "localhost" else {
             throw CompanionOwnedPackError.unsafeRoot
@@ -156,7 +167,7 @@ public enum CompanionOwnedPackStore {
         return fd
     }
 
-    private static func privateDirectory(_ info: stat) -> Bool {
+    static func privateDirectory(_ info: stat) -> Bool {
         (info.st_mode & mode_t(S_IFMT)) == mode_t(S_IFDIR)
             && info.st_uid == geteuid()
             && (info.st_mode & mode_t(0o077)) == 0
