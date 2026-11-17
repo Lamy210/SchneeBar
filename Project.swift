@@ -38,6 +38,27 @@ let project = Project(
             dependencies: [.target(name: "SchneeBarCompanionCore")]
         ),
         .target(
+            name: "SchneeBarCompanionEvents",
+            destinations: .macOS,
+            product: .staticFramework,
+            bundleId: "dev.lamy.schneebar.companion-events",
+            deploymentTargets: deploymentTarget,
+            sources: ["Sources/SchneeBarCompanionEvents/**"],
+            dependencies: [.target(name: "SchneeBarCompanionCore")]
+        ),
+        .target(
+            name: "SchneeBarCompanionEventsTests",
+            destinations: .macOS,
+            product: .unitTests,
+            bundleId: "dev.lamy.schneebar.companion-events-tests",
+            deploymentTargets: deploymentTarget,
+            sources: ["Tests/SchneeBarCompanionEventsTests/**"],
+            dependencies: [
+                .target(name: "SchneeBarCompanionEvents"),
+                .target(name: "SchneeBarCompanionCore"),
+            ]
+        ),
+        .target(
             name: "SchneeBarCompanionAssets",
             destinations: .macOS,
             product: .staticFramework,
