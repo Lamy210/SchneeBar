@@ -189,6 +189,8 @@ private actor CancellationAwareBudgetWorkflowLoader: GitHubWorkflowRunLoading {
     private let releaseGate = BudgetCancellationGate()
     private var calls: [Int64] = []
     private var shouldBlock = true
+    private let retryGate = BudgetCancellationGate()
+    private var shouldBlockRetry = true
 
     func workflowRuns(
         connection: GitHubConnection,
@@ -201,40 +203,8 @@ private actor CancellationAwareBudgetWorkflowLoader: GitHubWorkflowRunLoading {
         if shouldBlock {
             await releaseGate.wait()
             try Task.checkCancellation()
-        }
-        return []
-    }
-
-    func waitUntilCallCount(_ expectedCount: Int) async {
-        while calls.count < expectedCount {
-            await Task.yield()
-        }
-    }
-
-    func release() async {
-        shouldBlock = false
-        await releaseGate.open()
-    }
-
-    func repositoryIDs() -> [Int64] {
-        calls
-    }
-}
-
-private actor CancellationAwareBudgetReviewLoader: GitHubReviewRequestLoading {
-    private let releaseGate = BudgetCancellationGate()
-    private var calls: [Int64] = []
-    private var shouldBlock = true
-
-    func reviewRequests(
-        connection: GitHubConnection,
-        identity: GitHubAccountIdentity,
-        clientID: String?,
-        repository: GitHubRepositoryAccess
-    ) async throws -> [GitHubReviewRequest] {
-        calls.append(repository.id)
-        if shouldBlock {
-            await releaseGate.wait()
+        } else if shouldBlockRetry {
+            await retryGate.wait()
             try Task.checkCancellation()
         }
         return []
@@ -251,6 +221,56 @@ private actor CancellationAwareBudgetReviewLoader: GitHubReviewRequestLoading {
         await releaseGate.open()
     }
 
+    func releaseRetry() async {
+        shouldBlockRetry = false
+        await retryGate.open()
+    }
+
+    func repositoryIDs() -> [Int64] {
+        calls
+    }
+}
+
+private actor CancellationAwareBudgetReviewLoader: GitHubReviewRequestLoading {
+    private let releaseGate = BudgetCancellationGate()
+    private var calls: [Int64] = []
+    private var shouldBlock = true
+    private let retryGate = BudgetCancellationGate()
+    private var shouldBlockRetry = true
+
+    func reviewRequests(
+        connection: GitHubConnection,
+        identity: GitHubAccountIdentity,
+        clientID: String?,
+        repository: GitHubRepositoryAccess
+    ) async throws -> [GitHubReviewRequest] {
+        calls.append(repository.id)
+        if shouldBlock {
+            await releaseGate.wait()
+            try Task.checkCancellation()
+        } else if shouldBlockRetry {
+            await retryGate.wait()
+            try Task.checkCancellation()
+        }
+        return []
+    }
+
+    func waitUntilCallCount(_ expectedCount: Int) async {
+        while calls.count < expectedCount {
+            await Task.yield()
+        }
+    }
+
+    func release() async {
+        shouldBlock = false
+        await releaseGate.open()
+    }
+
+    func releaseRetry() async {
+        shouldBlockRetry = false
+        await retryGate.open()
+    }
+
     func repositoryIDs() -> [Int64] {
         calls
     }
@@ -260,6 +280,8 @@ private actor CancellationAwareBudgetCheckLoader: GitHubCheckRunLoading {
     private let releaseGate = BudgetCancellationGate()
     private var calls: [Int64] = []
     private var shouldBlock = true
+    private let retryGate = BudgetCancellationGate()
+    private var shouldBlockRetry = true
 
     func checkRuns(
         connection: GitHubConnection,
@@ -272,6 +294,9 @@ private actor CancellationAwareBudgetCheckLoader: GitHubCheckRunLoading {
         if shouldBlock {
             await releaseGate.wait()
             try Task.checkCancellation()
+        } else if shouldBlockRetry {
+            await retryGate.wait()
+            try Task.checkCancellation()
         }
         return []
     }
@@ -285,6 +310,11 @@ private actor CancellationAwareBudgetCheckLoader: GitHubCheckRunLoading {
     func release() async {
         shouldBlock = false
         await releaseGate.open()
+    }
+
+    func releaseRetry() async {
+        shouldBlockRetry = false
+        await retryGate.open()
     }
 
     func repositoryIDs() -> [Int64] {
@@ -731,18 +761,26 @@ func cancelledWorkflowRefreshStopsQueuedRepositoriesAndPrioritizesUnattemptedRep
     #expect(cancelledRepositoryIDs.count == 2)
     #expect(Set(cancelledRepositoryIDs) == Set([1, 2]))
 
-    _ = await provider.load(
-        profile: profile,
-        inventory: inventory,
-        capabilities: capabilities
-    )
+    // Keep the first two retry tasks parked until their identities are
+    // observed. A sliding task group does not guarantee loader entry order:
+    // a third task may otherwise enter before the second scheduled task.
+    let retry = Task {
+        await provider.load(
+            profile: profile,
+            inventory: inventory,
+            capabilities: capabilities
+        )
+    }
+    await workflows.waitUntilCallCount(4)
+    let firstRetryWave = await workflows.repositoryIDs()
+    #expect(firstRetryWave.count == 4)
+    #expect(Set(firstRetryWave.dropFirst(2)) == Set([3, 4]))
+    await workflows.releaseRetry()
+    _ = await retry.value
 
     let requestedRepositoryIDs = await workflows.repositoryIDs()
     #expect(requestedRepositoryIDs.count == 6)
-    #expect(
-        Set(requestedRepositoryIDs.dropFirst(2).prefix(2))
-            == Set([3, 4])
-    )
+    #expect(Set(requestedRepositoryIDs.dropFirst(2)) == Set([1, 2, 3, 4]))
 }
 
 @Test
@@ -782,18 +820,26 @@ func cancelledReviewRefreshStopsQueuedRepositoriesAndPrioritizesUnattemptedRepos
     #expect(cancelledRepositoryIDs.count == 2)
     #expect(Set(cancelledRepositoryIDs) == Set([1, 2]))
 
-    _ = await provider.load(
-        profile: profile,
-        inventory: inventory,
-        capabilities: capabilities
-    )
+    // Keep the first two retry tasks parked until their identities are
+    // observed. A sliding task group does not guarantee loader entry order:
+    // a third task may otherwise enter before the second scheduled task.
+    let retry = Task {
+        await provider.load(
+            profile: profile,
+            inventory: inventory,
+            capabilities: capabilities
+        )
+    }
+    await reviews.waitUntilCallCount(4)
+    let firstRetryWave = await reviews.repositoryIDs()
+    #expect(firstRetryWave.count == 4)
+    #expect(Set(firstRetryWave.dropFirst(2)) == Set([3, 4]))
+    await reviews.releaseRetry()
+    _ = await retry.value
 
     let requestedRepositoryIDs = await reviews.repositoryIDs()
     #expect(requestedRepositoryIDs.count == 6)
-    #expect(
-        Set(requestedRepositoryIDs.dropFirst(2).prefix(2))
-            == Set([3, 4])
-    )
+    #expect(Set(requestedRepositoryIDs.dropFirst(2)) == Set([1, 2, 3, 4]))
 }
 
 @Test
@@ -836,18 +882,26 @@ func cancelledCheckRefreshStopsQueuedTargetsAndPrioritizesUnattemptedRepositorie
     #expect(cancelledRepositoryIDs.count == 2)
     #expect(Set(cancelledRepositoryIDs) == Set([1, 2]))
 
-    _ = await provider.load(
-        profile: profile,
-        inventory: inventory,
-        capabilities: capabilities
-    )
+    // Keep the first two retry tasks parked until their identities are
+    // observed. A sliding task group does not guarantee loader entry order:
+    // a third task may otherwise enter before the second scheduled task.
+    let retry = Task {
+        await provider.load(
+            profile: profile,
+            inventory: inventory,
+            capabilities: capabilities
+        )
+    }
+    await checks.waitUntilCallCount(4)
+    let firstRetryWave = await checks.repositoryIDs()
+    #expect(firstRetryWave.count == 4)
+    #expect(Set(firstRetryWave.dropFirst(2)) == Set([3, 4]))
+    await checks.releaseRetry()
+    _ = await retry.value
 
     let requestedRepositoryIDs = await checks.repositoryIDs()
     #expect(requestedRepositoryIDs.count == 6)
-    #expect(
-        Set(requestedRepositoryIDs.dropFirst(2).prefix(2))
-            == Set([3, 4])
-    )
+    #expect(Set(requestedRepositoryIDs.dropFirst(2)) == Set([1, 2, 3, 4]))
 }
 
 @Test
