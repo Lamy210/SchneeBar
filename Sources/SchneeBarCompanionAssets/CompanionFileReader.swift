@@ -38,9 +38,19 @@ public enum CompanionFileReader {
         return info
     }
 
-    private static func readOpenedFile(_ fd: Int32) throws -> Data {
+    // Caller retains ownership of the descriptor. Pack reads impose a
+    // stricter size and link policy than explicitly selected single files.
+    static func readOpenedFile(
+        _ fd: Int32, limit: Int = CompanionImageDecoder.maximumBytes,
+        requireSingleLink: Bool = false
+    ) throws -> Data {
         let before = try metadata(fd)
-        let limit = CompanionImageDecoder.maximumBytes
+        guard (1...CompanionImageDecoder.maximumBytes).contains(limit) else {
+            throw CompanionFileReadError.invalidSize
+        }
+        if requireSingleLink, before.st_nlink != 1 {
+            throw CompanionPackError.unsafeResource
+        }
         guard before.st_size > 0, before.st_size <= off_t(limit) else {
             throw CompanionFileReadError.invalidSize
         }
@@ -67,6 +77,9 @@ public enum CompanionFileReader {
         }
 
         let after = try metadata(fd)
+        if requireSingleLink, after.st_nlink != 1 {
+            throw CompanionPackError.unsafeResource
+        }
         guard before.st_dev == after.st_dev, before.st_ino == after.st_ino,
               before.st_size == after.st_size, after.st_size == off_t(result.count),
               before.st_mtimespec.tv_sec == after.st_mtimespec.tv_sec,
