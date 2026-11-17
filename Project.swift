@@ -278,6 +278,7 @@ let project = Project(
             sources: ["Tests/SchneeBarCompanionPreviewTests/**"],
             dependencies: [
                 .target(name: "SchneeBarCompanionPreview"),
+                .target(name: "SchneeBarCompanionAssets"),
                 .target(name: "SchneeBarCompanionCore"),
                 .target(name: "SchneeBarSystemProvider"),
             ]

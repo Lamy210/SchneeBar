@@ -22,7 +22,7 @@ private struct CompanionPreviewView: View {
         VStack(alignment: .leading, spacing: 16) {
             Label("Companion Preview", systemImage: "snowflake")
                 .font(.title2.weight(.semibold))
-            Text("Developer-only preview. Quit regular SchneeBar and SchneeRunner before starting. No user files or settings are imported.")
+            Text("Developer-only preview. Quit regular SchneeBar and SchneeRunner before starting. Selected images are used in memory only. No settings are imported.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -41,6 +41,22 @@ private struct CompanionPreviewView: View {
                 .disabled(model.automatic || !model.showCharacter)
                 Toggle("Freeze animation", isOn: $model.freeze)
                     .disabled(!model.showCharacter)
+                Divider()
+                LabeledContent("Image", value: model.imageSource == .builtIn ? "Built-in" : "Selected file")
+                HStack {
+                    Button("Choose image…") { model.chooseImage() }
+                    Button("Restore default") { model.restoreBuiltInImage() }
+                }
+                .disabled(model.imageSelectionSession == nil)
+                if model.imageImportPending {
+                    ProgressView("Loading image…").controlSize(.small)
+                }
+                if !model.imageMessage.isEmpty {
+                    Text(model.imageMessage)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
                 Divider()
                 LabeledContent("State", value: String(describing: model.state))
                 LabeledContent("Effective speed", value: model.effectiveRate.formatted()

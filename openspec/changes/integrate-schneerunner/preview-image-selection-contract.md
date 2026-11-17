@@ -1,0 +1,11 @@
+# Draft C2b3: developer-only selected-image surface
+
+Based on integration commit 8710d727 (#393). This change is deliberately separate from #394 so its queued event-runtime CI can finish unchanged. It proposes a preview-only manual image selection path for review. Existing C2b2 import/format/rights/real-Mac gates remain; no permission to activate or distribute a production importer is implied.
+
+Use a native NSOpenPanel on the main actor, single explicit file, PNG/APNG/GIF/WebP filter, no directory/alias resolution, no bookmark or copy. Capture the current eligible presentation session before entering the panel and reject an obsolete selection. The panel is a UX filter, not the security boundary; the existing descriptor reader and ImageIO type/pixel checks remain authoritative. The worker balances successful security-scoped access around its lifetime; false means only ordinary access may be available, not an entitlement grant. The preview is not a sandbox permission proof.
+
+The host retains its existing one queue through Stop/restart. Latest successful result replaces the catalogue on MainActor; errors preserve the installed artwork and use a generic path-free message. Hide, sleep, stop, or conflict invalidate the session, cancel pending publication, and retain the worker slot until exit. Wake/reshow creates a fresh session. Stop discards selected artwork, restart uses original geometry. Restore default cancels pending publication. No per-file path persistence, asset pack or production connection. During an active import the existing catalogue and decoded candidate may coexist; per-clip ceiling is not a process-wide RSS cap. Replacing catalogues currently follows the existing runtime input-session reset behavior.
+
+Tests: known synthetic GIF and invalid file; successful selection, failure retention, default restore; non-cooperative worker gate with stop/restart, stale picker result, queued replacement, visibility/sleep invalidation. Actual panel, security scope, supported macOS image format corpus, permission denial, peak memory, and real-device resource measurements remain acceptance blockers. Keep as draft until reviewed; do not enable or distribute this feature by merging to main.
+
+See companion-assets-renderer-contract.md and tasks 15.4 / 17.3. No existing broad task marked complete.
