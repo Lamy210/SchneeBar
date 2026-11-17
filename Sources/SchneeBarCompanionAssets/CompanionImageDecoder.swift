@@ -22,7 +22,7 @@ public struct CompanionDecodedClip: @unchecked Sendable {
     public let clip: CompanionClip
     public let frames: [CGImage]
 
-    fileprivate init(clip: CompanionClip, frames: [CGImage]) {
+    init(clip: CompanionClip, frames: [CGImage]) {
         self.clip = clip
         self.frames = frames
     }
@@ -62,6 +62,8 @@ public enum CompanionImageDecoder {
         fileprivate let clip: CompanionClip
         let format: Format
         let metadataPixels: Int
+        let firstWidth: Int
+        let firstHeight: Int
         var frameCount: Int { clip.durations.count }
     }
 
@@ -91,6 +93,8 @@ public enum CompanionImageDecoder {
             throw CompanionImageError.incompleteImage
         }
         var metadataPixels = 0
+        var firstWidth = 0
+        var firstHeight = 0
         var durations: [Double] = []
         durations.reserveCapacity(count)
         // Validate all metadata before any explicit frame decode or allocation
@@ -103,10 +107,15 @@ public enum CompanionImageDecoder {
                 throw CompanionImageError.invalidDimensions
             }
             try account(width: width, height: height, total: &metadataPixels)
+            if index == 0 {
+                firstWidth = width
+                firstHeight = height
+            }
             durations.append(frameDuration(properties, format: format))
         }
         let clip = try CompanionClip(revision: UUID(), durations: durations)
-        return Prepared(source: source, clip: clip, format: format, metadataPixels: metadataPixels)
+        return Prepared(source: source, clip: clip, format: format, metadataPixels: metadataPixels,
+                        firstWidth: firstWidth, firstHeight: firstHeight)
     }
 
     static func decodePrepared(_ prepared: Prepared, pixelLimit: Int = maximumTotalPixels) throws -> CompanionDecodedClip {
