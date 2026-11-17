@@ -142,6 +142,23 @@ private struct CompanionPreviewView: View {
                             VStack(alignment: .leading, spacing: 8) {
                                 ForEach(library.entries) { entry in
                                     HStack {
+                                        if let image = model.libraryThumbnails[entry.id] {
+                                            Image(decorative: image, scale: 1)
+                                                .resizable().interpolation(.high)
+                                                .aspectRatio(contentMode: .fit)
+                                                .frame(width: 36, height: 36)
+                                                .accessibilityHidden(true)
+                                        } else {
+                                            Button {
+                                                model.loadThumbnail(entry.id)
+                                            } label: {
+                                                Image(systemName: "photo")
+                                                    .frame(width: 30, height: 30)
+                                            }
+                                            .buttonStyle(.borderless)
+                                            .disabled(entry.name == nil)
+                                            .accessibilityLabel("Load thumbnail for \(entry.name ?? "unavailable pack")")
+                                        }
                                         VStack(alignment: .leading) {
                                             Text(entry.name ?? "Unavailable pack").lineLimit(1)
                                             if let count = entry.clipCount {

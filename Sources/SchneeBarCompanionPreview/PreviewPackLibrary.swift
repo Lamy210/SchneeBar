@@ -1,3 +1,4 @@
+import CoreGraphics
 import Darwin
 import Foundation
 import SchneeBarCompanionAssets
@@ -5,13 +6,18 @@ import SchneeBarCompanionAssets
 /// Only the explicit developer preview uses this separate store.
 enum PreviewPackLibrary {
     enum Request: Sendable {
-        case refresh, restoreSelection, install(URL), select(UUID), builtIn
+        case refresh, restoreSelection, install(URL), select(UUID), builtIn, thumbnail(UUID)
         case trash(UUID), restoreTrash(UUID), purgeTrash(UUID), discardStage(UUID), discardPendingSelection
     }
     struct Output: Sendable {
         let inventory: CompanionOwnedPackStore.Inventory?
         let selection: CompanionOwnedPackStore.Selection?
         let message: String
+        let thumbnail: Thumbnail?
+    }
+    struct Thumbnail: Sendable {
+        let id: UUID
+        let image: CGImage
     }
 
     static func defaultRoot() -> URL? {
@@ -32,6 +38,7 @@ enum PreviewPackLibrary {
         // Existing paths are never chmodded. Each store call verifies root.
         let selection: CompanionOwnedPackStore.Selection?
         let message: String
+        var thumbnail: Thumbnail?
         switch request {
         case .refresh:
             selection = nil
@@ -55,6 +62,14 @@ enum PreviewPackLibrary {
             try CompanionOwnedPackStore.selectBuiltIn(in: root)
             selection = .builtIn
             message = "Default choice saved."
+        case .thumbnail(let id):
+            let catalogue = try CompanionOwnedPackStore.load(id: id, from: root)
+            guard let image = PreviewPackThumbnail.make(from: catalogue) else {
+                throw CompanionImageError.decodeFailed
+            }
+            thumbnail = Thumbnail(id: id, image: image)
+            selection = nil
+            message = "Thumbnail loaded."
         case .trash(let id):
             try CompanionOwnedPackStore.trash(id: id, in: root)
             selection = nil
@@ -77,8 +92,13 @@ enum PreviewPackLibrary {
             message = "Uncommitted selection discarded."
         }
         // Failure to list after a durable commit does not undo the commit.
+        if case let .installed(id, catalogue)? = selection,
+           let image = PreviewPackThumbnail.make(from: catalogue) {
+            thumbnail = Thumbnail(id: id, image: image)
+        }
         let inventory = try? CompanionOwnedPackStore.inventory(in: root)
         return Output(inventory: inventory, selection: selection,
-                      message: inventory == nil ? message + " Library listing unavailable." : message)
+                      message: inventory == nil ? message + " Library listing unavailable." : message,
+                      thumbnail: thumbnail)
     }
 }

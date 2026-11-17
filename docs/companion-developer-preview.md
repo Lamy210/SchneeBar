@@ -23,3 +23,7 @@ After explicit Start, the preview uses its fixed Application Support child `dev.
 ## Draft trash and recovery controls
 
 Use a pack's trash button, then confirm the full UUID. Trash and stage IDs are visible in Trash and recovery. Restore never selects; permanent delete and stage/pending discard require explicit confirmation. Selection is cleared on the store before moving a selected pack, while the preview switches to built-in before starting the worker. If the move fails, restore explicitly to reconcile the persisted choice. Unknown entries are not eligible for automatic cleanup. The Quit button is disabled during a library operation (OS termination can still interrupt it). Check stale dialogs after hide/sleep/stop, failed rename/unsafe content, restart and source preservation on a real Mac.
+
+## Draft static thumbnails
+
+Click the photo placeholder to request a static thumbnail, or select a pack to generate one from its decoded default clip. Listing alone never decodes artwork. Each explicit request uses the same serialized library worker and full pack validation; it may be slow for large packs. Thumbnails are 48x48 transparent RGBA8, only cached in memory for up to 16 current IDs. Refresh, mutations, hide, sleep and stop invalidate cached images. A thumbnail never selects or persists a pack. No disk cache or background animation.
