@@ -144,3 +144,26 @@ private struct Fixture {
     #expect(f.set("new", at: 0.5) == .updateLimited)
     #expect(f.set("new", at: 1) == .accepted)
 }
+
+@Test func lazyPayloadIsNotConvertedOnRawOverflowOrQuarantine() {
+    var f = Fixture()
+    var conversions = 0
+    for _ in 0..<128 {
+        let result = f.ingress.receive(kind: .build, at: .zero, arbitration: &f.arbitration) {
+            conversions += 1
+            return .malformed
+        }
+        #expect(result == .malformed)
+    }
+    let overflow = f.ingress.receive(kind: .build, at: .zero, arbitration: &f.arbitration) {
+        conversions += 1
+        return .malformed
+    }
+    #expect(overflow == .localStateCleared)
+    let quarantined = f.ingress.receive(kind: .build, at: .milliseconds(500), arbitration: &f.arbitration) {
+        conversions += 1
+        return .malformed
+    }
+    #expect(quarantined == .quarantined)
+    #expect(conversions == 128)
+}

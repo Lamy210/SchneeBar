@@ -16,6 +16,11 @@ public struct CompanionLocalEventIngress: Sendable {
         case quarantined, localStateCleared, staleClock
     }
 
+    /// Lazy conversion is invoked only after raw admission, never during quarantine.
+    public enum Payload {
+        case bytes(Data), malformed, oversized
+    }
+
     private enum Event {
         case set(String, CompanionState, Duration)
         case clear(String)
@@ -75,6 +80,14 @@ public struct CompanionLocalEventIngress: Sendable {
     public mutating func receive(
         kind: Kind, payload: Data, at now: Duration, arbitration: inout CompanionArbitration
     ) -> Outcome {
+        receive(kind: kind, at: now, arbitration: &arbitration) { .bytes(payload) }
+    }
+
+    @discardableResult
+    public mutating func receive(
+        kind: Kind, at now: Duration, arbitration: inout CompanionArbitration,
+        payload: () -> Payload
+    ) -> Outcome {
         guard now >= time else { return .staleClock }
         // During quarantine do no JSON parsing or arbitration scan.
         if let quarantinedUntil, now < quarantinedUntil { return .quarantined }
@@ -83,8 +96,14 @@ public struct CompanionLocalEventIngress: Sendable {
         Self.expire(&attempts, at: now)
         guard attempts.count < 128 else { return failClosed(at: now, arbitration: &arbitration) }
         attempts.append(now)
-        guard payload.count <= 4096 else { return .oversized }
-        guard let event = Self.parse(kind, payload) else { return .malformed }
+        let data: Data
+        switch payload() {
+        case .bytes(let bytes): data = bytes
+        case .malformed: return .malformed
+        case .oversized: return .oversized
+        }
+        guard data.count <= 4096 else { return .oversized }
+        guard let event = Self.parse(kind, data) else { return .malformed }
 
         Self.expire(&updates, at: now)
         Self.expire(&terminals, at: now)

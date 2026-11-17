@@ -284,6 +284,7 @@ let project = Project(
             ]),
             sources: ["Sources/SchneeBarCompanionPreview/**"],
             dependencies: [
+                .target(name: "SchneeBarCompanionEvents"),
                 .target(name: "SchneeBarCompanionCore"),
                 .target(name: "SchneeBarCompanionAssets"),
                 .target(name: "SchneeBarCompanionFeature"),
@@ -300,6 +301,7 @@ let project = Project(
             deploymentTargets: deploymentTarget,
             sources: ["Tests/SchneeBarCompanionPreviewTests/**"],
             dependencies: [
+                .target(name: "SchneeBarCompanionEvents"),
                 .target(name: "SchneeBarCompanionPreview"),
                 .target(name: "SchneeBarCompanionAssets"),
                 .target(name: "SchneeBarCompanionCore"),

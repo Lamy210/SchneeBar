@@ -4,6 +4,7 @@ import Foundation
 import SchneeBarCompanionAssets
 import SchneeBarCompanionCore
 import SchneeBarCompanionFeature
+import SchneeBarCompanionEvents
 import SchneeBarSystemProvider
 import UniformTypeIdentifiers
 
@@ -26,6 +27,9 @@ final class CompanionPreviewModel: NSObject, ObservableObject {
     @Published var automatic = true { didSet { reconcile() } }
     @Published var manualRate: CompanionPlaybackRate = .normal { didSet { reconcile() } }
     @Published var freeze = false { didSet { reconcile() } }
+    @Published var listenToLocalEvents = false { didSet { reconcile() } }
+    private var localSubscription: PreviewLocalNotificationSubscription?
+    private var subscribedSession: UUID?
 
     private let imageQueue: CompanionImportQueue<URL, CompanionAssetCatalog>
     private let sampler: HostCPUSampler
@@ -38,13 +42,20 @@ final class CompanionPreviewModel: NSObject, ObservableObject {
     private var fallback: NSImage? {
         NSImage(systemSymbolName: "snowflake", accessibilityDescription: "SchneeBar Preview")
     }
-    private lazy var runtime = CompanionRuntimeCoordinator(renderer: CompanionMenuBarRenderer(
+    private lazy var runtime: CompanionRuntimeCoordinator = {
+        let coordinator = CompanionRuntimeCoordinator(renderer: CompanionMenuBarRenderer(
         onFrame: { [weak self] image in self?.item?.button?.image = image },
         onClear: { [weak self] in
             guard let self else { return }
             self.item?.button?.image = self.fallback
         }
-    ))
+        ))
+        coordinator.onStateChange = { [weak self] state, rate in
+            self?.state = state
+            self?.effectiveRate = rate.factor
+        }
+        return coordinator
+    }()
     private var transition: Task<Void, Never>?
     private var refresh: Task<Void, Never>?
     private var revision = UUID()
@@ -253,6 +264,8 @@ final class CompanionPreviewModel: NSObject, ObservableObject {
         // automatic demand changes. Keep EMA and consumed sample identities
         // across presentation-only changes. A changed sampler epoch reseeds
         // the policy on the next accepted observation.
+        runtime.setLocalEventsEnabled(listenToLocalEvents)
+        reconcileLocalSubscription()
         let companion = runtime.wantsHostCPU
         if !widget { cpuText = "" }
         updatePresentation()
@@ -279,6 +292,33 @@ final class CompanionPreviewModel: NSObject, ObservableObject {
                     catch { return }
                 }
             }
+        }
+    }
+
+    private func reconcileLocalSubscription() {
+        let session = runtime.localEventSession
+        guard subscribedSession != session else { return }
+        localSubscription?.stop()
+        localSubscription = nil
+        subscribedSession = session
+        guard let session else { return }
+        // Headless tests use explicit synthetic delivery, not the system bus.
+        guard !allowHeadlessPresentation else { return }
+        let subscription = PreviewLocalNotificationSubscription(session: session) { [weak self] id, kind, object in
+            self?.receiveLocalNotification(session: id, kind: kind, object: object)
+        }
+        localSubscription = subscription
+        subscription.start()
+    }
+
+    var localNotificationSession: UUID? { subscribedSession }
+
+    @discardableResult
+    func receiveLocalNotification(session: UUID, kind: CompanionLocalEventIngress.Kind,
+                                  object: Any?) -> CompanionLocalEventIngress.Outcome? {
+        guard subscribedSession == session else { return nil }
+        return runtime.receiveLocalEvent(session: session, kind: kind) {
+            PreviewLocalNotificationSubscription.boundedPayload(object)
         }
     }
 
@@ -320,6 +360,7 @@ final class CompanionPreviewModel: NSObject, ObservableObject {
     }
 
     isolated deinit {
+        localSubscription?.stop()
         imageQueue.cancel()
         refresh?.cancel()
         if let item { NSStatusBar.system.removeStatusItem(item) }

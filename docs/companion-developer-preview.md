@@ -11,3 +11,7 @@ Open the generated Xcode workspace and select the **SchneeBarCompanionPreview** 
 - Quit preview and launch normal Bar; its settings and icon must remain unchanged.
 
 The preview baseline passed macOS CI 43996910174. The new image-picker revision is an unverified developer prototype. Explicitly selected images are read only for this preview; credentials, asset packs, notifications and login settings are not read or migrated. Users must have permission to use an image; no bundled fan artwork. Validate sandbox/selected-file permission behavior, security-scope balancing, APNG/WebP and truncated/partial frame fixtures, old-plus-new peak memory, and actual macOS panel/lifecycle behavior before accepting the picker for broader use. No release artifact or production assembly.
+
+## Draft local notification preview
+
+Opt in with "Listen to local Runner events" only after starting the isolated preview. Use the existing Runner CLI event wire format without launching the Runner app. Untrusted local events only affect the character; no GitHub or command execution. Test with automatic CPU speed off, state expiry, hide/reshow, sleep/wake, Stop and relaunch, malformed and oversized input, background delivery, and a controlled sender storm. Distributed notifications may be dropped or delayed. The new transport remains a draft; actual two-process/real-Mac acceptance is not yet established. No user notification schedules are migrated.
