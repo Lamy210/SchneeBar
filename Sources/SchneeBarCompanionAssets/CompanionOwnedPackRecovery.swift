@@ -5,7 +5,7 @@ extension CompanionOwnedPackStore {
     /// Move to a reversible tombstone under the same private root. Retains
     /// the slot reservation until explicit purge. No image bytes modified.
     public static func trash(id: UUID, in privateRoot: URL) throws {
-        try move(packName(id), to: trashName(id), in: privateRoot)
+        try move(packName(id), to: trashName(id), in: privateRoot, deselecting: id)
     }
 
     public static func restore(id: UUID, in privateRoot: URL) throws {
@@ -24,7 +24,8 @@ extension CompanionOwnedPackStore {
         try purge(stageName(id), in: privateRoot)
     }
 
-    private static func move(_ source: String, to destination: String, in url: URL) throws {
+    private static func move(_ source: String, to destination: String, in url: URL,
+                             deselecting id: UUID? = nil) throws {
         try Task.checkCancellation()
         let root = try openRoot(url)
         defer { _ = Darwin.close(root) }
@@ -35,6 +36,11 @@ extension CompanionOwnedPackStore {
         guard fstat(fd, &info) == 0 else { throw CompanionOwnedPackError.unsafeCleanup }
         try Task.checkCancellation()
         try requireIdentity(parent: root, name: source, expected: info)
+        // Clear the persistent selection BEFORE moving the selected pack.
+        // If rename subsequently fails, built-in is still the safe choice.
+        if let id, try selectedID(root) == id {
+            try clearSelection(root)
+        }
         guard source.withCString({ src in
             destination.withCString { dst in
                 renameatx_np(root, src, root, dst, UInt32(RENAME_EXCL))

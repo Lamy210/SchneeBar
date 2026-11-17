@@ -235,3 +235,97 @@ private func withStore(_ body: (URL, URL) throws -> Void) throws {
         #expect(inventory.canInstall)
     }
 }
+
+@Test func ownedSelectionPersistsOnlyValidatedChoiceAndRestoresBuiltIn() throws {
+    try withStore { source, target in
+        let first = try CompanionOwnedPackStore.install(from: source, into: target)
+        let initial = try CompanionOwnedPackStore.restoreSelection(in: target)
+        guard case .builtIn = initial else { Issue.record("expected built-in"); return }
+        let selected = try CompanionOwnedPackStore.select(id: first.id, in: target)
+        guard case let .installed(id, catalogue) = selected else { Issue.record("expected selected"); return }
+        #expect(id == first.id)
+        #expect(catalogue.asset(for: .run).frames.count == 2)
+        #expect(try CompanionOwnedPackStore.inventory(in: target).canInstall)
+        #expect(throws: CompanionOwnedPackError.missingPack) {
+            try CompanionOwnedPackStore.select(id: UUID(), in: target)
+        }
+        let restored = try CompanionOwnedPackStore.restoreSelection(in: target)
+        guard case let .installed(restoredID, _) = restored else { Issue.record("expected restored"); return }
+        #expect(restoredID == first.id)
+        try CompanionOwnedPackStore.selectBuiltIn(in: target)
+        guard case .builtIn = try CompanionOwnedPackStore.restoreSelection(in: target) else {
+            Issue.record("expected built-in after reset"); return
+        }
+    }
+}
+
+@Test func ownedSelectionTrashAndRestoreDoNotResurrectChoice() throws {
+    try withStore { source, target in
+        let first = try CompanionOwnedPackStore.install(from: source, into: target)
+        _ = try CompanionOwnedPackStore.select(id: first.id, in: target)
+        try CompanionOwnedPackStore.trash(id: first.id, in: target)
+        try CompanionOwnedPackStore.restore(id: first.id, in: target)
+        guard case .builtIn = try CompanionOwnedPackStore.restoreSelection(in: target) else {
+            Issue.record("trash must clear persistent selection"); return
+        }
+        _ = try CompanionOwnedPackStore.select(id: first.id, in: target)
+        let leaf = target.appendingPathComponent(CompanionOwnedPackStore.packName(first.id))
+            .appendingPathComponent("run.gif")
+        try Data([1]).write(to: leaf)
+        guard case let .unavailable(id) = try CompanionOwnedPackStore.restoreSelection(in: target) else {
+            Issue.record("expected unavailable choice"); return
+        }
+        #expect(id == first.id)
+        try #require(Data(base64Encoded: ownedGIF)).write(to: leaf)
+        guard case .builtIn = try CompanionOwnedPackStore.restoreSelection(in: target) else {
+            Issue.record("damaged selection must not resurrect"); return
+        }
+    }
+}
+
+@Test func ownedSelectionWriteFailureKeepsPreviousChoiceAndPendingRecoveryNeverReplays() throws {
+    try withStore { source, target in
+        let first = try CompanionOwnedPackStore.install(from: source, into: target)
+        let second = try CompanionOwnedPackStore.install(from: source, into: target)
+        _ = try CompanionOwnedPackStore.select(id: first.id, in: target)
+        #expect(throws: StoreFault.injected) {
+            try CompanionOwnedPackStore.select(id: second.id, in: target) { throw StoreFault.injected }
+        }
+        let pending = target.appendingPathComponent(CompanionOwnedPackStore.selectionStageName)
+        #expect(!FileManager.default.fileExists(atPath: pending.path))
+        try #require(FileManager.default.createFile(atPath: pending.path,
+            contents: Data("v1\n\(second.id.uuidString.lowercased())\n".utf8),
+            attributes: [.posixPermissions: NSNumber(value: 0o600)]))
+        #expect(!((try CompanionOwnedPackStore.inventory(in: target)).canInstall))
+        #expect(throws: CompanionOwnedPackError.recoveryRequired) {
+            try CompanionOwnedPackStore.select(id: second.id, in: target)
+        }
+        try CompanionOwnedPackStore.discardPendingSelection(in: target)
+        guard case let .installed(id, _) = try CompanionOwnedPackStore.restoreSelection(in: target) else {
+            Issue.record("expected previous choice"); return
+        }
+        #expect(id == first.id)
+    }
+}
+
+@Test func ownedSelectionRejectsUnsafeRecordAndAllowsExplicitMalformedReset() throws {
+    try withStore { source, target in
+        let record = target.appendingPathComponent(CompanionOwnedPackStore.selectionName)
+        try FileManager.default.createSymbolicLink(at: record, withDestinationURL: source.appendingPathComponent("character.json"))
+        #expect(throws: CompanionOwnedPackError.invalidSelection) {
+            try CompanionOwnedPackStore.restoreSelection(in: target)
+        }
+        #expect(throws: CompanionOwnedPackError.invalidSelection) {
+            try CompanionOwnedPackStore.selectBuiltIn(in: target)
+        }
+        #expect(try Data(contentsOf: source.appendingPathComponent("character.json")) == Data(ownedManifest.utf8))
+        try FileManager.default.removeItem(at: record)
+        try #require(FileManager.default.createFile(atPath: record.path, contents: Data([1]),
+            attributes: [.posixPermissions: NSNumber(value: 0o600)]))
+        #expect(throws: CompanionOwnedPackError.invalidSelection) {
+            try CompanionOwnedPackStore.restoreSelection(in: target)
+        }
+        try CompanionOwnedPackStore.selectBuiltIn(in: target)
+        #expect(!FileManager.default.fileExists(atPath: record.path))
+    }
+}
