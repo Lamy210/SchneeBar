@@ -53,3 +53,15 @@ The interface SHALL distinguish imported Runner reminder/timer/Pomodoro definiti
 #### Scenario: User creates a native reminder
 - **WHEN** a user creates a new SchneeBar-owned reminder while imported Runner schedules are inactive
 - **THEN** the interface SHALL permit ordinary notification configuration subject to operating-system authorization.
+
+### Requirement: Presentation changes preserve native schedule ownership
+
+The app SHALL keep native active schedules independent from presentation visibility and SHALL require explicit schedule actions to stop or delete them. Layout presets SHALL NOT automatically enable legacy local events, imported schedules, autonomous desktop movement or GitHub reactions.
+
+#### Scenario: Focus surface hidden with active timer
+- **WHEN** a user hides Focus presentation while a native countdown is running
+- **THEN** its deadline and notification policy SHALL remain unchanged and the active schedule SHALL remain accessible through settings or a schedule management entry point.
+
+#### Scenario: Existing activity detail remains navigable
+- **WHEN** integration features are enabled while the user opens delivery history or developer activity detail
+- **THEN** the existing return paths, widget controls and settings SHALL remain reachable without requiring Companion or Focus to be enabled.

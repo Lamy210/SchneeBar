@@ -70,3 +70,59 @@ The app SHALL recover safely from handled renderer/asset failures but SHALL NOT 
 #### Scenario: Safe recovery after process restart
 - **WHEN** the user relaunches after an application crash correlated with Companion playback
 - **THEN** the app SHALL provide a safe option to keep Companion disabled while retaining settings and GitHub connection state.
+
+### Requirement: Character playback preserves user control and clip timing
+
+The app SHALL keep manual character selection higher priority than automatic reactions and SHALL keep playback rate separate from resolved state, preserving relative authored frame durations. Returning to Automatic SHALL remove only the manual override. The app SHALL avoid restarting an unchanged clip solely because its trigger changed.
+
+#### Scenario: Manual override released during a local reaction
+- **WHEN** a manual state is selected during an active local reaction and then Automatic is selected
+- **THEN** the active valid reaction SHALL resume precedence without discarding unrelated triggers or restarting an unchanged clip.
+
+#### Scenario: Desktop movement restored after relaunch
+- **WHEN** the app launches with a previously visible desktop character and autonomous movement had been enabled
+- **THEN** it SHALL restore supported visibility and safe placement but SHALL leave autonomous movement disabled until explicitly enabled again.
+
+#### Scenario: Menu renderer hidden while desktop remains visible
+- **WHEN** the menu character is hidden while the desktop character remains enabled
+- **THEN** menu-specific frame work SHALL stop and the desktop renderer SHALL remain usable; hiding both SHALL stop frame scheduling and ongoing decoding.
+
+### Requirement: Companion trigger resolution is deterministic and bounded
+
+The companion SHALL resolve state using fixed source-derived priorities (manual 1000, local/build/productivity/developer event 500, system event 400, system advisory 300, CPU 100). The most recently accepted trigger at the same priority SHALL win, with run as the empty fallback. The domain SHALL use normalized typed identities rather than raw external strings or caller-selected numeric priorities.
+
+#### Scenario: Manual override and equal-priority reactions
+- **WHEN** CPU walk, a system advisory, two distinct local events and a manual idle override are accepted in order
+- **THEN** manual idle SHALL win; clearing manual SHALL reveal the newest eligible local event and clearing that event SHALL reveal the older eligible event.
+
+#### Scenario: Expiry and renewal at a monotonic boundary
+- **WHEN** a trigger is renewed before its prior deadline and resolution is requested at the prior deadline
+- **THEN** the renewed trigger SHALL survive until its current deadline; at or after its current deadline it SHALL expire, and an earlier timestamp SHALL NOT resurrect it.
+
+#### Scenario: Capacity limit and manual control
+- **WHEN** the proposed domain cap of 126 non-manual/non-CPU triggers is reached
+- **THEN** new nonreserved identities SHALL be rejected without eviction; existing identities may be renewed and manual/CPU singleton slots and explicit clears SHALL remain available. At most 64 of those 126 entries SHALL be untrusted local/build triggers combined.
+
+#### Scenario: Local event without a deadline
+- **WHEN** an internal caller attempts to install a local/build trigger without a future expiry
+- **THEN** it SHALL be rejected; the adapter SHALL assign the existing lease for legacy events omitting duration before calling the domain.
+
+### Requirement: Playback cursor ignores obsolete or repeated frame ticks
+
+The app SHALL preserve an unchanged resolved clip's current frame and SHALL invalidate pending frame callbacks when a clip is replaced, cleared or its playback rate changes. The app SHALL apply at most one frame advancement for each current tick and SHALL avoid scheduling a single-frame clip.
+
+#### Scenario: Old callback after replacement
+- **WHEN** a callback for an old clip arrives after a different clip revision was installed
+- **THEN** it SHALL NOT advance the new clip or reset its frame index.
+
+#### Scenario: Speed changes while playing an authored animation
+- **WHEN** the user changes the playback rate while a clip is active
+- **THEN** its frame index SHALL remain the same and each base duration SHALL be scaled by the exact selected rate without changing relative authored frame durations.
+
+### Requirement: CPU reactions distinguish invalid samples from idle load
+
+The companion SHALL use valid host-wide CPU samples, keep state and playback speed separate, and clear its automatic CPU contribution after invalid or missing samples.
+
+#### Scenario: CPU sample is outside its declared range
+- **WHEN** a host percentage is nonfinite, absent or outside 0 through 100
+- **THEN** the derived automatic CPU state SHALL become unavailable and SHALL NOT be interpreted as a true zero-percent observation.

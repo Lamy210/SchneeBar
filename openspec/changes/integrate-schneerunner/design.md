@@ -111,3 +111,11 @@ Each module behind a feature flag, disabled by default initially. Migration does
 **Evidence status:** contracts are proposed; source-app handoff support and complete preference-domain inventory are not yet implemented. The new application's Source→Destination `Application Support` and UserDefaults migrations must pass real-macOS compatibility and sandbox tests before opt-in activation.
 
 **Local-event overload policy**: 12 set/update + 4 reserved clear/cancel accepted events in one rolling second, 128 pre-decode ingress attempts, 64 active local channels. A saturated terminal reserve or total ingress storm **clears untrusted volatile Companion reactions and quarantines the source**, not arbitrary application-owned timers, credentials or GitHub state. See [local events/time](local-events-and-time-contract.md).
+
+## Implementation execution and parity gate (2026-11-15)
+
+See [implementation and parity contract](implementation-parity-contract.md) for source-pinned target boundaries, explicit behavior differences, UI navigation, PR dependency order and reproducible measurement protocol. These are proposed refinements, not ADR acceptance. Existing migration/notification/event security constraints prevail. The first implementation PR is deliberately local-only pure domain work under issue #370; do not copy RunnerApp or bundle artwork. No GitHub security gate is bypassed.
+
+## C1 state-arbitration execution boundary
+
+See [C1a contract](companion-arbitration-contract.md). A standalone independently authored, unlinked draft can be reviewed while ADR and reuse rights are pending; merge, source reuse, and runtime activation remain gated. C1b/C1c are separate; no claim of full C1 parity.

@@ -94,3 +94,23 @@ The app SHALL treat Distributed Notifications as untrusted, SHALL check raw UTF-
 #### Scenario: Untrusted event attempts notification handoff
 - **WHEN** a distributed notification claims that the source Runner disabled its reminder schedule
 - **THEN** the app SHALL NOT treat this unverified message as an authorized migration acknowledgement.
+
+### Requirement: Shared metrics respect consumer cancellation and sample validity
+
+The app SHALL share the host sampling owner and SHALL stop acquisition when its final consumer unsubscribes. After suspension or invalidation the app SHALL re-establish a valid counter baseline before emitting new measurements and SHALL reject results from invalidated acquisitions.
+
+#### Scenario: Final consumer disables during acquisition
+- **WHEN** both consumers unsubscribe while a bootstrap sample is in flight
+- **THEN** the app SHALL cancel or invalidate that acquisition, SHALL NOT apply its stale result and SHALL NOT continue polling until a consumer subscribes.
+
+#### Scenario: Invalid sample after wake
+- **WHEN** host counters cannot yield a valid post-wake measurement
+- **THEN** the app SHALL present unavailable measurement state rather than a fabricated zero percentage, and automatic CPU reaction SHALL clear its stale trigger.
+
+### Requirement: Terminal build results have reserved admission
+
+The app SHALL classify local build success, failure and cancellation as terminal events using the same reserved capacity as local state clearing. Successful terminal admission SHALL extinguish any prior started state for that build channel, replacing it only with a bounded completion reaction if appropriate.
+
+#### Scenario: Build succeeds after update saturation
+- **WHEN** all 12 update slots are used and a valid local build success arrives with a terminal reserve slot available
+- **THEN** the app SHALL end the old started reaction and MAY show the bounded success reaction without consuming an update slot.
