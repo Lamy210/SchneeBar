@@ -11,7 +11,8 @@ public final class CompanionHostSettingsModel {
         case none, saved, reloaded, changedExternally, saveFailed, reset
     }
 
-    public private(set) var baseline: CompanionHostPreferenceStore.ReadResult
+    private var baselineSnapshot: CompanionHostPreferenceStore.Snapshot
+    public var baseline: CompanionHostPreferenceStore.ReadResult { baselineSnapshot.result }
     public var draft: CompanionHostPreferences
     public private(set) var notice: Notice = .none
     public private(set) var resetConfirmation: UUID?
@@ -19,9 +20,9 @@ public final class CompanionHostSettingsModel {
 
     public init(store: CompanionHostPreferenceStore) {
         self.store = store
-        let result = store.load()
-        self.baseline = result
-        self.draft = result.preferences
+        let snapshot = store.snapshot()
+        self.baselineSnapshot = snapshot
+        self.draft = snapshot.result.preferences
     }
 
     public var requiresRecovery: Bool {
@@ -36,7 +37,7 @@ public final class CompanionHostSettingsModel {
     public var committedPreferences: CompanionHostPreferences { baseline.preferences }
 
     public func reload() {
-        adopt(store.load(), notice: .reloaded)
+        adopt(store.snapshot(), notice: .reloaded)
     }
 
     public func discardEdits() {
@@ -47,19 +48,19 @@ public final class CompanionHostSettingsModel {
 
     public func save() {
         guard canSave else { return }
-        let current = store.load()
-        guard current == baseline else {
+        let current = store.snapshot()
+        guard current.matches(baselineSnapshot) else {
             adopt(current, notice: .changedExternally)
             return
         }
         do {
             try store.save(draft)
             // Read back the domain value, not a promise of durable disk flush.
-            let readBack = store.load()
+            let readBack = store.snapshot()
             let expected = CompanionHostPreferenceStore.ReadResult.valid(draft)
-            adopt(readBack, notice: readBack == expected ? .saved : .saveFailed)
+            adopt(readBack, notice: readBack.result == expected ? .saved : .saveFailed)
         } catch {
-            adopt(store.load(), notice: .saveFailed)
+            adopt(store.snapshot(), notice: .saveFailed)
         }
     }
 
@@ -76,19 +77,19 @@ public final class CompanionHostSettingsModel {
     public func confirmReset(_ token: UUID) {
         guard requiresRecovery, resetConfirmation == token else { return }
         resetConfirmation = nil
-        let current = store.load()
-        guard current == baseline else {
+        let current = store.snapshot()
+        guard current.matches(baselineSnapshot) else {
             adopt(current, notice: .changedExternally)
             return
         }
         store.reset()
-        let readBack = store.load()
-        adopt(readBack, notice: readBack == .missing ? .reset : .saveFailed)
+        let readBack = store.snapshot()
+        adopt(readBack, notice: readBack.result == .missing ? .reset : .saveFailed)
     }
 
-    private func adopt(_ result: CompanionHostPreferenceStore.ReadResult, notice: Notice) {
-        baseline = result
-        draft = result.preferences
+    private func adopt(_ snapshot: CompanionHostPreferenceStore.Snapshot, notice: Notice) {
+        baselineSnapshot = snapshot
+        draft = snapshot.result.preferences
         resetConfirmation = nil
         self.notice = notice
     }
