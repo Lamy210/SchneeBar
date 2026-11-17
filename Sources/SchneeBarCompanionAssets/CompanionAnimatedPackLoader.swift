@@ -8,7 +8,7 @@ public enum CompanionAnimatedPackError: Error, Equatable {
 }
 
 /// Pack decoding for all six Runner v1 clip kinds, including bounded sequences.
-/// No copying, persistence, UI, or archive extraction.
+/// No UI or archive extraction. Capture is internal to the owned-store worker.
 public enum CompanionAnimatedPackLoader {
     public static let maximumEncodedBytes = 32 * 1024 * 1024
     public static let maximumFrames = 240
@@ -26,6 +26,18 @@ public enum CompanionAnimatedPackLoader {
 
     /// Internal limits seam can only tighten the production ceilings.
     static func load(_ url: URL, limits: Limits) throws -> CompanionAssetCatalog {
+        try capture(url, limits: limits).catalogue
+    }
+
+    /// Return exactly the admitted, successfully decoded bytes to the
+    /// persistence worker. No public constructor or caller-supplied paths.
+    struct Capture {
+        let manifest: CompanionPackManifest
+        let clips: [(CompanionPackManifest.Clip, [Data])]
+        let catalogue: CompanionAssetCatalog
+    }
+
+    static func capture(_ url: URL, limits: Limits = Limits()) throws -> Capture {
         guard (1...maximumEncodedBytes).contains(limits.bytes),
               (1...maximumFrames).contains(limits.frames),
               (1...maximumPixels).contains(limits.pixels) else {
@@ -40,6 +52,7 @@ public enum CompanionAnimatedPackLoader {
         var remainingFrames = limits.frames
         var remainingMetadataPixels = limits.pixels
         var prepared: [(CompanionPackManifest.Clip, [CompanionImageDecoder.Prepared])] = []
+        var captured: [(CompanionPackManifest.Clip, [Data])] = []
 
         // Read once per declared clip, including aliases, retaining its source
         // for a second phase. ALL metadata must fit before explicit decoding.
@@ -74,6 +87,7 @@ public enum CompanionAnimatedPackLoader {
                     sequence.append(candidate)
                 }
                 prepared.append((entry, sequence))
+                captured.append((entry, data))
                 continue
             }
 
@@ -103,6 +117,7 @@ public enum CompanionAnimatedPackLoader {
             remainingFrames -= frames
             remainingMetadataPixels -= candidate.metadataPixels + generatedPixels
             prepared.append((entry, [candidate]))
+            captured.append((entry, [data]))
         }
 
         var assets: [CompanionState: CompanionDecodedClip] = [:]
@@ -137,7 +152,8 @@ public enum CompanionAnimatedPackLoader {
             }
         }
         try Task.checkCancellation()
-        return try CompanionAssetCatalog(assets: assets, defaultState: manifest.defaultState)
+        let catalogue = try CompanionAssetCatalog(assets: assets, defaultState: manifest.defaultState)
+        return Capture(manifest: manifest, clips: captured, catalogue: catalogue)
     }
 
     private static func isStatic(_ kind: CompanionPackManifest.Kind) -> Bool {
