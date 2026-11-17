@@ -292,7 +292,7 @@ func cpuProviderCoalescesOverlappingInitialSnapshots() async throws {
     let firstSnapshot = try await first.value
     let secondSnapshot = try await second.value
     #expect(firstSnapshot.content(for: .normal).text == "Total CPU 30%")
-    // Independently created snapshots have different generatedAt timestamps.
+    // Both snapshots share the timestamp of the underlying acquisition.
     #expect(secondSnapshot.content(for: .normal) == firstSnapshot.content(for: .normal))
     #expect(reader.callCount() == 2)
 
@@ -330,4 +330,128 @@ func cpuCancelledWaiterDoesNotInterruptOtherInFlightReader() async throws {
     _ = await cancelled.result
     #expect(activeSnapshot.content(for: .normal).text == "Total CPU 20%")
     #expect(reader.callCount() == 2)
+}
+
+@Test
+func sharedCPUConsumersReuseSampleAndCachedWindow() async throws {
+    let reader = ScriptedCPUReader([
+        cpuCounters(), cpuCounters(user: 30, idle: 70),
+        cpuCounters(user: 80, idle: 120)
+    ])
+    let clock = ScriptedCPUClock()
+    let sampler = HostCPUSampler(
+        readCounters: { try reader.next() }, bootstrapDelay: {}, now: { clock.now() }
+    )
+    let widget = await sampler.subscribe(.widget)
+    let companion = await sampler.subscribe(.companion)
+    let provider = CPUWidgetProvider(sampler: sampler, lease: widget)
+    let first = try await sampler.sample(for: companion)
+    clock.advance(by: .seconds(1))
+    let snapshot = try await provider.snapshot()
+    let cached = try await sampler.sample(for: companion)
+    #expect(snapshot.content(for: .normal).text == "Total CPU 30%")
+    #expect(snapshot.generatedAt == first.wallTime)
+    #expect(first == cached)
+    #expect(reader.callCount() == 2)
+
+    clock.advance(by: .seconds(4))
+    let next = try await sampler.sample(for: companion)
+    #expect(next.id != first.id)
+    #expect(next.epoch == first.epoch)
+    #expect(next.percentage == 50)
+    #expect(reader.callCount() == 3)
+}
+
+@Test
+func sharedCPUFinalUnsubscribeInvalidatesParkedBootstrap() async throws {
+    let reader = ScriptedCPUReader([
+        cpuCounters(), cpuCounters(user: 100, idle: 100),
+        cpuCounters(user: 120, idle: 180)
+    ])
+    let clock = ScriptedCPUClock()
+    let gate = CPUAsyncGate()
+    // Only the first bootstrap uses the gate.
+    let sampler = HostCPUSampler(
+        readCounters: { try reader.next() },
+        bootstrapDelay: {
+            if reader.callCount() == 1 { await gate.park() }
+        },
+        now: { clock.now() }
+    )
+    let old = await sampler.subscribe(.widget)
+    let pending = Task { try await sampler.sample(for: old) }
+    await gate.waitUntilParked()
+    await sampler.unsubscribe(old)
+    let fresh = await sampler.subscribe(.widget)
+    #expect(fresh != old)
+    let valid = try await sampler.sample(for: fresh)
+    #expect(valid.percentage == 20)
+    await gate.release()
+    do {
+        _ = try await pending.value
+        Issue.record("Invalidated bootstrap delivered a result")
+    } catch {
+        #expect(error is CancellationError)
+    }
+    #expect(reader.callCount() == 3)
+    await sampler.unsubscribe(old)
+    let current = try await sampler.sample(for: fresh)
+    #expect(current == valid)
+}
+
+@Test
+func sharedCPUSuspendAndResumeRebaselineEvenForShortSleep() async throws {
+    let reader = ScriptedCPUReader([
+        cpuCounters(), cpuCounters(user: 20, idle: 80),
+        cpuCounters(user: 200, idle: 200), cpuCounters(user: 240, idle: 260)
+    ])
+    let clock = ScriptedCPUClock()
+    let sampler = HostCPUSampler(
+        readCounters: { try reader.next() }, bootstrapDelay: {}, now: { clock.now() }
+    )
+    let widget = await sampler.subscribe(.widget)
+    let companion = await sampler.subscribe(.companion)
+    let initial = try await sampler.sample(for: widget)
+    await sampler.unsubscribe(widget)
+    let stillActive = try await sampler.sample(for: companion)
+    #expect(stillActive == initial)
+    await sampler.suspend()
+    do {
+        _ = try await sampler.sample(for: companion)
+        Issue.record("Suspended sampler returned a cached value")
+    } catch {
+        #expect(error is CancellationError)
+    }
+    await sampler.resume()
+    let afterWake = try await sampler.sample(for: companion)
+    #expect(afterWake.epoch != initial.epoch)
+    #expect(afterWake.percentage == 40)
+    #expect(reader.callCount() == 4)
+}
+
+@Test
+func sharedCPUFailureIsNotZeroAndIsCoalescedWithinWindow() async throws {
+    let reader = ScriptedCPUReader([
+        cpuCounters(user: 10, idle: 10), cpuCounters(user: 10, idle: 10),
+        cpuCounters(user: 20, idle: 50)
+    ])
+    let clock = ScriptedCPUClock()
+    let sampler = HostCPUSampler(
+        readCounters: { try reader.next() }, bootstrapDelay: {}, now: { clock.now() }
+    )
+    let widget = await sampler.subscribe(.widget)
+    let companion = await sampler.subscribe(.companion)
+    for lease in [widget, companion] {
+        do {
+            _ = try await sampler.sample(for: lease)
+            Issue.record("Counter stall was reported as a valid sample")
+        } catch {
+            #expect(error as? CPUWidgetError == .noCounterProgress)
+        }
+    }
+    #expect(reader.callCount() == 2)
+    clock.advance(by: .seconds(5))
+    let recovered = try await sampler.sample(for: companion)
+    #expect(recovered.percentage == 20)
+    #expect(reader.callCount() == 3)
 }

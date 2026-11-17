@@ -62,49 +62,46 @@ public actor CPUWidgetProvider: WidgetProvider {
         refreshPolicy: .interval(5)
     )
 
-    private var previous: (counters: CPUCounters, instant: ContinuousClock.Instant)?
-    private var inFlight: Task<Double, Error>?
-    private let readCounters: @Sendable () throws -> CPUCounters
-    private let bootstrapDelay: @Sendable () async throws -> Void
-    private let now: @Sendable () -> ContinuousClock.Instant
-    // Internal test hook; production does not observe/coalesce callbacks.
-    private let onJoinInFlight: (@Sendable () -> Void)?
+    private let sampler: HostCPUSampler
+    private let lease: HostCPUConsumerLease
 
     public init() {
-        readCounters = readCPUCounters
-        bootstrapDelay = { try await Task.sleep(for: .milliseconds(500)) }
-        now = { ContinuousClock.now }
-        onJoinInFlight = nil
+        let lease = HostCPUConsumerLease(consumer: .widget)
+        self.lease = lease
+        sampler = HostCPUSampler(
+            readCounters: readCPUCounters,
+            bootstrapDelay: { try await Task.sleep(for: .milliseconds(500)) },
+            now: { ContinuousClock.now },
+            initialLease: lease
+        )
     }
 
-    /// Internal injection seams allow deterministic counter and sampling-gap
-    /// tests without depending on the host's current CPU load.
+    /// The shared composition root passes its own widget lease.
+    public init(sampler: HostCPUSampler, lease: HostCPUConsumerLease) {
+        self.sampler = sampler
+        self.lease = lease
+    }
+
     init(
         readCounters: @escaping @Sendable () throws -> CPUCounters,
         bootstrapDelay: @escaping @Sendable () async throws -> Void,
         now: @escaping @Sendable () -> ContinuousClock.Instant,
         onJoinInFlight: (@Sendable () -> Void)? = nil
     ) {
-        self.readCounters = readCounters
-        self.bootstrapDelay = bootstrapDelay
-        self.now = now
-        self.onJoinInFlight = onJoinInFlight
+        let lease = HostCPUConsumerLease(consumer: .widget)
+        self.lease = lease
+        sampler = HostCPUSampler(
+            readCounters: readCounters,
+            bootstrapDelay: bootstrapDelay,
+            now: now,
+            onJoinInFlight: onJoinInFlight,
+            initialLease: lease
+        )
     }
 
     public func snapshot() async throws -> WidgetSnapshot {
-        // WidgetEngine may request another refresh while the first bootstrap
-        // sleep is suspended. Share that measurement instead of racing baselines.
-        let percentage: Double
-        if let inFlight {
-            onJoinInFlight?()
-            percentage = try await inFlight.value
-        } else {
-            let task = Task { try await measurePercentage() }
-            inFlight = task
-            defer { inFlight = nil }
-            percentage = try await task.value
-        }
-
+        let sample = try await sampler.sample(for: lease)
+        let percentage = sample.percentage
         let rounded = Int(percentage.rounded())
         let severity: WidgetSeverity
         let priority: WidgetPriority
@@ -133,6 +130,7 @@ public actor CPUWidgetProvider: WidgetProvider {
 
         return WidgetSnapshot(
             descriptor: descriptor,
+            generatedAt: sample.wallTime,
             severity: severity,
             priority: priority,
             representations: .init(
@@ -147,26 +145,6 @@ public actor CPUWidgetProvider: WidgetProvider {
         )
     }
 
-    private func measurePercentage() async throws -> Double {
-        let first = try readCounters()
-        let firstInstant = now()
-
-        if let previous {
-            let elapsed = previous.instant.duration(to: firstInstant)
-            // Discard a stale baseline after sleep/wake or a long suspension.
-            // A fresh short interval is preferable to a misleading average.
-            if elapsed > .zero && elapsed <= .seconds(30) {
-                self.previous = (first, firstInstant)
-                return try first.usagePercentage(since: previous.counters)
-            }
-        }
-
-        try await bootstrapDelay()
-        try Task.checkCancellation()
-        let second = try readCounters()
-        previous = (second, now())
-        return try second.usagePercentage(since: first)
-    }
 }
 
 /// host_cpu_load_info_data_t uses natural_t (32-bit) *per CPU state*.
@@ -208,7 +186,7 @@ enum CPUWidgetError: Error, Equatable {
     case implausibleCounterDelta
 }
 
-private func readCPUCounters() throws -> CPUCounters {
+func readCPUCounters() throws -> CPUCounters {
     var info = host_cpu_load_info_data_t()
     var count = mach_msg_type_number_t(
         MemoryLayout<host_cpu_load_info_data_t>.size / MemoryLayout<integer_t>.size
