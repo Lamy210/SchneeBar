@@ -24,6 +24,19 @@ public final class CompanionHostPreferenceStore {
         }
     }
 
+    /// Internal comparison only; raw malformed content is never surfaced in UI.
+    struct Snapshot {
+        enum Identity: Equatable {
+            case missing, data(Data), propertyList(Data), unavailable
+        }
+        let result: ReadResult
+        let identity: Identity
+
+        func matches(_ other: Snapshot) -> Bool {
+            identity != .unavailable && identity == other.identity && result == other.result
+        }
+    }
+
     public enum WriteError: Error, Equatable, Sendable {
         case invalidExistingRecord
         case unsupportedExistingVersion(Int)
@@ -46,7 +59,33 @@ public final class CompanionHostPreferenceStore {
     }
 
     public func load() -> ReadResult {
-        guard let object = defaults.object(forKey: Self.storageKey) else {
+        decode(defaults.object(forKey: Self.storageKey))
+    }
+
+    /// Decode and capture identity from the same read. Data is compared byte
+    /// for byte, other supported property-list values by serialized content.
+    /// Serialization failure must never authorize an overwrite or reset.
+    func snapshot() -> Snapshot {
+        let object = defaults.object(forKey: Self.storageKey)
+        let identity: Snapshot.Identity
+        if let object {
+            if let data = object as? Data {
+                identity = .data(data)
+            } else if let encoded = try? PropertyListSerialization.data(
+                fromPropertyList: ["record": object], format: .binary, options: 0
+            ) {
+                identity = .propertyList(encoded)
+            } else {
+                identity = .unavailable
+            }
+        } else {
+            identity = .missing
+        }
+        return Snapshot(result: decode(object), identity: identity)
+    }
+
+    private func decode(_ object: Any?) -> ReadResult {
+        guard let object else {
             return .missing
         }
         guard let data = object as? Data,
