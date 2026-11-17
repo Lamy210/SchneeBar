@@ -519,3 +519,49 @@ private final class PreviewImportGate: @unchecked Sendable {
     #expect(try Data(contentsOf: unknown) == Data([9]))
     #expect(model.libraryInventory?.canInstall == false)
 }
+
+@Test @MainActor func previewThumbnailIsExplicitBoundedAndInvalidatedWithoutSelecting() async throws {
+    let tmp = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+    let source = tmp.appendingPathComponent("fixture.schneerunner", isDirectory: true)
+    let root = tmp.appendingPathComponent("owned", isDirectory: true)
+    try FileManager.default.createDirectory(at: source, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: tmp) }
+    let gif = try #require(Data(base64Encoded: "R0lGODlhBAACAIEAAECA/wAAAAAAAAAAACH/C05FVFNDQVBFMi4wAwEAAAAh+QQACgAAACwAAAAABAACAAAIBwABCBwoMCAAIfkEARQAAQAsAAAAAAQAAgCB/0AAAAAAAAAAAAAACAcAAQgcKDAgADs="))
+    try gif.write(to: source.appendingPathComponent("run.gif"))
+    try Data(#"{"formatVersion":1,"name":"Thumbnail","defaultState":"run","clips":[{"state":"run","kind":"gif","path":"run.gif"}]}"#.utf8)
+        .write(to: source.appendingPathComponent("character.json"))
+    let model = CompanionPreviewModel(conflictingApplication: { nil }, makeStatusItem: { nil },
+        systemReduceMotion: { true }, allowHeadlessPresentation: true, libraryRoot: root)
+    model.start()
+    defer { model.stop() }
+    try await waitForPreview { !model.libraryBusy && model.libraryInventory != nil }
+    model.importPack(source)
+    try await waitForPreview { !model.libraryBusy }
+    let id = try #require(model.libraryInventory?.entries.first?.id)
+    #expect(model.libraryThumbnails.isEmpty)
+    model.loadThumbnail(UUID())
+    #expect(!model.libraryBusy)
+    model.loadThumbnail(id)
+    try await waitForPreview { !model.libraryBusy }
+    let image = try #require(model.libraryThumbnails[id])
+    #expect(image.width == 48 && image.height == 48)
+    #expect(image.bitsPerPixel == 32)
+    #expect(model.imageSource == .builtIn)
+    guard case .builtIn = try CompanionOwnedPackStore.restoreSelection(in: root) else {
+        Issue.record("thumbnail changed stored selection"); return
+    }
+    model.loadThumbnail(id)
+    #expect(!model.libraryBusy)
+    model.refreshLibrary()
+    try await waitForPreview { !model.libraryBusy }
+    #expect(model.libraryThumbnails.isEmpty)
+    model.selectPack(id)
+    try await waitForPreview { !model.libraryBusy }
+    #expect(model.libraryThumbnails[id] != nil)
+    model.showCharacter = false
+    #expect(model.libraryThumbnails.isEmpty)
+    model.showCharacter = true
+    #expect(model.libraryThumbnails.isEmpty)
+    model.stop()
+    #expect(model.libraryThumbnails.isEmpty)
+}

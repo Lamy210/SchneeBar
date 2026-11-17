@@ -32,6 +32,9 @@ public struct CompanionAssetCatalog: Sendable {
         self.fallback = fallback
     }
 
+    /// The actual declared default clip, independent of the run state.
+    public var defaultAsset: CompanionDecodedClip { fallback }
+
     public func asset(for state: CompanionState) -> CompanionDecodedClip {
         assets[state] ?? fallback
     }

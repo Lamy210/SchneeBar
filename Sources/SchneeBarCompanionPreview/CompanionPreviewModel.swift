@@ -1,5 +1,6 @@
 import AppKit
 import Combine
+import CoreGraphics
 import Foundation
 import SchneeBarCompanionAssets
 import SchneeBarCompanionCore
@@ -22,6 +23,7 @@ final class CompanionPreviewModel: NSObject, ObservableObject {
     @Published private(set) var libraryBusy = false
     @Published private(set) var libraryInventory: CompanionOwnedPackStore.Inventory?
     @Published private(set) var libraryMessage = ""
+    @Published private(set) var libraryThumbnails: [UUID: CGImage] = [:]
     private let libraryRoot: URL?
     private var libraryNeedsRestore = false
     var libraryAvailable: Bool { libraryRoot != nil }
@@ -240,6 +242,7 @@ final class CompanionPreviewModel: NSObject, ObservableObject {
             restoreLibraryIfNeeded()
         } else if imageSelectionSession != nil {
             imageSelectionSession = nil
+            libraryThumbnails.removeAll()
             if started && libraryBusy { libraryNeedsRestore = true }
             imageQueue.cancel()
             imageImportPending = false
@@ -269,6 +272,12 @@ final class CompanionPreviewModel: NSObject, ObservableObject {
         runLibrary(.install(url))
     }
     func refreshLibrary() { runLibrary(.refresh) }
+
+    func loadThumbnail(_ id: UUID) {
+        guard libraryThumbnails[id] == nil,
+              libraryInventory?.entries.contains(where: { $0.id == id && $0.name != nil }) == true else { return }
+        runLibrary(.thumbnail(id))
+    }
     func restoreSavedChoice() { runLibrary(.restoreSelection) }
     func selectPack(_ id: UUID) { runLibrary(.select(id)) }
     func selectLibraryDefault() { runLibrary(.builtIn) }
@@ -363,6 +372,12 @@ final class CompanionPreviewModel: NSObject, ObservableObject {
             return
         }
         libraryNeedsRestore = false
+        // Explicit refresh and mutations invalidate every cached preview.
+        // Selection/thumbnail requests may accumulate only current IDs.
+        switch request {
+        case .thumbnail, .select, .restoreSelection: break
+        default: libraryThumbnails.removeAll()
+        }
         libraryBusy = true
         libraryMessage = "Working with character library…"
         // A durable operation can commit after hide/stop. Hold the slot
@@ -384,6 +399,13 @@ final class CompanionPreviewModel: NSObject, ObservableObject {
             switch result {
             case .success(let output):
                 self.libraryInventory = output.inventory
+                let validIDs = Set(output.inventory?.entries.filter { $0.name != nil }.map(\.id) ?? [])
+                self.libraryThumbnails = self.libraryThumbnails.filter { validIDs.contains($0.key) }
+                if let thumbnail = output.thumbnail, validIDs.contains(thumbnail.id),
+                   self.libraryThumbnails[thumbnail.id] != nil ||
+                    self.libraryThumbnails.count < PreviewPackThumbnail.maximumCount {
+                    self.libraryThumbnails[thumbnail.id] = thumbnail.image
+                }
                 self.libraryMessage = output.message
                 if let selection = output.selection {
                     do {
@@ -403,6 +425,7 @@ final class CompanionPreviewModel: NSObject, ObservableObject {
                 }
             case .failure:
                 self.libraryInventory = nil
+                self.libraryThumbnails.removeAll()
                 self.libraryMessage = "Library operation failed. Current display retained; refresh or restore saved choice."
             }
         }
