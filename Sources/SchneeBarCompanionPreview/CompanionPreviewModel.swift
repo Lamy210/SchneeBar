@@ -8,10 +8,26 @@ import SchneeBarCompanionEvents
 import SchneeBarSystemProvider
 import UniformTypeIdentifiers
 
-/// Developer preview only. No preferences, network, login items or GitHub.
+/// Developer preview only. Separate character selection storage; no network, login items or GitHub.
 @MainActor
 final class CompanionPreviewModel: NSObject, ObservableObject {
-    enum ImageSource: Equatable { case builtIn, selectedFile }
+    enum ImageSource: Equatable { case builtIn, selectedFile, installedPack(UUID) }
+    var imageSourceTitle: String {
+        switch imageSource {
+        case .builtIn: "Built-in"
+        case .selectedFile: "Selected file (session only)"
+        case .installedPack: "Saved pack"
+        }
+    }
+    @Published private(set) var libraryBusy = false
+    @Published private(set) var libraryInventory: CompanionOwnedPackStore.Inventory?
+    @Published private(set) var libraryMessage = ""
+    private let libraryRoot: URL?
+    private var libraryNeedsRestore = false
+    var libraryAvailable: Bool { libraryRoot != nil }
+    var canUseLibrary: Bool {
+        libraryAvailable && imageSelectionSession != nil && !libraryBusy && !imageImportPending
+    }
     @Published private(set) var imageSource: ImageSource = .builtIn
     @Published private(set) var imageMessage = ""
     @Published private(set) var imageImportPending = false
@@ -76,9 +92,11 @@ final class CompanionPreviewModel: NSObject, ObservableObject {
         waitForNextPoll: @escaping @Sendable (Duration) async throws -> Void = {
             try await Task.sleep(for: $0)
         },
-        imageQueue: CompanionImportQueue<URL, CompanionAssetCatalog>? = nil
+        imageQueue: CompanionImportQueue<URL, CompanionAssetCatalog>? = nil,
+        libraryRoot: URL? = nil
     ) {
         self.imageQueue = imageQueue ?? CompanionSingleFileImporter.makeQueue()
+        self.libraryRoot = libraryRoot ?? (allowHeadlessPresentation ? nil : PreviewPackLibrary.defaultRoot())
         self.sampler = sampler
         self.conflictingApplication = conflictingApplication
         self.makeStatusItem = makeStatusItem
@@ -109,6 +127,7 @@ final class CompanionPreviewModel: NSObject, ObservableObject {
 
     func start() {
         guard !started else { return }
+        guard !libraryBusy else { message = "Library operation is still finishing."; return }
         if let conflict = conflictingApplication() {
             message = "Quit \(conflict) before starting the isolated preview."
             return
@@ -138,12 +157,16 @@ final class CompanionPreviewModel: NSObject, ObservableObject {
         imageMessage = ""
         started = true
         message = ""
+        libraryNeedsRestore = libraryAvailable
         reconcile()
     }
 
     func stop() {
         guard started else { return }
         started = false
+        libraryNeedsRestore = false
+        libraryInventory = nil
+        libraryMessage = ""
         reconcile()
         runtime.setCatalog(nil)
         imageSource = .builtIn
@@ -156,7 +179,7 @@ final class CompanionPreviewModel: NSObject, ObservableObject {
     /// The modal panel can run nested events, so capture and recheck session
     /// identity before handing any result to the asynchronous importer.
     func chooseImage() {
-        guard let session = imageSelectionSession else { return }
+        guard !libraryBusy, let session = imageSelectionSession else { return }
         let panel = NSOpenPanel()
         panel.title = "Choose preview image"
         panel.message = "Choose a PNG, APNG, GIF or WebP that you have permission to use."
@@ -174,7 +197,8 @@ final class CompanionPreviewModel: NSObject, ObservableObject {
     /// Internal selection seam for deterministic tests. All native panel
     /// results and worker completions are fenced against lifecycle changes.
     func importImage(_ url: URL, session: UUID) {
-        guard imageSelectionSession == session else { return }
+        guard !libraryBusy, imageSelectionSession == session else { return }
+        libraryNeedsRestore = false
         imageImportPending = true
         imageMessage = "Loading selected image…"
         imageQueue.submit(url) { [weak self] result in
@@ -195,7 +219,8 @@ final class CompanionPreviewModel: NSObject, ObservableObject {
     }
 
     func restoreBuiltInImage() {
-        guard imageSelectionSession != nil else { return }
+        guard !libraryBusy, imageSelectionSession != nil else { return }
+        libraryNeedsRestore = false
         do {
             let catalogue = try CompanionPreviewAssets.catalogue()
             imageQueue.cancel()
@@ -212,11 +237,101 @@ final class CompanionPreviewModel: NSObject, ObservableObject {
     private func reconcileImageSession() {
         if started && showCharacter && !sleeping {
             if imageSelectionSession == nil { imageSelectionSession = UUID() }
+            restoreLibraryIfNeeded()
         } else if imageSelectionSession != nil {
             imageSelectionSession = nil
+            if started && libraryBusy { libraryNeedsRestore = true }
             imageQueue.cancel()
             imageImportPending = false
             imageMessage = ""
+        }
+    }
+
+    func choosePack() {
+        guard canUseLibrary, let session = imageSelectionSession,
+              libraryInventory?.canInstall == true else { return }
+        let panel = NSOpenPanel()
+        panel.title = "Import character pack"
+        panel.message = "Choose a .schneerunner directory you have permission to use. A copy will be saved."
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.canCreateDirectories = false
+        panel.resolvesAliases = false
+        panel.treatsFilePackagesAsDirectories = true
+        guard panel.runModal() == .OK, let url = panel.url,
+              imageSelectionSession == session else { return }
+        importPack(url)
+    }
+
+    func importPack(_ url: URL) {
+        guard libraryInventory?.canInstall == true else { return }
+        runLibrary(.install(url))
+    }
+    func refreshLibrary() { runLibrary(.refresh) }
+    func restoreSavedChoice() { runLibrary(.restoreSelection) }
+    func selectPack(_ id: UUID) { runLibrary(.select(id)) }
+    func selectLibraryDefault() { runLibrary(.builtIn) }
+
+    private func restoreLibraryIfNeeded() {
+        guard libraryNeedsRestore, !libraryBusy, imageSelectionSession != nil else { return }
+        guard !imageQueue.isBusy else {
+            libraryNeedsRestore = false
+            libraryMessage = "Image worker still finishing. Restore saved choice manually."
+            return
+        }
+        runLibrary(.restoreSelection)
+    }
+
+    private func runLibrary(_ request: PreviewPackLibrary.Request) {
+        guard canUseLibrary, let root = libraryRoot, let session = imageSelectionSession else { return }
+        guard !imageQueue.isBusy else {
+            libraryMessage = "Image worker still finishing. Try again."
+            return
+        }
+        libraryNeedsRestore = false
+        libraryBusy = true
+        libraryMessage = "Working with character library…"
+        // A durable operation can commit after hide/stop. Hold the slot
+        // until actual worker exit and fence UI publication independently.
+        let worker = Task.detached(priority: .userInitiated) {
+            try PreviewPackLibrary.perform(request, root: root)
+        }
+        Task { @MainActor [weak self] in
+            let result = await worker.result
+            guard let self else { return }
+            self.libraryBusy = false
+            guard self.imageSelectionSession == session else {
+                if self.started {
+                    self.libraryNeedsRestore = true
+                    self.restoreLibraryIfNeeded()
+                }
+                return
+            }
+            switch result {
+            case .success(let output):
+                self.libraryInventory = output.inventory
+                self.libraryMessage = output.message
+                if let selection = output.selection {
+                    do {
+                        switch selection {
+                        case .installed(let id, let catalogue):
+                            self.runtime.setCatalog(catalogue)
+                            self.imageSource = .installedPack(id)
+                        case .builtIn, .unavailable:
+                            self.runtime.setCatalog(try CompanionPreviewAssets.catalogue())
+                            self.imageSource = .builtIn
+                        }
+                        self.imageMessage = ""
+                        self.updatePresentation()
+                    } catch {
+                        self.libraryMessage = "Saved choice updated, but preview could not display it."
+                    }
+                }
+            case .failure:
+                self.libraryInventory = nil
+                self.libraryMessage = "Library operation failed. Current display retained; refresh or restore saved choice."
+            }
         }
     }
 

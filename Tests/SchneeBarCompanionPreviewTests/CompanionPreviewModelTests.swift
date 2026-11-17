@@ -368,3 +368,69 @@ private final class PreviewImportGate: @unchecked Sendable {
     #expect(outcome(42) == -2)
     #expect(outcome(nil) == -2)
 }
+
+@Test @MainActor func previewLibraryImportSelectAndRestartRestore() async throws {
+    let tmp = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+    let source = tmp.appendingPathComponent("fixture.schneerunner", isDirectory: true)
+    let root = tmp.appendingPathComponent("preview-owned", isDirectory: true)
+    try FileManager.default.createDirectory(at: source, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: tmp) }
+    let gif = try #require(Data(base64Encoded: "R0lGODlhBAACAIEAAECA/wAAAAAAAAAAACH/C05FVFNDQVBFMi4wAwEAAAAh+QQACgAAACwAAAAABAACAAAIBwABCBwoMCAAIfkEARQAAQAsAAAAAAQAAgCB/0AAAAAAAAAAAAAACAcAAQgcKDAgADs="))
+    try gif.write(to: source.appendingPathComponent("run.gif"))
+    try Data(#"{"formatVersion":1,"name":"Preview fixture","defaultState":"run","clips":[{"state":"run","kind":"gif","path":"run.gif"}]}"#.utf8)
+        .write(to: source.appendingPathComponent("character.json"))
+    let model = CompanionPreviewModel(conflictingApplication: { nil }, makeStatusItem: { nil },
+        systemReduceMotion: { true }, allowHeadlessPresentation: true, libraryRoot: root)
+    #expect(!FileManager.default.fileExists(atPath: root.path))
+    model.start()
+    defer { model.stop() }
+    try await waitForPreview { !model.libraryBusy && model.libraryInventory != nil }
+    #expect(model.imageSource == .builtIn)
+    model.importPack(source)
+    try await waitForPreview { !model.libraryBusy }
+    let id = try #require(model.libraryInventory?.entries.first?.id)
+    #expect(model.imageSource == .builtIn)
+    model.selectPack(id)
+    try await waitForPreview { !model.libraryBusy }
+    #expect(model.imageSource == .installedPack(id))
+    model.stop()
+    #expect(model.imageSource == .builtIn)
+    model.start()
+    try await waitForPreview { !model.libraryBusy }
+    #expect(model.imageSource == .installedPack(id))
+    model.selectLibraryDefault()
+    try await waitForPreview { !model.libraryBusy }
+    #expect(model.imageSource == .builtIn)
+    model.stop()
+    model.start()
+    try await waitForPreview { !model.libraryBusy }
+    #expect(model.imageSource == .builtIn)
+}
+
+@Test @MainActor func previewLibraryCannotOverlapCancellationResistantImageWorker() async throws {
+    let tmp = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+    try FileManager.default.createDirectory(at: tmp, withIntermediateDirectories: false)
+    defer { try? FileManager.default.removeItem(at: tmp) }
+    let gate = PreviewImportGate()
+    defer { gate.release() }
+    let queue = CompanionImportQueue<URL, CompanionAssetCatalog>(work: { try gate.work($0) })
+    let model = CompanionPreviewModel(conflictingApplication: { nil }, makeStatusItem: { nil },
+        systemReduceMotion: { true }, allowHeadlessPresentation: true, imageQueue: queue,
+        libraryRoot: tmp.appendingPathComponent("owned"))
+    model.start()
+    defer { model.stop() }
+    try await waitForPreview { !model.libraryBusy }
+    let session = try #require(model.imageSelectionSession)
+    model.importImage(URL(fileURLWithPath: "/fixture-only.gif"), session: session)
+    try await waitForPreview { gate.calls() == 1 }
+    model.restoreBuiltInImage()
+    #expect(queue.isBusy)
+    #expect(!model.imageImportPending)
+    model.refreshLibrary()
+    #expect(!model.libraryBusy)
+    #expect(model.libraryMessage.contains("worker still finishing"))
+    gate.release()
+    try await waitForPreview { !queue.isBusy }
+    model.refreshLibrary()
+    try await waitForPreview { !model.libraryBusy && model.libraryInventory != nil }
+}
