@@ -15,3 +15,7 @@ The preview baseline passed macOS CI 43996910174. The new image-picker revision 
 ## Draft local notification preview
 
 Opt in with "Listen to local Runner events" only after starting the isolated preview. Use the existing Runner CLI event wire format without launching the Runner app. Untrusted local events only affect the character; no GitHub or command execution. Test with automatic CPU speed off, state expiry, hide/reshow, sleep/wake, Stop and relaunch, malformed and oversized input, background delivery, and a controlled sender storm. Distributed notifications may be dropped or delayed. The new transport remains a draft; actual two-process/real-Mac acceptance is not yet established. No user notification schedules are migrated.
+
+## Draft persistent character library
+
+After explicit Start, the preview uses its fixed Application Support child `dev.lamy.schneebar.companion-preview-packs-v1`, not Runner or shipping Bar storage. Only the final directory is created (0700). Start restores the saved UUID after validation. Import saves a copy without selecting it; select explicitly to save the choice. "Session default" and single-file images are transient; "Use built-in" clears persistent choice. "Restore saved" revalidates it. Stop/hide/sleep fence UI publication; a started durable operation may commit even after Stop. Restart is blocked until the worker exits. No trash/purge/recovery UI yet. Real picker, root permissions, sleep/quit, accessibility and memory acceptance remain required.
