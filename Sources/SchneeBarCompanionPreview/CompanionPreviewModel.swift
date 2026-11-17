@@ -5,10 +5,17 @@ import SchneeBarCompanionAssets
 import SchneeBarCompanionCore
 import SchneeBarCompanionFeature
 import SchneeBarSystemProvider
+import UniformTypeIdentifiers
 
 /// Developer preview only. No preferences, network, login items or GitHub.
 @MainActor
 final class CompanionPreviewModel: NSObject, ObservableObject {
+    enum ImageSource: Equatable { case builtIn, selectedFile }
+    @Published private(set) var imageSource: ImageSource = .builtIn
+    @Published private(set) var imageMessage = ""
+    @Published private(set) var imageImportPending = false
+    @Published private(set) var imageSelectionSession: UUID?
+
     @Published private(set) var started = false
     @Published private(set) var message = ""
     @Published private(set) var cpuText = ""
@@ -20,6 +27,7 @@ final class CompanionPreviewModel: NSObject, ObservableObject {
     @Published var manualRate: CompanionPlaybackRate = .normal { didSet { reconcile() } }
     @Published var freeze = false { didSet { reconcile() } }
 
+    private let imageQueue: CompanionImportQueue<URL, CompanionAssetCatalog>
     private let sampler: HostCPUSampler
     private let conflictingApplication: @MainActor () -> String?
     private let makeStatusItem: @MainActor () -> NSStatusItem?
@@ -56,8 +64,10 @@ final class CompanionPreviewModel: NSObject, ObservableObject {
         allowHeadlessPresentation: Bool = false,
         waitForNextPoll: @escaping @Sendable (Duration) async throws -> Void = {
             try await Task.sleep(for: $0)
-        }
+        },
+        imageQueue: CompanionImportQueue<URL, CompanionAssetCatalog>? = nil
     ) {
+        self.imageQueue = imageQueue ?? CompanionSingleFileImporter.makeQueue()
         self.sampler = sampler
         self.conflictingApplication = conflictingApplication
         self.makeStatusItem = makeStatusItem
@@ -113,6 +123,8 @@ final class CompanionPreviewModel: NSObject, ObservableObject {
         statusItem?.button?.target = self
         statusItem?.button?.action = #selector(activateWindow)
         statusItem?.button?.setAccessibilityLabel("SchneeBar Companion Preview")
+        imageSource = .builtIn
+        imageMessage = ""
         started = true
         message = ""
         reconcile()
@@ -123,8 +135,78 @@ final class CompanionPreviewModel: NSObject, ObservableObject {
         started = false
         reconcile()
         runtime.setCatalog(nil)
+        imageSource = .builtIn
+        imageMessage = ""
         if let item { NSStatusBar.system.removeStatusItem(item) }
         item = nil
+    }
+
+    /// Explicit selection only; no automatic discovery, bookmarks or copies.
+    /// The modal panel can run nested events, so capture and recheck session
+    /// identity before handing any result to the asynchronous importer.
+    func chooseImage() {
+        guard let session = imageSelectionSession else { return }
+        let panel = NSOpenPanel()
+        panel.title = "Choose preview image"
+        panel.message = "Choose a PNG, APNG, GIF or WebP that you have permission to use."
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.canCreateDirectories = false
+        panel.resolvesAliases = false
+        panel.allowedContentTypes = [.png, .gif, .webP] +
+            [UTType(filenameExtension: "apng")].compactMap { $0 }
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        importImage(url, session: session)
+    }
+
+    /// Internal selection seam for deterministic tests. All native panel
+    /// results and worker completions are fenced against lifecycle changes.
+    func importImage(_ url: URL, session: UUID) {
+        guard imageSelectionSession == session else { return }
+        imageImportPending = true
+        imageMessage = "Loading selected image…"
+        imageQueue.submit(url) { [weak self] result in
+            guard let self, self.imageSelectionSession == session else { return }
+            self.imageImportPending = false
+            switch result {
+            case let .success(catalogue):
+                self.runtime.setCatalog(catalogue)
+                self.imageSource = .selectedFile
+                self.imageMessage = "Selected image loaded for this session."
+                self.updatePresentation()
+            case .failure:
+                // Keep the last successful catalogue; never disclose a path
+                // or raw system error in the status item or preview label.
+                self.imageMessage = "Unable to load image. Current image retained."
+            }
+        }
+    }
+
+    func restoreBuiltInImage() {
+        guard imageSelectionSession != nil else { return }
+        do {
+            let catalogue = try CompanionPreviewAssets.catalogue()
+            imageQueue.cancel()
+            imageImportPending = false
+            runtime.setCatalog(catalogue)
+            imageSource = .builtIn
+            imageMessage = "Default image restored."
+            updatePresentation()
+        } catch {
+            imageMessage = "Unable to restore default image. Current image retained."
+        }
+    }
+
+    private func reconcileImageSession() {
+        if started && showCharacter && !sleeping {
+            if imageSelectionSession == nil { imageSelectionSession = UUID() }
+        } else if imageSelectionSession != nil {
+            imageSelectionSession = nil
+            imageQueue.cancel()
+            imageImportPending = false
+            imageMessage = ""
+        }
     }
 
     func appLaunched() {
@@ -154,6 +236,7 @@ final class CompanionPreviewModel: NSObject, ObservableObject {
     }
 
     private func reconcile() {
+        reconcileImageSession()
         let old = transition
         refresh?.cancel()
         refresh = nil
@@ -237,6 +320,7 @@ final class CompanionPreviewModel: NSObject, ObservableObject {
     }
 
     isolated deinit {
+        imageQueue.cancel()
         refresh?.cancel()
         if let item { NSStatusBar.system.removeStatusItem(item) }
         let pending = transition

@@ -1,5 +1,6 @@
 import Foundation
 @testable import SchneeBarCompanionPreview
+import SchneeBarCompanionAssets
 import SchneeBarCompanionCore
 @testable import SchneeBarSystemProvider
 import Testing
@@ -226,4 +227,100 @@ private final class PreviewConflictFixture {
     #expect(!model.started)
     #expect(model.message.contains("SchneeBar"))
     #expect(await sampler.delayUntilNextAcquisition(for: .companion) == nil)
+}
+
+@Test @MainActor func selectedImageFailurePreservesLastSuccessAndRestoreDefault() async throws {
+    let (model, _) = modelFixture()
+    model.automatic = false
+    model.freeze = true
+    let directory = FileManager.default.temporaryDirectory
+        .appendingPathComponent("preview-import-\(UUID())", isDirectory: true)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let image = directory.appendingPathComponent("valid.gif")
+    let bytes = try #require(Data(base64Encoded: "R0lGODlhBAACAIEAAECA/wAAAAAAAAAAACH/C05FVFNDQVBFMi4wAwEAAAAh+QQACgAAACwAAAAABAACAAAIBwABCBwoMCAAIfkEARQAAQAsAAAAAAQAAgCB/0AAAAAAAAAAAAAACAcAAQgcKDAgADs="))
+    try bytes.write(to: image)
+    let invalid = directory.appendingPathComponent("invalid.gif")
+    try Data([0, 1, 2]).write(to: invalid)
+    model.start()
+    defer { model.stop() }
+    let session = try #require(model.imageSelectionSession)
+    model.importImage(image, session: session)
+    try await waitForPreview { !model.imageImportPending }
+    #expect(model.imageSource == .selectedFile)
+    model.importImage(invalid, session: session)
+    try await waitForPreview { !model.imageImportPending }
+    #expect(model.imageSource == .selectedFile)
+    #expect(model.imageMessage.contains("retained"))
+    model.restoreBuiltInImage()
+    #expect(model.imageSource == .builtIn)
+    #expect(!model.imageImportPending)
+}
+
+/// A selected image is still decoding while the preview is stopped. The same
+/// queue must retain its worker slot across stop/restart, but publish nothing.
+private final class PreviewImportGate: @unchecked Sendable {
+    private let lock = NSLock()
+    private let releaseGate = DispatchSemaphore(value: 0)
+    private var count = 0
+    func work(_ url: URL) throws -> CompanionAssetCatalog {
+        lock.lock()
+        count += 1
+        let first = count == 1
+        lock.unlock()
+        if first, releaseGate.wait(timeout: .now() + 5) != .success {
+            throw CancellationError()
+        }
+        return try CompanionPreviewAssets.catalogue()
+    }
+    func calls() -> Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return count
+    }
+    func release() { releaseGate.signal() }
+}
+
+@Test @MainActor func stopRestartFencesPickerAndLateImportWithoutSecondWorker() async throws {
+    let gate = PreviewImportGate()
+    defer { gate.release() }
+    let queue = CompanionImportQueue<URL, CompanionAssetCatalog>(work: { try gate.work($0) })
+    let model = CompanionPreviewModel(
+        conflictingApplication: { nil }, makeStatusItem: { nil },
+        systemReduceMotion: { true }, allowHeadlessPresentation: true,
+        imageQueue: queue
+    )
+    model.start()
+    defer { model.stop() }
+    let first = try #require(model.imageSelectionSession)
+    let url = URL(fileURLWithPath: "/fixture-only.gif")
+    model.importImage(url, session: first)
+    try await waitForPreview { gate.calls() == 1 }
+    model.stop()
+    #expect(model.imageSelectionSession == nil)
+    #expect(!model.imageImportPending)
+    #expect(queue.isBusy)
+    model.start()
+    let second = try #require(model.imageSelectionSession)
+    #expect(first != second)
+    model.importImage(url, session: first)
+    #expect(!model.imageImportPending)
+    model.importImage(url, session: second)
+    #expect(model.imageImportPending)
+    #expect(gate.calls() == 1)
+    gate.release()
+    try await waitForPreview { !model.imageImportPending }
+    #expect(gate.calls() == 2)
+    #expect(model.imageSource == .selectedFile)
+    model.showCharacter = false
+    #expect(model.imageSelectionSession == nil)
+    model.showCharacter = true
+    let third = try #require(model.imageSelectionSession)
+    #expect(third != second)
+    model.setSleeping(true)
+    #expect(model.imageSelectionSession == nil)
+    model.setSleeping(false)
+    #expect(model.imageSelectionSession != third)
+    model.stop()
+    #expect(model.imageSource == .builtIn)
 }
