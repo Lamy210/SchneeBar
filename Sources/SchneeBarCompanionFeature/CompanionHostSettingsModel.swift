@@ -17,9 +17,14 @@ public final class CompanionHostSettingsModel {
     public private(set) var notice: Notice = .none
     public private(set) var resetConfirmation: UUID?
     private let store: CompanionHostPreferenceStore
+    /// Notification after a persisted-state read is adopted, never for draft edits.
+    /// The owner must not synchronously reenter this editor from the callback.
+    private let onCommittedRefresh: @MainActor () -> Void
 
-    public init(store: CompanionHostPreferenceStore) {
+    public init(store: CompanionHostPreferenceStore,
+                onCommittedRefresh: @escaping @MainActor () -> Void = {}) {
         self.store = store
+        self.onCommittedRefresh = onCommittedRefresh
         let snapshot = store.snapshot()
         self.baselineSnapshot = snapshot
         self.draft = snapshot.result.preferences
@@ -92,5 +97,6 @@ public final class CompanionHostSettingsModel {
         draft = snapshot.result.preferences
         resetConfirmation = nil
         self.notice = notice
+        onCommittedRefresh()
     }
 }
