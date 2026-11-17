@@ -9,6 +9,10 @@ import SchneeBarCompanionEvents
 @MainActor
 public final class CompanionRuntimeCoordinator {
     private let renderer: CompanionMenuBarRenderer
+    /// Optional presentation-only callback. Must not reenter the coordinator.
+    public var onStateChange: (@MainActor (CompanionState, CompanionPlaybackRate) -> Void)?
+    private var lastPublishedState: CompanionState?
+    private var lastPublishedRate: CompanionPlaybackRate?
     private var catalog: CompanionAssetCatalog?
     private var input = CompanionCPUInput()
     private var arbitration = CompanionArbitration()
@@ -100,11 +104,19 @@ public final class CompanionRuntimeCoordinator {
     public func receiveLocalEvent(
         session: UUID, kind: CompanionLocalEventIngress.Kind, payload: Data
     ) -> CompanionLocalEventIngress.Outcome? {
+        receiveLocalEvent(session: session, kind: kind) { .bytes(payload) }
+    }
+
+    @discardableResult
+    public func receiveLocalEvent(
+        session: UUID, kind: CompanionLocalEventIngress.Kind,
+        payload: () -> CompanionLocalEventIngress.Payload
+    ) -> CompanionLocalEventIngress.Outcome? {
         guard active, localEventsEnabled, localEventSession == session else { return nil }
         let priorState = arbitration.state
         let priorDeadline = arbitration.nextDeadline
         let outcome = localIngress.receive(
-            kind: kind, payload: payload, at: elapsed(), arbitration: &arbitration
+            kind: kind, at: elapsed(), arbitration: &arbitration, payload: payload
         )
         if arbitration.state != priorState || arbitration.nextDeadline != priorDeadline {
             reconcile()
@@ -153,14 +165,18 @@ public final class CompanionRuntimeCoordinator {
             arbitration.clear(.cpu, at: now)
         }
         scheduleDeadline(active ? arbitration.nextDeadline : nil, at: now)
-        guard active, let catalog else {
+        if active, let catalog {
+            renderer.setReduceMotion(reduceMotion)
+            renderer.setRate(input.rate)
+            renderer.install(catalog.asset(for: arbitration.state))
+        } else {
             renderer.stop()
-            return
         }
-
-        renderer.setReduceMotion(reduceMotion)
-        renderer.setRate(input.rate)
-        renderer.install(catalog.asset(for: arbitration.state))
+        if lastPublishedState != state || lastPublishedRate != rate {
+            lastPublishedState = state
+            lastPublishedRate = rate
+            onStateChange?(state, rate)
+        }
     }
 
     /// One-shot expiry, independent of CPU polling. Reconcile the current

@@ -1,6 +1,7 @@
 import Foundation
 @testable import SchneeBarCompanionPreview
 import SchneeBarCompanionAssets
+import SchneeBarCompanionEvents
 import SchneeBarCompanionCore
 @testable import SchneeBarSystemProvider
 import Testing
@@ -323,4 +324,47 @@ private final class PreviewImportGate: @unchecked Sendable {
     #expect(model.imageSelectionSession != third)
     model.stop()
     #expect(model.imageSource == .builtIn)
+}
+
+@Test @MainActor func localNotificationOptInFencesLifecycleAndPublishesExpiry() async throws {
+    let (model, _) = modelFixture()
+    model.automatic = false
+    model.freeze = true
+    model.start()
+    defer { model.stop() }
+    #expect(model.localNotificationSession == nil)
+    model.listenToLocalEvents = true
+    let first = try #require(model.localNotificationSession)
+    #expect(model.receiveLocalNotification(session: first, kind: .build,
+        object: "{\"phase\":\"started\"}") == .accepted)
+    #expect(model.state == .dash)
+    model.showCharacter = false
+    #expect(model.localNotificationSession == nil)
+    model.showCharacter = true
+    let second = try #require(model.localNotificationSession)
+    #expect(first != second)
+    #expect(model.state == .run)
+    #expect(model.receiveLocalNotification(session: first, kind: .build,
+        object: "{\"phase\":\"started\"}") == nil)
+    #expect(model.receiveLocalNotification(session: second, kind: .character,
+        object: "{\"action\":\"set\",\"state\":\"sprint\",\"durationSeconds\":0.1}") == .accepted)
+    #expect(model.state == .sprint)
+    try await waitForPreview { model.state == .run }
+    model.listenToLocalEvents = false
+    #expect(model.localNotificationSession == nil)
+}
+
+@Test @MainActor func notificationPayloadBoundsUTF8AndRejectsNonString() {
+    func outcome(_ object: Any?) -> Int {
+        switch PreviewLocalNotificationSubscription.boundedPayload(object) {
+        case .bytes(let data): return data.count
+        case .oversized: return -1
+        case .malformed: return -2
+        }
+    }
+    #expect(outcome(String(repeating: "a", count: 4096)) == 4096)
+    #expect(outcome(String(repeating: "a", count: 4097)) == -1)
+    #expect(outcome(String(repeating: "あ", count: 1366)) == -1)
+    #expect(outcome(42) == -2)
+    #expect(outcome(nil) == -2)
 }

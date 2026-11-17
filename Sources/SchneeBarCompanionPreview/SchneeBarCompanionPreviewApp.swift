@@ -41,6 +41,11 @@ private struct CompanionPreviewView: View {
                 .disabled(model.automatic || !model.showCharacter)
                 Toggle("Freeze animation", isOn: $model.freeze)
                     .disabled(!model.showCharacter)
+                Toggle("Listen to local Runner events", isOn: $model.listenToLocalEvents)
+                    .disabled(!model.started || !model.showCharacter)
+                Text("Local events are untrusted and affect only the preview character.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
                 Divider()
                 LabeledContent("Image", value: model.imageSource == .builtIn ? "Built-in" : "Selected file")
                 HStack {
