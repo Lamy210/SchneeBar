@@ -22,7 +22,7 @@ private struct CompanionPreviewView: View {
         VStack(alignment: .leading, spacing: 16) {
             Label("Companion Preview", systemImage: "snowflake")
                 .font(.title2.weight(.semibold))
-            Text("Developer-only preview. Quit the regular SchneeBar before starting. No user files or settings are imported.")
+            Text("Developer-only preview. Quit regular SchneeBar and SchneeRunner before starting. No user files or settings are imported.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)

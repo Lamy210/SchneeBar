@@ -21,7 +21,7 @@ final class CompanionPreviewModel: NSObject, ObservableObject {
     @Published var freeze = false { didSet { reconcile() } }
 
     private let sampler: HostCPUSampler
-    private let isBarRunning: @MainActor () -> Bool
+    private let conflictingApplication: @MainActor () -> String?
     private let makeStatusItem: @MainActor () -> NSStatusItem?
     private let systemReduceMotion: @MainActor () -> Bool
     private let allowHeadlessPresentation: Bool
@@ -44,8 +44,8 @@ final class CompanionPreviewModel: NSObject, ObservableObject {
 
     init(
         sampler: HostCPUSampler = HostCPUSampler(),
-        isBarRunning: @escaping @MainActor () -> Bool = {
-            !NSRunningApplication.runningApplications(withBundleIdentifier: "dev.lamy.schneebar").isEmpty
+        conflictingApplication: @escaping @MainActor () -> String? = {
+            CompanionPreviewModel.runningConflict()
         },
         makeStatusItem: @escaping @MainActor () -> NSStatusItem? = {
             NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -59,7 +59,7 @@ final class CompanionPreviewModel: NSObject, ObservableObject {
         }
     ) {
         self.sampler = sampler
-        self.isBarRunning = isBarRunning
+        self.conflictingApplication = conflictingApplication
         self.makeStatusItem = makeStatusItem
         self.systemReduceMotion = systemReduceMotion
         self.allowHeadlessPresentation = allowHeadlessPresentation
@@ -67,10 +67,29 @@ final class CompanionPreviewModel: NSObject, ObservableObject {
         super.init()
     }
 
+    /// Cooperative check for known app bundle identities, not an atomic lock.
+    /// Unbundled development executables and simultaneous launches are not
+    /// covered. Keep this preview isolated from both shipping applications.
+    private static func runningConflict() -> String? {
+        let candidates = [
+            ("dev.lamy.schneebar", "SchneeBar"),
+            ("io.github.Lamy210.SchneeRunner", "SchneeRunner"),
+            ("dev.lamy.schneebar.companion-preview", "another Companion Preview"),
+        ]
+        let ownPID = ProcessInfo.processInfo.processIdentifier
+        for (identifier, name) in candidates {
+            if NSRunningApplication.runningApplications(withBundleIdentifier: identifier)
+                .contains(where: { $0.processIdentifier != ownPID && !$0.isTerminated }) {
+                return name
+            }
+        }
+        return nil
+    }
+
     func start() {
         guard !started else { return }
-        guard !isBarRunning() else {
-            message = "Quit SchneeBar before starting the isolated preview."
+        if let conflict = conflictingApplication() {
+            message = "Quit \(conflict) before starting the isolated preview."
             return
         }
         do {
@@ -109,15 +128,21 @@ final class CompanionPreviewModel: NSObject, ObservableObject {
     }
 
     func appLaunched() {
-        if started && isBarRunning() {
-            stop()
-            message = "Preview stopped because SchneeBar launched."
-        }
+        _ = stopIfConflictingApplicationRunning()
+    }
+
+    /// The workspace launch notification may have been missed during sleep.
+    private func stopIfConflictingApplicationRunning() -> Bool {
+        guard started, let conflict = conflictingApplication() else { return false }
+        stop()
+        message = "Preview stopped because \(conflict) is running."
+        return true
     }
 
     func setSleeping(_ value: Bool) {
         guard sleeping != value else { return }
         sleeping = value
+        if !value, stopIfConflictingApplicationRunning() { return }
         reconcile()
     }
 

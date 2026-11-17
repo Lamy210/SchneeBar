@@ -23,7 +23,7 @@ private func modelFixture() -> (CompanionPreviewModel, HostCPUSampler) {
         now: { ContinuousClock.now }
     )
     return (CompanionPreviewModel(
-        sampler: sampler, isBarRunning: { false }, makeStatusItem: { nil },
+        sampler: sampler, conflictingApplication: { nil }, makeStatusItem: { nil },
         systemReduceMotion: { false }, allowHeadlessPresentation: true
     ), sampler)
 }
@@ -72,7 +72,7 @@ private func waitForPreview(_ condition: @MainActor () async -> Bool) async thro
         now: { ContinuousClock.now }
     )
     var model: CompanionPreviewModel? = CompanionPreviewModel(
-        sampler: sampler, isBarRunning: { false }, makeStatusItem: { nil },
+        sampler: sampler, conflictingApplication: { nil }, makeStatusItem: { nil },
         systemReduceMotion: { false }, allowHeadlessPresentation: true
     )
     weak var released = model
@@ -129,7 +129,7 @@ private final class PreviewDeadlineFixture: @unchecked Sendable {
         now: { clock.now() }
     )
     let model = CompanionPreviewModel(
-        sampler: sampler, isBarRunning: { false }, makeStatusItem: { nil },
+        sampler: sampler, conflictingApplication: { nil }, makeStatusItem: { nil },
         systemReduceMotion: { false }, allowHeadlessPresentation: true,
         waitForNextPoll: { duration in
             clock.record(duration)
@@ -160,12 +160,70 @@ private final class PreviewDeadlineFixture: @unchecked Sendable {
         now: { ContinuousClock.now }
     )
     let model = CompanionPreviewModel(
-        sampler: sampler, isBarRunning: { false }, makeStatusItem: { nil },
+        sampler: sampler, conflictingApplication: { nil }, makeStatusItem: { nil },
         systemReduceMotion: { false }
     )
     model.start()
     #expect(!model.started)
     #expect(!model.message.isEmpty)
     #expect(await sampler.delayUntilNextAcquisition(for: .widget) == nil)
+    #expect(await sampler.delayUntilNextAcquisition(for: .companion) == nil)
+}
+
+@Test @MainActor func previewRefusesKnownApplicationConflictAtStart() async {
+    for conflict in ["SchneeBar", "SchneeRunner", "another Companion Preview"] {
+        let sampler = HostCPUSampler()
+        let model = CompanionPreviewModel(
+            sampler: sampler, conflictingApplication: { conflict },
+            makeStatusItem: { nil }, systemReduceMotion: { false },
+            allowHeadlessPresentation: true
+        )
+        model.start()
+        #expect(!model.started)
+        #expect(model.message.contains(conflict))
+        #expect(await sampler.delayUntilNextAcquisition(for: .widget) == nil)
+        #expect(await sampler.delayUntilNextAcquisition(for: .companion) == nil)
+    }
+}
+
+@MainActor
+private final class PreviewConflictFixture {
+    var application: String?
+}
+
+@Test @MainActor func launchAndWakeConflictsStopPreviewWithoutRenewingDemand() async throws {
+    let counters = PreviewCounterFixture()
+    let sampler = HostCPUSampler(
+        readCounters: { counters.read() }, bootstrapDelay: {},
+        now: { ContinuousClock.now }
+    )
+    let conflict = PreviewConflictFixture()
+    let model = CompanionPreviewModel(
+        sampler: sampler, conflictingApplication: { conflict.application },
+        makeStatusItem: { nil }, systemReduceMotion: { false },
+        allowHeadlessPresentation: true
+    )
+    model.start()
+    defer { model.stop() }
+    try await waitForPreview { model.state == .sprint }
+    conflict.application = "SchneeRunner"
+    model.appLaunched()
+    #expect(!model.started)
+    #expect(model.message.contains("SchneeRunner"))
+    try await waitForPreview {
+        await sampler.delayUntilNextAcquisition(for: .companion) == nil
+    }
+
+    conflict.application = nil
+    model.start()
+    try await waitForPreview { model.state == .sprint }
+    model.setSleeping(true)
+    try await waitForPreview {
+        await sampler.delayUntilNextAcquisition(for: .companion) == nil
+    }
+    conflict.application = "SchneeBar"
+    model.setSleeping(false)
+    #expect(!model.started)
+    #expect(model.message.contains("SchneeBar"))
     #expect(await sampler.delayUntilNextAcquisition(for: .companion) == nil)
 }
