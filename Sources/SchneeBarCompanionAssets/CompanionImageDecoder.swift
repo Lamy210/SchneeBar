@@ -16,7 +16,9 @@ public enum CompanionImageError: Error, Equatable {
 
 /// A validated in-memory clip; callers cannot construct mismatched frames/timing.
 /// No file-system or URL authority enters this module.
-public struct CompanionDecodedClip {
+// The only constructors create fully materialized, immutable CoreGraphics
+// images backed by owned bitmap storage. No mutable context escapes.
+public struct CompanionDecodedClip: @unchecked Sendable {
     public let clip: CompanionClip
     public let frames: [CGImage]
 
@@ -50,6 +52,7 @@ public enum CompanionImageDecoder {
     /// Synchronous, bounded application-side admission. Platform decoders may
     /// still allocate internally; schedule off the UI path before production use.
     public static func decode(_ data: Data) throws -> CompanionDecodedClip {
+        try Task.checkCancellation()
         guard !data.isEmpty, data.count <= maximumBytes else {
             throw CompanionImageError.invalidPayload
         }
@@ -79,6 +82,7 @@ public enum CompanionImageDecoder {
         // Validate all metadata before any explicit frame decode or allocation
         // of decoded frame storage. Recheck actual dimensions after decoding.
         for index in 0..<count {
+            try Task.checkCancellation()
             guard let properties = CGImageSourceCopyPropertiesAtIndex(source, index, options) as? [CFString: Any],
                   let width = (properties[kCGImagePropertyPixelWidth] as? NSNumber)?.intValue,
                   let height = (properties[kCGImagePropertyPixelHeight] as? NSNumber)?.intValue else {
@@ -93,6 +97,7 @@ public enum CompanionImageDecoder {
         var frames: [CGImage] = []
         frames.reserveCapacity(count)
         for index in 0..<count {
+            try Task.checkCancellation()
             guard CGImageSourceGetStatusAtIndex(source, index) == .statusComplete,
                   let image = CGImageSourceCreateImageAtIndex(
                     source, index, [kCGImageSourceShouldCacheImmediately: true] as CFDictionary
@@ -114,6 +119,7 @@ public enum CompanionImageDecoder {
             }
             frames.append(normalized)
         }
+        try Task.checkCancellation()
         return CompanionDecodedClip(clip: clip, frames: frames)
     }
 
@@ -138,5 +144,45 @@ public enum CompanionImageDecoder {
             }
         }
         return 0.1
+    }
+}
+
+/// Original, small procedural mascot for the developer-only preview. No
+/// external assets, disk access, ImageIO input, or runtime decoding required.
+public enum CompanionPreviewAssets {
+    public static func catalogue() throws -> CompanionAssetCatalog {
+        let states: [(CompanionState, Double, CGFloat)] = [
+            (.idle, 0.5, 0), (.walk, 0.3, 1), (.run, 0.2, 2),
+            (.dash, 0.12, 3), (.sprint, 0.08, 4)
+        ]
+        var assets: [CompanionState: CompanionDecodedClip] = [:]
+        for (state, delay, lift) in states {
+            let frames = try [frame(lift: 0), frame(lift: lift + 1)]
+            let clip = try CompanionClip(revision: UUID(), durations: [delay, delay])
+            assets[state] = CompanionDecodedClip(clip: clip, frames: frames)
+        }
+        return try CompanionAssetCatalog(assets: assets, defaultState: .run)
+    }
+
+    private static func frame(lift: CGFloat) throws -> CGImage {
+        guard let canvas = CGContext(
+            data: nil, width: 32, height: 32, bitsPerComponent: 8, bytesPerRow: 128,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else { throw CompanionImageError.decodeFailed }
+        canvas.clear(CGRect(x: 0, y: 0, width: 32, height: 32))
+        // Original geometric snow creature: icy body, dark eyes, blue feet.
+        canvas.setFillColor(red: 0.25, green: 0.48, blue: 0.76, alpha: 1)
+        canvas.fillEllipse(in: CGRect(x: 5, y: 4 + lift, width: 10, height: 6))
+        canvas.fillEllipse(in: CGRect(x: 17, y: 4 + lift, width: 10, height: 6))
+        canvas.fillEllipse(in: CGRect(x: 3, y: 6 + lift, width: 26, height: 20))
+        canvas.setFillColor(red: 0.83, green: 0.94, blue: 1, alpha: 1)
+        canvas.fillEllipse(in: CGRect(x: 5, y: 8 + lift, width: 22, height: 16))
+        canvas.setFillColor(red: 0.10, green: 0.22, blue: 0.40, alpha: 1)
+        canvas.fillEllipse(in: CGRect(x: 10, y: 18 + lift, width: 3, height: 4))
+        canvas.fillEllipse(in: CGRect(x: 19, y: 18 + lift, width: 3, height: 4))
+        canvas.fillEllipse(in: CGRect(x: 14, y: 14 + lift, width: 4, height: 2))
+        guard let image = canvas.makeImage() else { throw CompanionImageError.decodeFailed }
+        return image
     }
 }

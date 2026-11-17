@@ -9,7 +9,7 @@ public enum CompanionAssetCatalogError: Error, Equatable {
 
 /// Bounds the retained decoded catalogue, counting aliased clips once.
 /// This is not an import preflight or a process-wide allocation limit.
-public struct CompanionAssetCatalog {
+public struct CompanionAssetCatalog: Sendable {
     private let assets: [CompanionState: CompanionDecodedClip]
     private let fallback: CompanionDecodedClip
 
