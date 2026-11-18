@@ -15,6 +15,12 @@ private final class PreviewCounterFixture: @unchecked Sendable {
         calls += 100
         return CPUCounters(user: calls, system: 0, idle: 0, nice: 0)
     }
+
+    func readCount() -> Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return Int(calls / 100)
+    }
 }
 
 @MainActor
@@ -564,4 +570,74 @@ private final class PreviewImportGate: @unchecked Sendable {
     #expect(model.libraryThumbnails.isEmpty)
     model.stop()
     #expect(model.libraryThumbnails.isEmpty)
+}
+
+
+@Test @MainActor func previewSharedPlanDeliversToBothConsumersAndStopsWhenDisabled() async throws {
+    let counters = PreviewCounterFixture()
+    let clock = PreviewDeadlineFixture()
+    let sampler = HostCPUSampler(
+        readCounters: { counters.read() },
+        bootstrapDelay: { clock.advance(.milliseconds(500)) },
+        now: { clock.now() }
+    )
+    let model = CompanionPreviewModel(
+        sampler: sampler, conflictingApplication: { nil }, makeStatusItem: { nil },
+        systemReduceMotion: { false }, allowHeadlessPresentation: true,
+        waitForNextPoll: { duration in
+            clock.record(duration)
+            try await Task.sleep(for: .seconds(60))
+        }
+    )
+    model.showCPU = true
+    model.start()
+    defer { model.stop() }
+    try await waitForPreview { clock.recorded().count == 1 }
+    let both = await sampler.refreshPlan()
+    #expect(both.consumers == [.widget, .companion])
+    #expect(both.pendingDelivery.isEmpty)
+    #expect(clock.recorded() == [.seconds(5)])
+    #expect(counters.readCount() == 2)
+    #expect(model.cpuText == "Total CPU 100%" && model.state == .sprint)
+
+    clock.advance(.seconds(2))
+    model.showCharacter = false
+    try await waitForPreview { clock.recorded().count == 2 }
+    let widgetOnly = await sampler.refreshPlan()
+    #expect(widgetOnly.consumers == [.widget] && widgetOnly.pendingDelivery.isEmpty)
+    #expect(clock.recorded() == [.seconds(5), .seconds(3)])
+    #expect(counters.readCount() == 2)
+
+    model.showCPU = false
+    try await waitForPreview { await sampler.refreshPlan().consumers.isEmpty }
+    #expect(model.cpuText.isEmpty)
+    #expect(counters.readCount() == 2)
+    #expect(clock.recorded().count == 2)
+}
+
+@Test @MainActor func previewSharedPlanConsumesCachedErrorWithoutImmediateRetry() async throws {
+    let clock = PreviewDeadlineFixture()
+    let sampler = HostCPUSampler(
+        readCounters: { CPUCounters(user: 100, system: 0, idle: 0, nice: 0) },
+        bootstrapDelay: { clock.advance(.milliseconds(500)) },
+        now: { clock.now() }
+    )
+    let model = CompanionPreviewModel(
+        sampler: sampler, conflictingApplication: { nil }, makeStatusItem: { nil },
+        systemReduceMotion: { false }, allowHeadlessPresentation: true,
+        waitForNextPoll: { duration in
+            clock.record(duration)
+            try await Task.sleep(for: .seconds(60))
+        }
+    )
+    model.showCPU = true
+    model.start()
+    defer { model.stop() }
+    try await waitForPreview { clock.recorded().count == 1 }
+    let plan = await sampler.refreshPlan()
+    #expect(plan.consumers == [.widget, .companion])
+    #expect(plan.pendingDelivery.isEmpty)
+    #expect(model.cpuText == "Total CPU unavailable")
+    #expect(model.effectiveRate == 1)
+    #expect(clock.recorded() == [.seconds(5)])
 }
