@@ -114,7 +114,7 @@ public final class CompanionHostComposition {
             self.cpu.invalidate()
             self.publishDemand()
         }
-        acquisition.onDrained = { [weak self] in self?.assetSettings.sync() }
+        acquisition.onDrained = { [weak self] in self?.publishDemand() }
     }
 
     public var decision: CompanionHostPolicy.Decision { acquisition.decision }
