@@ -324,3 +324,76 @@ private func acquisitionCatalogue() throws -> CompanionAssetCatalog {
     #expect(editor.inventoryStatus == .idle && editor.entries.isEmpty)
     #expect(editor.canOperate && probe.peakWorkers() == 1)
 }
+
+
+@Test @MainActor func hostAutomaticRestoreIsOptInAndOncePerAdmittedSession() async throws {
+    let name = "SchneeBarTests.autoRestore.\(UUID())"
+    let defaults = try #require(UserDefaults(suiteName: name))
+    defer { defaults.removePersistentDomain(forName: name) }
+    let store = CompanionHostPreferenceStore(defaults: defaults)
+    try store.save(.init(enabled: true, freeze: true))
+    let saved = UUID(), manual = UUID()
+    let probe = AcquisitionProbe(blockedID: UUID(), failedID: UUID(), catalogue: try acquisitionCatalogue())
+    let button = NSButton()
+    button.image = NSImage(size: NSSize(width: 12, height: 12))
+    let owner = CompanionHostComposition(button: button, store: store,
+        load: { try probe.load($0) },
+        readSelection: { _ = try probe.load(saved); return .builtIn },
+        makeCPU: { runtime in CompanionSharedCPURefresh(runtime: runtime, read: { throw CancellationError() }) })
+    defer { owner.stop() }
+    owner.updateEnvironment(.init(releaseApproved: true, ownsMenuSurface: true))
+    #expect(!owner.automaticAssetRestoreEnabled && probe.started().isEmpty)
+    owner.enableAutomaticAssetRestore()
+    try await waitForAcquisition { !owner.isAssetWorkerBusy }
+    #expect(owner.assetStatus == .noSavedSelection && probe.started() == [saved])
+    owner.refreshPreferences()
+    owner.enableAutomaticAssetRestore()
+    #expect(!owner.isAssetWorkerBusy && probe.started() == [saved])
+    #expect(owner.requestInstalledAsset(manual))
+    try await waitForAcquisition { !owner.isAssetWorkerBusy }
+    #expect(owner.assetStatus == .loaded(manual))
+    owner.refreshPreferences()
+    #expect(probe.started() == [saved, manual])
+    owner.updateEnvironment(.init(releaseApproved: true, awake: false, ownsMenuSurface: true))
+    owner.updateEnvironment(.init(releaseApproved: true, ownsMenuSurface: true))
+    try await waitForAcquisition { !owner.isAssetWorkerBusy }
+    #expect(owner.assetStatus == .noSavedSelection && probe.started() == [saved, manual, saved])
+    owner.disableAutomaticAssetRestore()
+    owner.updateEnvironment(.init(releaseApproved: true, awake: false, ownsMenuSurface: true))
+    owner.updateEnvironment(.init(releaseApproved: true, ownsMenuSurface: true))
+    #expect(!owner.isAssetWorkerBusy && probe.started() == [saved, manual, saved])
+}
+
+@Test @MainActor func hostAutomaticRestoreWaitsForRevokedWorkerAndHonorsExplicitCancel() async throws {
+    let name = "SchneeBarTests.autoRestoreDrain.\(UUID())"
+    let defaults = try #require(UserDefaults(suiteName: name))
+    defer { defaults.removePersistentDomain(forName: name) }
+    let store = CompanionHostPreferenceStore(defaults: defaults)
+    try store.save(.init(enabled: true, freeze: true))
+    let saved = UUID(), prior = UUID()
+    let probe = AcquisitionProbe(blockedID: prior, failedID: UUID(), catalogue: try acquisitionCatalogue())
+    defer { probe.release() }
+    let button = NSButton()
+    button.image = NSImage(size: NSSize(width: 12, height: 12))
+    let owner = CompanionHostComposition(button: button, store: store,
+        load: { try probe.load($0) },
+        readSelection: { .installed(id: saved, catalogue: try probe.load(saved)) },
+        makeCPU: { runtime in CompanionSharedCPURefresh(runtime: runtime, read: { throw CancellationError() }) })
+    defer { owner.stop() }
+    owner.updateEnvironment(.init(releaseApproved: true, ownsMenuSurface: true))
+    #expect(owner.requestInstalledAsset(prior))
+    try await waitForAcquisition { probe.started() == [prior] }
+    owner.enableAutomaticAssetRestore()
+    owner.updateEnvironment(.init(releaseApproved: true, awake: false, ownsMenuSurface: true))
+    owner.updateEnvironment(.init(releaseApproved: true, ownsMenuSurface: true))
+    #expect(owner.isAssetWorkerBusy && probe.started() == [prior])
+    probe.release()
+    try await waitForAcquisition { owner.assetStatus == .loaded(saved) && !owner.isAssetWorkerBusy }
+    #expect(probe.started() == [prior, saved] && probe.peakWorkers() == 1)
+    owner.updateEnvironment(.init(releaseApproved: true, awake: false, ownsMenuSurface: true))
+    owner.disableAutomaticAssetRestore()
+    owner.updateEnvironment(.init(releaseApproved: true, ownsMenuSurface: true))
+    owner.cancelAssetRequest()
+    owner.enableAutomaticAssetRestore()
+    #expect(!owner.isAssetWorkerBusy && probe.started() == [prior, saved])
+}
