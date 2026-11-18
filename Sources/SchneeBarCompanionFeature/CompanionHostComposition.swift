@@ -80,6 +80,7 @@ public final class CompanionHostComposition {
             readSelection: { try CompanionOwnedPackStore.readSelection(in: privateRoot) },
             saveSelection: { try CompanionOwnedPackStore.select(id: $0, in: privateRoot) },
             clearSelection: { try CompanionOwnedPackStore.selectBuiltIn(in: privateRoot) },
+            readInventory: { try CompanionOwnedPackStore.inventory(in: privateRoot) },
             makeCPU: { CompanionSharedCPURefresh(runtime: $0, sampler: sampler) },
             onDemandChanged: onDemandChanged)
     }
@@ -89,6 +90,7 @@ public final class CompanionHostComposition {
          readSelection: (@Sendable () throws -> CompanionOwnedPackStore.ReadOnlySelection)? = nil,
          saveSelection: (@Sendable (UUID) throws -> CompanionOwnedPackStore.Selection)? = nil,
          clearSelection: (@Sendable () throws -> Void)? = nil,
+         readInventory: (@Sendable () throws -> CompanionOwnedPackStore.Inventory)? = nil,
          makeCPU: (CompanionRuntimeCoordinator) -> CompanionSharedCPURefresh,
          onDemandChanged: @escaping @MainActor (Demand) -> Void = { _ in }) {
         let binding = Binding(button: button)
@@ -98,7 +100,8 @@ public final class CompanionHostComposition {
         let runtime = CompanionRuntimeCoordinator(renderer: renderer)
         let bridge = CompanionHostRuntimeBridge(store: store, runtime: runtime)
         let acquisition = CompanionOwnedAssetAcquisition(bridge: bridge, load: load,
-            readSelection: readSelection, saveSelection: saveSelection, clearSelection: clearSelection)
+            readSelection: readSelection, saveSelection: saveSelection, clearSelection: clearSelection,
+            readInventory: readInventory)
         self.binding = binding
         self.store = store
         self.runtime = runtime
@@ -116,6 +119,8 @@ public final class CompanionHostComposition {
 
     public var decision: CompanionHostPolicy.Decision { acquisition.decision }
     public var assetStatus: CompanionOwnedAssetAcquisition.Status { acquisition.status }
+    public var assetInventory: CompanionOwnedPackStore.Inventory? { acquisition.inventory }
+    public var assetInventoryStatus: CompanionOwnedAssetAcquisition.InventoryStatus { acquisition.inventoryStatus }
     /// Retain this owner until false after stop before creating a successor.
     public var isAssetWorkerBusy: Bool { acquisition.isBusy }
 
@@ -168,6 +173,15 @@ public final class CompanionHostComposition {
         guard !isStopped else { return false }
         guard binding.check() else { stop(); return false }
         let accepted = acquisition.clearSavedSelection()
+        publishDemand()
+        return accepted
+    }
+
+    @discardableResult
+    public func refreshAssetInventory() -> Bool {
+        guard !isStopped else { return false }
+        guard binding.check() else { stop(); return false }
+        let accepted = acquisition.refreshInventory()
         publishDemand()
         return accepted
     }
