@@ -133,6 +133,8 @@ public final class CompanionHostComposition {
     public var assetStatus: CompanionOwnedAssetAcquisition.Status { acquisition.status }
     public var assetInventory: CompanionOwnedPackStore.Inventory? { acquisition.inventory }
     public var assetInventoryStatus: CompanionOwnedAssetAcquisition.InventoryStatus { acquisition.inventoryStatus }
+    public var assetPreviewStatus: CompanionOwnedAssetAcquisition.PreviewStatus { acquisition.previewStatus }
+    public var assetThumbnail: CompanionPackThumbnail? { acquisition.thumbnail }
     /// Retain this owner until false after stop before creating a successor.
     public var isAssetWorkerBusy: Bool { acquisition.isBusy }
 
@@ -200,6 +202,15 @@ public final class CompanionHostComposition {
         guard !isStopped else { return false }
         guard binding.check() else { stop(); return false }
         let accepted = acquisition.refreshInventory()
+        publishDemand()
+        return accepted
+    }
+
+    @discardableResult
+    public func requestAssetPreview(_ id: UUID) -> Bool {
+        guard !isStopped else { return false }
+        guard binding.check() else { stop(); return false }
+        let accepted = acquisition.requestPreview(id)
         publishDemand()
         return accepted
     }
