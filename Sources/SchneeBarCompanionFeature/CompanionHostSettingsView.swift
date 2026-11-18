@@ -6,9 +6,16 @@ import SchneeBarCompanionCore
 @MainActor
 public struct CompanionHostSettingsView: View {
     @Bindable private var model: CompanionHostSettingsModel
+    private let assets: CompanionHostAssetSettingsModel?
 
     public init(model: CompanionHostSettingsModel) {
         self.model = model
+        self.assets = nil
+    }
+
+    public init(owner: CompanionHostComposition) {
+        self.model = owner.settings
+        self.assets = owner.assetSettings
     }
 
     public var body: some View {
@@ -35,6 +42,10 @@ public struct CompanionHostSettingsView: View {
                 Toggle("Allow local activity events", isOn: $model.draft.allowLocalEvents)
             }
             .disabled(model.requiresRecovery)
+
+            if let assets {
+                CompanionHostAssetSettingsSection(model: assets)
+            }
 
             if model.requiresRecovery {
                 Section("Recovery") {
@@ -85,6 +96,73 @@ public struct CompanionHostSettingsView: View {
         case .changedExternally: Text("Settings changed elsewhere. Review the latest values before retrying.")
         case .saveFailed: Text("The operation could not be verified. Review the current settings.")
         case .reset: Text("Saved companion preferences reset.")
+        }
+    }
+}
+
+
+/// Developer-only installed UUID controls. A metadata picker is a later slice;
+/// no path discovery/import or implicit disk writes from textual input.
+@MainActor
+private struct CompanionHostAssetSettingsSection: View {
+    @Bindable var model: CompanionHostAssetSettingsModel
+
+    var body: some View {
+        Section("Installed character packs") {
+            Text("Enter an installed pack UUID. Display does not save your choice. Save and clear change only the owned selection record.")
+                .foregroundStyle(.secondary)
+            TextField("Installed pack UUID", text: $model.packIDText)
+                .disabled(!model.canOperate)
+            HStack {
+                Button("Display") { model.displayCandidate() }
+                Button("Save selection") { model.saveCandidate() }
+            }
+            .disabled(!model.canSelect)
+            HStack {
+                Button("Restore saved") { model.restoreSaved() }
+                Button("Clear saved selection…", role: .destructive) { model.requestClear() }
+            }
+            .disabled(!model.canOperate)
+            if model.isBusy {
+                ProgressView("Asset operation still running…").controlSize(.small)
+            }
+            if !model.canOperate && !model.isBusy {
+                Text("Asset operations require an approved, active or awaiting-catalogue host.")
+                    .foregroundStyle(.secondary)
+            }
+            statusView
+            if model.notice == .rejected {
+                Text("Operation not accepted. Check the pack UUID and current host state.")
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .confirmationDialog("Clear saved character selection?",
+            isPresented: Binding(get: { model.clearConfirmation != nil },
+                set: { if !$0 { model.cancelClear() } }),
+            titleVisibility: .visible, presenting: model.clearConfirmation
+        ) { token in
+            Button("Clear saved selection", role: .destructive) { model.confirmClear(token) }
+            Button("Cancel", role: .cancel) { model.cancelClear() }
+        } message: { _ in
+            Text("The selection record will be removed. Installed packs are not deleted.")
+        }
+    }
+
+    @ViewBuilder private var statusView: some View {
+        switch model.status {
+        case .idle: EmptyView()
+        case .loading: Text("Loading installed pack…")
+        case .loaded: Text("Installed pack displayed.")
+        case .failed: Text("Unable to load pack. Original image restored.")
+        case .restoring: Text("Reading saved selection…")
+        case .noSavedSelection: Text("No saved selection.")
+        case .savedAssetUnavailable: Text("Saved pack unavailable. Selection record retained.")
+        case .restoreFailed: Text("Unable to read saved selection.")
+        case .savingSelection: Text("Saving selection…")
+        case .clearingSelection: Text("Clearing selection…")
+        case .selectionSaved: Text("Selection saved.")
+        case .selectionCleared: Text("Selection cleared.")
+        case .selectionCommitFailed: Text("Selection operation failed or could not be verified. Restore saved to check the persisted choice.")
         }
     }
 }
