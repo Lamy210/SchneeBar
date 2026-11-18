@@ -488,18 +488,20 @@ final class CompanionPreviewModel: NSObject, ObservableObject {
             guard let self, self.revision == expected else { return }
             guard widget || companion else { return }
             self.refresh = Task { @MainActor [weak self] in
+                var firstIteration = true
                 while !Task.isCancelled {
                     guard self?.revision == expected else { return }
-                    await self?.refreshOnce(widget: widget, companion: companion, revision: expected)
+                    await self?.refreshOnce(widget: widget, companion: companion,
+                        revision: expected, force: firstIteration)
+                    firstIteration = false
                     guard !Task.isCancelled, self?.revision == expected else { return }
-                    // Match the cache's monotonic deadline even if this
-                    // generation started with a cached observation.
-                    let consumer: HostCPUConsumer = widget ? .widget : .companion
-                    let delay = await sampler.delayUntilNextAcquisition(for: consumer)
+                    let plan = await sampler.refreshPlan()
                     guard !Task.isCancelled, self?.revision == expected,
-                          let delay else { return }
-                    // Do not bind self strongly across deadline query or idle wait.
-                    do { try await waitForNextPoll(max(.milliseconds(50), delay)) }
+                          plan.acquisitionDelay != nil else { return }
+                    // Both leases share one deadline. A pending delivery must
+                    // not sleep through a fresh cache window.
+                    // Do not bind self strongly across the idle wait.
+                    do { try await waitForNextPoll(plan.nextHostDelay(otherWidgetsSeconds: 30)) }
                     catch { return }
                 }
             }
@@ -533,23 +535,35 @@ final class CompanionPreviewModel: NSObject, ObservableObject {
         }
     }
 
-    private func refreshOnce(widget: Bool, companion: Bool, revision expected: UUID) async {
-        if widget {
+    private func refreshOnce(widget: Bool, companion: Bool, revision expected: UUID,
+                             force: Bool) async {
+        let firstPlan = await sampler.refreshPlan()
+        guard revision == expected, !Task.isCancelled else { return }
+        if widget && (force || firstPlan.requiresRefresh(.widget)) {
             do {
                 let sample = try await sampler.sample(for: HostCPUConsumer.widget)
                 guard revision == expected, !Task.isCancelled else { return }
                 cpuText = "Total CPU \(Int(sample.percentage.rounded()))%"
+            } catch is CancellationError {
+                // Revoked lease is not a counter failure.
             } catch {
                 guard revision == expected, !Task.isCancelled else { return }
                 cpuText = "Total CPU unavailable"
             }
         }
-        if companion, let request = runtime.beginCPURequest() {
+        // Re-read after the widget: it might have just acquired a new
+        // observation that the companion has not yet consumed.
+        let secondPlan = await sampler.refreshPlan()
+        guard revision == expected, !Task.isCancelled else { return }
+        if companion && (force || secondPlan.requiresRefresh(.companion)),
+           let request = runtime.beginCPURequest() {
             do {
                 let sample = try await sampler.sample(for: HostCPUConsumer.companion)
                 guard revision == expected, !Task.isCancelled else { return }
                 runtime.acceptCPU(request, id: sample.id, epoch: sample.epoch,
                     capturedAt: sample.capturedAt, hostPercentage: sample.percentage)
+            } catch is CancellationError {
+                // Revoked lease is not a counter failure.
             } catch {
                 guard revision == expected, !Task.isCancelled else { return }
                 runtime.cpuUnavailable(request)
