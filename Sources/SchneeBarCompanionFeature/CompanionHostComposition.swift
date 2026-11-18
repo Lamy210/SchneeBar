@@ -2,6 +2,7 @@ import AppKit
 import Foundation
 import SchneeBarCompanionAssets
 import SchneeBarCompanionCore
+import SchneeBarCompanionEvents
 import SchneeBarSystemProvider
 
 /// The existing host grants exclusive ownership of an existing button's
@@ -141,6 +142,20 @@ public final class CompanionHostComposition {
         guard !isStopped else { return }
         guard binding.check() else { stop(); return }
         await cpu.refresh { !self.isStopped && self.binding.check() && isCurrent() }
+    }
+
+    /// Transport entry point: an obsolete session or lost image slot must
+    /// not even evaluate the untrusted payload. No privileged operation.
+    @discardableResult
+    public func receiveLocalEvent(
+        session: UUID, kind: CompanionLocalEventIngress.Kind,
+        payload: () -> CompanionLocalEventIngress.Payload
+    ) -> CompanionLocalEventIngress.Outcome? {
+        guard !isStopped else { return nil }
+        guard binding.check() else { stop(); return nil }
+        guard demand.localEventSession == session,
+              runtime.localEventSession == session else { return nil }
+        return runtime.receiveLocalEvent(session: session, kind: kind, payload: payload)
     }
 
     /// Host calls before replacing its scheduler configuration generation.
