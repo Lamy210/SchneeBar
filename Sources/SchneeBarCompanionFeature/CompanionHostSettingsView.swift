@@ -1,3 +1,4 @@
+import Foundation
 import SwiftUI
 import SchneeBarCompanionCore
 
@@ -101,18 +102,43 @@ public struct CompanionHostSettingsView: View {
 }
 
 
-/// Developer-only installed UUID controls. A metadata picker is a later slice;
-/// no path discovery/import or implicit disk writes from textual input.
+/// Developer-only owned-library metadata picker. A manifest name does not
+/// prove that its images can be decoded. Display/save still validate by UUID.
 @MainActor
 private struct CompanionHostAssetSettingsSection: View {
     @Bindable var model: CompanionHostAssetSettingsModel
 
     var body: some View {
         Section("Installed character packs") {
-            Text("Enter an installed pack UUID. Display does not save your choice. Save and clear change only the owned selection record.")
+            Text("Choose an installed pack. Display does not save your choice. Save and clear change only the owned selection record.")
                 .foregroundStyle(.secondary)
-            TextField("Installed pack UUID", text: $model.packIDText)
+            Button("Refresh installed packs") { model.refreshInventory() }
                 .disabled(!model.canOperate)
+            Picker("Installed pack", selection: Binding<UUID?>(
+                get: { model.listedID }, set: { model.chooseListedPack($0) }
+            )) {
+                Text("Choose a pack").tag(nil as UUID?)
+                ForEach(model.entries.filter { $0.name != nil }) { entry in
+                    Text((entry.name ?? "Unavailable") + " · " + String(entry.id.uuidString.prefix(8)))
+                        .tag(Optional(entry.id))
+                }
+            }
+            .disabled(!model.canOperate || !model.entries.contains(where: { $0.name != nil }))
+            if model.inventoryStatus == .failed {
+                Text("Unable to read the installed pack list. Refresh to retry.")
+                    .foregroundStyle(.secondary)
+            }
+            if model.inventoryStatus == .loaded && model.entries.isEmpty {
+                Text("No installed packs.").foregroundStyle(.secondary)
+            }
+            if model.entries.contains(where: { $0.name == nil }) {
+                Text("Some packs have unavailable metadata and cannot be chosen from the list.")
+                    .foregroundStyle(.secondary)
+            }
+            DisclosureGroup("Advanced UUID entry (development)") {
+                TextField("Installed pack UUID", text: $model.packIDText)
+                    .disabled(!model.canOperate)
+            }
             HStack {
                 Button("Display") { model.displayCandidate() }
                 Button("Save selection") { model.saveCandidate() }
