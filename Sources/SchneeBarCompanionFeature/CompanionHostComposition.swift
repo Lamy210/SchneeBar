@@ -75,12 +75,14 @@ public final class CompanionHostComposition {
                 onDemandChanged: @escaping @MainActor (Demand) -> Void = { _ in }) {
         self.init(button: button, store: store,
             load: { try CompanionOwnedPackStore.load(id: $0, from: privateRoot) },
+            readSelection: { try CompanionOwnedPackStore.readSelection(in: privateRoot) },
             makeCPU: { CompanionSharedCPURefresh(runtime: $0, sampler: sampler) },
             onDemandChanged: onDemandChanged)
     }
 
     init(button: NSButton, store: CompanionHostPreferenceStore,
          load: @escaping @Sendable (UUID) throws -> CompanionAssetCatalog,
+         readSelection: (@Sendable () throws -> CompanionOwnedPackStore.ReadOnlySelection)? = nil,
          makeCPU: (CompanionRuntimeCoordinator) -> CompanionSharedCPURefresh,
          onDemandChanged: @escaping @MainActor (Demand) -> Void = { _ in }) {
         let binding = Binding(button: button)
@@ -89,7 +91,7 @@ public final class CompanionHostComposition {
         )
         let runtime = CompanionRuntimeCoordinator(renderer: renderer)
         let bridge = CompanionHostRuntimeBridge(store: store, runtime: runtime)
-        let acquisition = CompanionOwnedAssetAcquisition(bridge: bridge, load: load)
+        let acquisition = CompanionOwnedAssetAcquisition(bridge: bridge, load: load, readSelection: readSelection)
         self.binding = binding
         self.store = store
         self.runtime = runtime
@@ -128,6 +130,16 @@ public final class CompanionHostComposition {
         guard !isStopped else { return false }
         guard binding.check() else { stop(); return false }
         let accepted = acquisition.request(id)
+        publishDemand()
+        return accepted
+    }
+
+    /// Explicit read-only restore; never imports or writes a selection.
+    @discardableResult
+    public func restoreSavedAssetSelection() -> Bool {
+        guard !isStopped else { return false }
+        guard binding.check() else { stop(); return false }
+        let accepted = acquisition.restoreSavedSelection()
         publishDemand()
         return accepted
     }
