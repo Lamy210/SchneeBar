@@ -35,6 +35,7 @@ public final class CompanionOwnedAssetAcquisition {
     /// The owner observes the final adopted result, not intermediate queue
     /// state. Must not synchronously reenter the acquisition adapter.
     var onCompletion: (@MainActor () -> Void)?
+    var onDrained: (@MainActor () -> Void)?
 
     public convenience init(bridge: CompanionHostRuntimeBridge, privateRoot: URL) {
         self.init(bridge: bridge, load: { id in
@@ -70,6 +71,7 @@ public final class CompanionOwnedAssetAcquisition {
                 return .builtIn
             }
         }
+        queue.onIdle = { [weak self] in self?.onDrained?() }
     }
 
     public var decision: CompanionHostPolicy.Decision { bridge.decision }
