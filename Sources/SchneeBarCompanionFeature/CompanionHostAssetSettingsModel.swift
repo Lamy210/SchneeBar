@@ -9,7 +9,11 @@ import SchneeBarCompanionCore
 @Observable
 public final class CompanionHostAssetSettingsModel {
     public enum ActionNotice: Equatable, Sendable { case none, rejected }
-    public var packIDText = ""
+    public var packIDText = "" {
+        didSet {
+            if packIDText != oldValue { previewCandidate = nil }
+        }
+    }
     public private(set) var notice: ActionNotice = .none
     public private(set) var status: CompanionOwnedAssetAcquisition.Status = .idle
     public private(set) var isBusy = false
@@ -18,6 +22,9 @@ public final class CompanionHostAssetSettingsModel {
     public private(set) var entries: [CompanionOwnedPackStore.Entry] = []
     public private(set) var inventoryStatus: CompanionOwnedAssetAcquisition.InventoryStatus = .idle
     private var assetSession: UUID?
+    private var previewCandidate: UUID?
+    private var previewStatus: CompanionOwnedAssetAcquisition.PreviewStatus = .idle
+    private var thumbnail: CompanionPackThumbnail?
     @ObservationIgnored private weak var owner: CompanionHostComposition?
 
     init(owner: CompanionHostComposition) {
@@ -44,6 +51,25 @@ public final class CompanionHostAssetSettingsModel {
         packIDText = id.uuidString
     }
 
+    public var candidatePreviewStatus: CompanionOwnedAssetAcquisition.PreviewStatus {
+        guard let previewCandidate, candidateID == previewCandidate else { return .idle }
+        return previewStatus
+    }
+
+    public var candidateThumbnail: CompanionPackThumbnail? {
+        guard let previewCandidate, candidateID == previewCandidate,
+              previewStatus == .loaded(previewCandidate) else { return nil }
+        return thumbnail
+    }
+
+    public func previewSelectedPack() {
+        sync()
+        guard canSelect, let id = candidateID, let owner else { notice = .rejected; return }
+        previewCandidate = id
+        if owner.requestAssetPreview(id) { notice = .none }
+        else { previewCandidate = nil; notice = .rejected }
+    }
+
     public func refreshInventory() {
         sync()
         guard canOperate, let owner else { notice = .rejected; return }
@@ -65,6 +91,14 @@ public final class CompanionHostAssetSettingsModel {
         }
         if inventoryStatus != nextInventoryStatus { inventoryStatus = nextInventoryStatus }
         let nextSession = owner?.decision.assetSession
+        let nextPreview = owner?.assetPreviewStatus ?? .idle
+        if nextPreview != previewStatus {
+            previewStatus = nextPreview
+            thumbnail = owner?.assetThumbnail
+        }
+        if nextSession != assetSession || nextPreview == .idle {
+            previewCandidate = nil
+        }
         let nextStatus = owner?.assetStatus ?? .idle
         let nextBusy = owner?.isAssetWorkerBusy ?? false
         let nextAvailability = owner?.decision.availability ?? .releaseBlocked
