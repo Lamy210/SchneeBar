@@ -397,3 +397,83 @@ private func acquisitionCatalogue() throws -> CompanionAssetCatalog {
     owner.enableAutomaticAssetRestore()
     #expect(!owner.isAssetWorkerBusy && probe.started() == [prior, saved])
 }
+
+
+@Test @MainActor func hostStaticPreviewDoesNotReplaceRunningCharacterAndRejectsStaleCandidate() async throws {
+    let name = "SchneeBarTests.staticPreview.\(UUID())"
+    let defaults = try #require(UserDefaults(suiteName: name))
+    defer { defaults.removePersistentDomain(forName: name) }
+    let store = CompanionHostPreferenceStore(defaults: defaults)
+    try store.save(.init(enabled: true, freeze: true, allowLocalEvents: true))
+    let admitted = UUID(), selected = UUID(), bad = UUID()
+    let probe = AcquisitionProbe(blockedID: UUID(), failedID: bad, catalogue: try acquisitionCatalogue())
+    let button = NSButton()
+    button.image = NSImage(size: NSSize(width: 12, height: 12))
+    let owner = CompanionHostComposition(button: button, store: store,
+        load: { try probe.load($0) },
+        makeCPU: { runtime in CompanionSharedCPURefresh(runtime: runtime, read: { throw CancellationError() }) })
+    defer { owner.stop() }
+    let editor = owner.assetSettings
+    owner.updateEnvironment(.init(releaseApproved: true, ownsMenuSurface: true))
+    #expect(owner.requestInstalledAsset(admitted))
+    try await waitForAcquisition { !editor.isBusy }
+    let session = try #require(owner.demand.localEventSession)
+    let image = try #require(button.image)
+    editor.packIDText = selected.uuidString
+    editor.previewSelectedPack()
+    #expect(editor.candidatePreviewStatus == .loading(selected) && editor.isBusy)
+    try await waitForAcquisition { !editor.isBusy }
+    let thumbnail = try #require(editor.candidateThumbnail)
+    #expect(thumbnail.image.width == 4 && thumbnail.image.height == 2)
+    #expect(editor.candidatePreviewStatus == .loaded(selected))
+    #expect(owner.assetStatus == .loaded(admitted) && owner.demand.localEventSession == session)
+    #expect(button.image === image)
+    editor.packIDText = bad.uuidString
+    #expect(editor.candidateThumbnail == nil && editor.candidatePreviewStatus == .idle)
+    editor.packIDText = selected.uuidString
+    #expect(editor.candidateThumbnail == nil)
+    editor.packIDText = bad.uuidString
+    editor.previewSelectedPack()
+    try await waitForAcquisition { !editor.isBusy }
+    #expect(editor.candidatePreviewStatus == .failed(bad) && editor.candidateThumbnail == nil)
+    #expect(owner.assetStatus == .loaded(admitted) && owner.demand.localEventSession == session)
+    #expect(button.image === image)
+    owner.updateEnvironment(.init(releaseApproved: true, awake: false, ownsMenuSurface: true))
+    #expect(owner.assetThumbnail == nil && editor.candidatePreviewStatus == .idle)
+    #expect(probe.peakWorkers() == 1)
+}
+
+@Test @MainActor func hostStaticPreviewRevokesBlockedWorkerWithoutPublishingOldImage() async throws {
+    let name = "SchneeBarTests.previewDrain.\(UUID())"
+    let defaults = try #require(UserDefaults(suiteName: name))
+    defer { defaults.removePersistentDomain(forName: name) }
+    let store = CompanionHostPreferenceStore(defaults: defaults)
+    try store.save(.init(enabled: true, freeze: true))
+    let blocked = UUID(), next = UUID()
+    let probe = AcquisitionProbe(blockedID: blocked, failedID: UUID(), catalogue: try acquisitionCatalogue())
+    defer { probe.release() }
+    let button = NSButton()
+    button.image = NSImage(size: NSSize(width: 12, height: 12))
+    let owner = CompanionHostComposition(button: button, store: store,
+        load: { try probe.load($0) },
+        makeCPU: { runtime in CompanionSharedCPURefresh(runtime: runtime, read: { throw CancellationError() }) })
+    defer { owner.stop() }
+    let editor = owner.assetSettings
+    owner.updateEnvironment(.init(releaseApproved: true, ownsMenuSurface: true))
+    editor.packIDText = blocked.uuidString
+    editor.previewSelectedPack()
+    try await waitForAcquisition { probe.started() == [blocked] }
+    #expect(!owner.requestInstalledAsset(next) && !owner.requestAssetPreview(next))
+    owner.updateEnvironment(.init(releaseApproved: true, awake: false, ownsMenuSurface: true))
+    owner.updateEnvironment(.init(releaseApproved: true, ownsMenuSurface: true))
+    #expect(editor.isBusy && owner.assetThumbnail == nil && editor.candidatePreviewStatus == .idle)
+    #expect(!owner.requestAssetPreview(next))
+    probe.release()
+    try await waitForAcquisition { !editor.isBusy }
+    #expect(owner.assetThumbnail == nil && owner.assetStatus == .idle)
+    editor.packIDText = next.uuidString
+    editor.previewSelectedPack()
+    try await waitForAcquisition { !editor.isBusy }
+    #expect(editor.candidatePreviewStatus == .loaded(next) && editor.candidateThumbnail != nil)
+    #expect(!owner.decision.rendersCharacter && probe.peakWorkers() == 1)
+}

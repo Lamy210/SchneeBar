@@ -15,10 +15,10 @@ public final class CompanionOwnedAssetAcquisition {
 
     private let bridge: CompanionHostRuntimeBridge
     private enum Request: Sendable {
-        case installed(UUID), saved, save(UUID), clearSaved, inventory
+        case installed(UUID), saved, save(UUID), clearSaved, inventory, preview(UUID)
         var requiresExclusiveSlot: Bool {
             switch self {
-            case .save, .clearSaved, .inventory: true
+            case .save, .clearSaved, .inventory, .preview: true
             case .installed, .saved: false
             }
         }
@@ -28,10 +28,14 @@ public final class CompanionOwnedAssetAcquisition {
     private enum Output: Sendable {
         case selection(Selection)
         case inventory(CompanionOwnedPackStore.Inventory)
+        case preview(CompanionPackThumbnail)
     }
     public enum InventoryStatus: Equatable, Sendable { case idle, loading, loaded, failed }
     public private(set) var inventory: CompanionOwnedPackStore.Inventory?
     public private(set) var inventoryStatus: InventoryStatus = .idle
+    public enum PreviewStatus: Equatable, Sendable { case idle, loading(UUID), loaded(UUID), failed(UUID) }
+    public private(set) var previewStatus: PreviewStatus = .idle
+    public private(set) var thumbnail: CompanionPackThumbnail?
     private let queue: CompanionImportQueue<Request, Output>
     private let canReadInventory: Bool
     private let canReadSelection: Bool
@@ -83,6 +87,8 @@ public final class CompanionOwnedAssetAcquisition {
             case .inventory:
                 guard let readInventory else { throw CancellationError() }
                 return .inventory(try readInventory())
+            case .preview(let id):
+                return .preview(try CompanionPackThumbnail(catalogue: load(id)))
             }
         }
         queue.onIdle = { [weak self] in self?.onDrained?() }
@@ -142,6 +148,7 @@ public final class CompanionOwnedAssetAcquisition {
         }
         pending = ticket
         exclusiveInFlight = true
+        clearPreview()
         inventory = nil
         inventoryStatus = .loading
         queue.submit(.inventory) { [weak self] result in
@@ -165,6 +172,46 @@ public final class CompanionOwnedAssetAcquisition {
         return true
     }
 
+    /// Validate the chosen pack in the existing worker, then retain one
+    /// small static bitmap. Never adopt the catalogue or persist selection.
+    @discardableResult
+    public func requestPreview(_ id: UUID) -> Bool {
+        guard !queue.isBusy else { return false }
+        guard let ticket = bridge.beginAssetRequest(),
+              let session = bridge.decision.assetSession else {
+            discardIfRevoked()
+            return false
+        }
+        pending = ticket
+        exclusiveInFlight = true
+        thumbnail = nil
+        previewStatus = .loading(id)
+        queue.submit(.preview(id)) { [weak self] result in
+            guard let self, self.pending == ticket else { return }
+            self.pending = nil
+            self.exclusiveInFlight = false
+            self.bridge.refreshPreferences()
+            self.bridge.cancelAssetRequest(ticket)
+            guard self.bridge.decision.assetSession == session else {
+                self.cancel()
+                self.onCompletion?()
+                return
+            }
+            if case let .success(.preview(value)) = result {
+                self.thumbnail = value
+                self.previewStatus = .loaded(id)
+            } else {
+                self.previewStatus = .failed(id)
+            }
+        }
+        return true
+    }
+
+    private func clearPreview() {
+        thumbnail = nil
+        previewStatus = .idle
+    }
+
     private func submit(_ request: Request, status: Status, failure: Status) -> Bool {
         guard !queue.isBusy || (!exclusiveInFlight && !request.requiresExclusiveSlot) else { return false }
         guard let ticket = bridge.beginAssetRequest() else {
@@ -173,6 +220,7 @@ public final class CompanionOwnedAssetAcquisition {
         }
         pending = ticket
         exclusiveInFlight = request.requiresExclusiveSlot
+        clearPreview()
         self.status = status
         queue.submit(request) { [weak self] result in
             guard let self, self.pending == ticket else { return }
@@ -190,7 +238,7 @@ public final class CompanionOwnedAssetAcquisition {
             case .success(.selection(.unavailable(let id))):
                 catalogue = nil
                 adoptedStatus = .savedAssetUnavailable(id)
-            case .failure, .success(.inventory):
+            case .failure, .success(.inventory), .success(.preview):
                 catalogue = nil
                 adoptedStatus = failure
             }
@@ -210,6 +258,7 @@ public final class CompanionOwnedAssetAcquisition {
             self.pending = nil
         }
         queue.cancel()
+        clearPreview()
         inventory = nil
         inventoryStatus = .idle
         status = .idle
