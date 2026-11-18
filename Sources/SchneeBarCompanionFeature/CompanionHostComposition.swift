@@ -76,6 +76,8 @@ public final class CompanionHostComposition {
         self.init(button: button, store: store,
             load: { try CompanionOwnedPackStore.load(id: $0, from: privateRoot) },
             readSelection: { try CompanionOwnedPackStore.readSelection(in: privateRoot) },
+            saveSelection: { try CompanionOwnedPackStore.select(id: $0, in: privateRoot) },
+            clearSelection: { try CompanionOwnedPackStore.selectBuiltIn(in: privateRoot) },
             makeCPU: { CompanionSharedCPURefresh(runtime: $0, sampler: sampler) },
             onDemandChanged: onDemandChanged)
     }
@@ -83,6 +85,8 @@ public final class CompanionHostComposition {
     init(button: NSButton, store: CompanionHostPreferenceStore,
          load: @escaping @Sendable (UUID) throws -> CompanionAssetCatalog,
          readSelection: (@Sendable () throws -> CompanionOwnedPackStore.ReadOnlySelection)? = nil,
+         saveSelection: (@Sendable (UUID) throws -> CompanionOwnedPackStore.Selection)? = nil,
+         clearSelection: (@Sendable () throws -> Void)? = nil,
          makeCPU: (CompanionRuntimeCoordinator) -> CompanionSharedCPURefresh,
          onDemandChanged: @escaping @MainActor (Demand) -> Void = { _ in }) {
         let binding = Binding(button: button)
@@ -91,7 +95,8 @@ public final class CompanionHostComposition {
         )
         let runtime = CompanionRuntimeCoordinator(renderer: renderer)
         let bridge = CompanionHostRuntimeBridge(store: store, runtime: runtime)
-        let acquisition = CompanionOwnedAssetAcquisition(bridge: bridge, load: load, readSelection: readSelection)
+        let acquisition = CompanionOwnedAssetAcquisition(bridge: bridge, load: load,
+            readSelection: readSelection, saveSelection: saveSelection, clearSelection: clearSelection)
         self.binding = binding
         self.store = store
         self.runtime = runtime
@@ -140,6 +145,26 @@ public final class CompanionHostComposition {
         guard !isStopped else { return false }
         guard binding.check() else { stop(); return false }
         let accepted = acquisition.restoreSavedSelection()
+        publishDemand()
+        return accepted
+    }
+
+    /// Explicit user action only, distinct from read-only display requests.
+    @discardableResult
+    public func saveInstalledAssetSelection(_ id: UUID) -> Bool {
+        guard !isStopped else { return false }
+        guard binding.check() else { stop(); return false }
+        let accepted = acquisition.saveInstalledSelection(id)
+        publishDemand()
+        return accepted
+    }
+
+    /// Explicit deselection, not automatic repair of a broken record.
+    @discardableResult
+    public func clearSavedAssetSelection() -> Bool {
+        guard !isStopped else { return false }
+        guard binding.check() else { stop(); return false }
+        let accepted = acquisition.clearSavedSelection()
         publishDemand()
         return accepted
     }

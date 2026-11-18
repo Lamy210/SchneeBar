@@ -1,0 +1,7 @@
+# C3s draft: explicit durable host selection
+
+Stacked on #424. The host exposes separate explicit save and clear actions for the owned library. Display-only installed ID and read-only restoration remain non-mutating. All four operations use the same worker slot. A mutation can start only when idle, and no other request may supersede a running or cancelled-but-draining mutation. Existing exclusive root lock and validated atomic selection publication remain the persistence boundary.
+
+Success reports selectionSaved or selectionCleared only after a current publication ticket accepts the result. Failure falls back to the original host image and reports selectionCommitFailed; the caller should re-read the record rather than assume the disk outcome. The previously committed selection is preserved on candidate validation failure. A lifecycle revocation or explicit cancellation suppresses late UI publication, but cannot roll back an already committed rename/unlink. After cancellation the caller must wait for the worker to drain and explicitly restore the saved selection. No automatic retry, repair, or commit-on-draft-edit. The provided root is private and app-owned; same-user noncooperating writes remain outside the guarantee.
+
+Fixtures exercise mutual exclusion across save, read, clear and lifecycle revocation, and actual owned-library display-only versus explicit save, invalid candidate, re-read and clear. No UI picker or automatic startup, shipping dependencies, new rights approval, or release. Real Mac testing and ADR/main promotion gates remain.

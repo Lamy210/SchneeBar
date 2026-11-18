@@ -164,3 +164,41 @@ private func acquisitionCatalogue() throws -> CompanionAssetCatalog {
     #expect(probe.started() == [saved, latest] && probe.peakWorkers() == 1)
     #expect(loader.status == .loaded(latest) && loader.decision.rendersCharacter)
 }
+
+
+@Test @MainActor func ownedAssetSelectionCommitCannotOverlapReadsOrOtherWrites() async throws {
+    let name = "SchneeBarTests.assetCommit.\(UUID())"
+    let defaults = try #require(UserDefaults(suiteName: name))
+    defer { defaults.removePersistentDomain(forName: name) }
+    let store = CompanionHostPreferenceStore(defaults: defaults)
+    try store.save(.init(enabled: true, freeze: true))
+    let runtime = CompanionRuntimeCoordinator(renderer: CompanionMenuBarRenderer(onFrame: { _ in }, onClear: {}))
+    let bridge = CompanionHostRuntimeBridge(store: store, runtime: runtime)
+    let writing = UUID(), reading = UUID()
+    let probe = AcquisitionProbe(blockedID: writing, failedID: UUID(), catalogue: try acquisitionCatalogue())
+    defer { probe.release() }
+    let loader = CompanionOwnedAssetAcquisition(bridge: bridge, load: { try probe.load($0) },
+        readSelection: { .installed(id: writing, catalogue: try probe.load(reading)) },
+        saveSelection: { .installed(id: $0, catalogue: try probe.load($0)) },
+        clearSelection: { _ = try probe.load(reading) })
+    defer { loader.stop() }
+    #expect(!loader.saveInstalledSelection(writing))
+    loader.updateEnvironment(.init(releaseApproved: true, ownsMenuSurface: true))
+    #expect(loader.saveInstalledSelection(writing))
+    try await waitForAcquisition { probe.started() == [writing] }
+    #expect(loader.status == .savingSelection(writing))
+    #expect(!loader.request(reading) && !loader.restoreSavedSelection())
+    #expect(!loader.clearSavedSelection() && !loader.saveInstalledSelection(reading))
+    loader.updateEnvironment(.init(releaseApproved: true, awake: false, ownsMenuSurface: true))
+    #expect(loader.status == .idle && loader.isBusy)
+    loader.updateEnvironment(.init(releaseApproved: true, ownsMenuSurface: true))
+    #expect(!loader.restoreSavedSelection() && !loader.request(reading))
+    probe.release()
+    try await waitForAcquisition { !loader.isBusy }
+    #expect(loader.status == .idle && !loader.decision.rendersCharacter)
+    #expect(loader.restoreSavedSelection())
+    #expect(!loader.saveInstalledSelection(reading))
+    try await waitForAcquisition { !loader.isBusy }
+    #expect(loader.status == .loaded(writing))
+    #expect(probe.started() == [writing, reading] && probe.peakWorkers() == 1)
+}
