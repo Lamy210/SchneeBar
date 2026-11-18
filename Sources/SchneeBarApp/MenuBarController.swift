@@ -310,7 +310,7 @@ final class MenuBarController: NSObject {
               !Task.isCancelled else { return }
         let cpuID = cpuProvider.descriptor.id
         if cpuDemandEnabled,
-           await cpuSampler.refreshPlan().isDue(.widget),
+           await cpuSampler.refreshPlan().requiresRefresh(.widget),
            isCurrentRuntime(generation), configurationRevision == revision, !Task.isCancelled {
             _ = await widgetEngine.refreshIfEnabled(id: cpuID)
         }
