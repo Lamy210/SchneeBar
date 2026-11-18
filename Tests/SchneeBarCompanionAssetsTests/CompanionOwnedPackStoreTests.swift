@@ -350,3 +350,63 @@ private func withStore(_ body: (URL, URL) throws -> Void) throws {
         #expect(!unsafe.canInstall)
     }
 }
+
+
+@Test func readOnlySelectionRetainsUnavailableRecordAndNeverRepairs() throws {
+    try withStore { source, target in
+        if case .builtIn = try CompanionOwnedPackStore.readSelection(in: target) {} else {
+            Issue.record("Empty selection must be built-in")
+        }
+        let installed = try CompanionOwnedPackStore.install(from: source, into: target)
+        _ = try CompanionOwnedPackStore.select(id: installed.id, in: target)
+        let record = target.appendingPathComponent(CompanionOwnedPackStore.selectionName)
+        let original = try Data(contentsOf: record)
+        if case let .installed(id, catalogue) = try CompanionOwnedPackStore.readSelection(in: target) {
+            #expect(id == installed.id)
+            #expect(catalogue.asset(for: .run).frames.count == 2)
+        } else { Issue.record("Valid committed choice must decode") }
+        #expect(try Data(contentsOf: record) == original)
+        let pack = target.appendingPathComponent(CompanionOwnedPackStore.packName(installed.id))
+        try Data([1, 2, 3]).write(to: pack.appendingPathComponent("run.gif"))
+        let names = try FileManager.default.contentsOfDirectory(atPath: target.path).sorted()
+        if case let .unavailable(id) = try CompanionOwnedPackStore.readSelection(in: target) {
+            #expect(id == installed.id)
+        } else { Issue.record("Invalid asset must be unavailable") }
+        #expect(try Data(contentsOf: record) == original)
+        #expect(try FileManager.default.contentsOfDirectory(atPath: target.path).sorted() == names)
+        // Explicit recovery retains its original, mutating semantics.
+        if case .unavailable = try CompanionOwnedPackStore.restoreSelection(in: target) {} else {
+            Issue.record("Explicit recovery must report invalid selection")
+        }
+        #expect(!FileManager.default.fileExists(atPath: record.path))
+    }
+}
+
+@Test func readOnlySelectionRejectsMalformedLinkedAndBusyRootWithoutMutation() throws {
+    try withStore { source, target in
+        let installed = try CompanionOwnedPackStore.install(from: source, into: target)
+        _ = try CompanionOwnedPackStore.select(id: installed.id, in: target)
+        let record = target.appendingPathComponent(CompanionOwnedPackStore.selectionName)
+        let malformed = Data("invalid".utf8)
+        try malformed.write(to: record)
+        #expect(throws: CompanionOwnedPackError.invalidSelection) {
+            try CompanionOwnedPackStore.readSelection(in: target)
+        }
+        #expect(try Data(contentsOf: record) == malformed)
+        try FileManager.default.removeItem(at: record)
+        let original = source.appendingPathComponent("original.gif")
+        let originalBytes = try Data(contentsOf: original)
+        try FileManager.default.createSymbolicLink(at: record, withDestinationURL: original)
+        #expect(throws: CompanionOwnedPackError.invalidSelection) {
+            try CompanionOwnedPackStore.readSelection(in: target)
+        }
+        #expect(try FileManager.default.destinationOfSymbolicLink(atPath: record.path) == original.path)
+        #expect(try Data(contentsOf: original) == originalBytes)
+        let fd = try CompanionOwnedPackStore.openRoot(target)
+        defer { _ = Darwin.close(fd) }
+        try CompanionOwnedPackStore.lockRoot(fd, exclusive: true)
+        #expect(throws: CompanionOwnedPackError.busy) {
+            try CompanionOwnedPackStore.readSelection(in: target)
+        }
+    }
+}
