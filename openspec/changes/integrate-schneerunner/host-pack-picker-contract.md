@@ -1,0 +1,7 @@
+# C3u draft: host installed pack metadata picker
+
+Stacked on #426. The host explicitly requests metadata inventory through the same bounded worker slot. No image decoding, source path enumeration, implicit selection mutation or CPU timer is added. Inventory requests only start when idle and hold the exclusive slot until actual drain. Completion is fenced by current bridge ticket and asset session; invalidated results are dropped. Metadata refresh does not replace the admitted catalogue, reset CPU input or change local event session on an otherwise unchanged host. The owner republishes current demand on actual drain.
+
+The settings section lists valid manifest names with a short UUID distinction, disables unavailable metadata entries, allows explicit refresh, and clears a previously listed candidate when that snapshot is invalidated. Metadata is not image validation: display/save revalidate the pack by UUID. Keep advanced manual UUID entry for development. Selection remains explicit; listing and choosing do not save. No background refresh, thumbnails, import, repair, deletion, or shipping app dependency.
+
+Two fixtures verify real owned-library metadata versus corrupt images, unavailable manifest, selection-byte preservation, active session stability, and blocked inventory cancellation/drain with no worker overlap. Mac native CI, accessibility/keyboard/localization, actual application wiring, approved artwork, ADR and main promotion remain pending.
