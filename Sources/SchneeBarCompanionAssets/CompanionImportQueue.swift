@@ -28,6 +28,10 @@ public final class CompanionImportQueue<Input: Sendable, Output: Sendable> {
     /// True until the active worker actually exits, including after cancel().
     public var isBusy: Bool { active != nil }
 
+    /// Called when the real worker slot becomes idle, even after cancellation.
+    /// Observation only: do not synchronously submit/cancel from this callback.
+    public var onIdle: (@MainActor () -> Void)?
+
     /// Superseded requests receive no callback. Only the latest request can
     /// publish success or error on the main actor. Owners must capture weakly
     /// in the callback if they retain the queue.
@@ -85,5 +89,6 @@ public final class CompanionImportQueue<Input: Sendable, Output: Sendable> {
             self.pending = nil
             start(pending)
         }
+        if active == nil { onIdle?() }
     }
 }
