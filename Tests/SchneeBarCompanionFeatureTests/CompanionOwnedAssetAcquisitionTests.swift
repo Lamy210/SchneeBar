@@ -133,3 +133,34 @@ private func acquisitionCatalogue() throws -> CompanionAssetCatalog {
     #expect(loader.status == .idle && loader.decision.availability == .disabled)
     #expect(runtime.displayedFrameIndex == nil && !loader.request(good))
 }
+
+
+@Test @MainActor func ownedAssetRestoreSharesQueueAndRejectsRevokedCompletion() async throws {
+    let name = "SchneeBarTests.assetRestore.\(UUID())"
+    let defaults = try #require(UserDefaults(suiteName: name))
+    defer { defaults.removePersistentDomain(forName: name) }
+    let store = CompanionHostPreferenceStore(defaults: defaults)
+    try store.save(.init(enabled: true, freeze: true))
+    let runtime = CompanionRuntimeCoordinator(renderer: CompanionMenuBarRenderer(onFrame: { _ in }, onClear: {}))
+    let bridge = CompanionHostRuntimeBridge(store: store, runtime: runtime)
+    let saved = UUID(), latest = UUID()
+    let probe = AcquisitionProbe(blockedID: saved, failedID: UUID(), catalogue: try acquisitionCatalogue())
+    defer { probe.release() }
+    let loader = CompanionOwnedAssetAcquisition(bridge: bridge, load: { try probe.load($0) },
+        readSelection: { .installed(id: saved, catalogue: try probe.load(saved)) })
+    defer { loader.stop() }
+    #expect(!loader.restoreSavedSelection())
+    loader.updateEnvironment(.init(releaseApproved: true, ownsMenuSurface: true))
+    #expect(loader.restoreSavedSelection())
+    try await waitForAcquisition { probe.started() == [saved] }
+    #expect(loader.status == .restoring)
+    loader.updateEnvironment(.init(releaseApproved: true, awake: false, ownsMenuSurface: true))
+    #expect(loader.status == .idle && loader.isBusy)
+    loader.updateEnvironment(.init(releaseApproved: true, ownsMenuSurface: true))
+    #expect(loader.request(latest))
+    #expect(probe.started() == [saved])
+    probe.release()
+    try await waitForAcquisition { !loader.isBusy }
+    #expect(probe.started() == [saved, latest] && probe.peakWorkers() == 1)
+    #expect(loader.status == .loaded(latest) && loader.decision.rendersCharacter)
+}
