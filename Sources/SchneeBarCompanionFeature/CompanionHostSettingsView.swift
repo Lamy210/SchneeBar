@@ -139,6 +139,19 @@ private struct CompanionHostAssetSettingsSection: View {
                 TextField("Installed pack UUID", text: $model.packIDText)
                     .disabled(!model.canOperate)
             }
+            Button("Preview selected pack") { model.previewSelectedPack() }
+                .disabled(!model.canSelect)
+            if let thumbnail = model.candidateThumbnail {
+                Image(decorative: thumbnail.image, scale: 1, orientation: .up)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 96, height: 96)
+                    .accessibilityLabel("Static preview of selected character pack")
+            }
+            if case .failed = model.candidatePreviewStatus {
+                Text("Unable to validate the selected pack for preview.")
+                    .foregroundStyle(.secondary)
+            }
             HStack {
                 Button("Display") { model.displayCandidate() }
                 Button("Save selection") { model.saveCandidate() }
