@@ -1,0 +1,7 @@
+# C3p draft: explicit host notification attachment
+
+Stacked on #421. The reusable main-actor session owner stops a registration before opening its successor; its independent generation fences callbacks even when an old UUID is reused or the transport calls back during removal. A synchronous callback revoking the session during registration causes the just-created registration to be closed rather than retained. No per-event task or implicit subscribe.
+
+CompanionHostComposition optionally attaches this transport via an explicit enable method (default off). Choose this or a separately managed external transport, never both. It derives the subscription exclusively from the published current session; committed opt-in, active catalogue, approval and image ownership are already required by the bridge. Disabling the transport detaches it without changing stored preferences; terminal stop removes the observer before revoking other runtime state. A later attachment still requires current runtime admission. No new status item, polling, sender authentication, shipping app dependency or registered production observer.
+
+Two injected transport fixtures cover same-session idempotence, stop-before-open, stale and mismatched callbacks, UUID reuse and reentrant revocation during registration. They do not exercise the real distributed notification server. Host ingress and preview tests remain separate; actual macOS delivery, rights, ADR, performance and release gates remain pending.
