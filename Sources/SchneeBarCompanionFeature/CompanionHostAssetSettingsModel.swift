@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import SchneeBarCompanionAssets
 import SchneeBarCompanionCore
 
 /// An isolated editor for the host-owned library. Never writes on draft
@@ -14,6 +15,8 @@ public final class CompanionHostAssetSettingsModel {
     public private(set) var isBusy = false
     public private(set) var availability: CompanionHostPolicy.Availability = .releaseBlocked
     public private(set) var clearConfirmation: UUID?
+    public private(set) var entries: [CompanionOwnedPackStore.Entry] = []
+    public private(set) var inventoryStatus: CompanionOwnedAssetAcquisition.InventoryStatus = .idle
     private var assetSession: UUID?
     @ObservationIgnored private weak var owner: CompanionHostComposition?
 
@@ -28,10 +31,32 @@ public final class CompanionHostAssetSettingsModel {
         return UUID(uuidString: packIDText.trimmingCharacters(in: .whitespacesAndNewlines))
     }
     public var canSelect: Bool { canOperate && candidateID != nil }
+    public var listedID: UUID? {
+        guard let id = candidateID, entries.contains(where: { $0.id == id && $0.name != nil }) else { return nil }
+        return id
+    }
+
+    public func chooseListedPack(_ id: UUID?) {
+        sync()
+        guard canOperate else { return }
+        guard let id else { packIDText = ""; return }
+        guard entries.contains(where: { $0.id == id && $0.name != nil }) else { return }
+        packIDText = id.uuidString
+    }
+
+    public func refreshInventory() {
+        sync()
+        guard canOperate, let owner else { notice = .rejected; return }
+        notice = owner.refreshAssetInventory() ? .none : .rejected
+    }
 
     /// Owner invokes on lifecycle changes, request start, adoption and actual drain.
     /// A stale destructive confirmation must not survive any relevant change.
     func sync() {
+        let nextEntries = owner?.assetInventory?.entries ?? []
+        let nextInventoryStatus = owner?.assetInventoryStatus ?? .idle
+        if entries != nextEntries { entries = nextEntries }
+        if inventoryStatus != nextInventoryStatus { inventoryStatus = nextInventoryStatus }
         let nextSession = owner?.decision.assetSession
         let nextStatus = owner?.assetStatus ?? .idle
         let nextBusy = owner?.isAssetWorkerBusy ?? false
