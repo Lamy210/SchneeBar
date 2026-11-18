@@ -83,6 +83,7 @@ public final class CompanionHostComposition {
             saveSelection: { try CompanionOwnedPackStore.select(id: $0, in: privateRoot) },
             clearSelection: { try CompanionOwnedPackStore.selectBuiltIn(in: privateRoot) },
             readInventory: { try CompanionOwnedPackStore.inventory(in: privateRoot) },
+            installPack: { try CompanionOwnedPackStore.install(from: $0, into: privateRoot).id },
             makeCPU: { CompanionSharedCPURefresh(runtime: $0, sampler: sampler) },
             onDemandChanged: onDemandChanged)
     }
@@ -93,6 +94,7 @@ public final class CompanionHostComposition {
          saveSelection: (@Sendable (UUID) throws -> CompanionOwnedPackStore.Selection)? = nil,
          clearSelection: (@Sendable () throws -> Void)? = nil,
          readInventory: (@Sendable () throws -> CompanionOwnedPackStore.Inventory)? = nil,
+         installPack: (@Sendable (URL) throws -> UUID)? = nil,
          makeCPU: (CompanionRuntimeCoordinator) -> CompanionSharedCPURefresh,
          onDemandChanged: @escaping @MainActor (Demand) -> Void = { _ in }) {
         let binding = Binding(button: button)
@@ -103,7 +105,7 @@ public final class CompanionHostComposition {
         let bridge = CompanionHostRuntimeBridge(store: store, runtime: runtime)
         let acquisition = CompanionOwnedAssetAcquisition(bridge: bridge, load: load,
             readSelection: readSelection, saveSelection: saveSelection, clearSelection: clearSelection,
-            readInventory: readInventory)
+            readInventory: readInventory, installPack: installPack)
         self.binding = binding
         self.store = store
         self.runtime = runtime
@@ -135,6 +137,7 @@ public final class CompanionHostComposition {
     public var assetInventoryStatus: CompanionOwnedAssetAcquisition.InventoryStatus { acquisition.inventoryStatus }
     public var assetPreviewStatus: CompanionOwnedAssetAcquisition.PreviewStatus { acquisition.previewStatus }
     public var assetThumbnail: CompanionPackThumbnail? { acquisition.thumbnail }
+    public var assetImportStatus: CompanionOwnedAssetAcquisition.ImportStatus { acquisition.importStatus }
     /// Retain this owner until false after stop before creating a successor.
     public var isAssetWorkerBusy: Bool { acquisition.isBusy }
 
@@ -211,6 +214,18 @@ public final class CompanionHostComposition {
         guard !isStopped else { return false }
         guard binding.check() else { stop(); return false }
         let accepted = acquisition.requestPreview(id)
+        publishDemand()
+        return accepted
+    }
+
+    /// The caller must pass the session captured before presenting the file
+    /// chooser. A stale modal result must not gain new write authority.
+    @discardableResult
+    public func importAssetPack(from url: URL, session: UUID) -> Bool {
+        guard !isStopped else { return false }
+        guard binding.check() else { stop(); return false }
+        guard decision.assetSession == session else { return false }
+        let accepted = acquisition.importPack(from: url)
         publishDemand()
         return accepted
     }
