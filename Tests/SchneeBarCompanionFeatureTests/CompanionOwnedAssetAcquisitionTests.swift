@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import SchneeBarCompanionAssets
 import SchneeBarCompanionCore
@@ -201,4 +202,85 @@ private func acquisitionCatalogue() throws -> CompanionAssetCatalog {
     try await waitForAcquisition { !loader.isBusy }
     #expect(loader.status == .loaded(writing))
     #expect(probe.started() == [writing, reading] && probe.peakWorkers() == 1)
+}
+
+
+@Test @MainActor func hostAssetEditorRejectsDraftAndStaleClearConfirmation() async throws {
+    let name = "SchneeBarTests.assetEditor.\(UUID())"
+    let defaults = try #require(UserDefaults(suiteName: name))
+    defer { defaults.removePersistentDomain(forName: name) }
+    let store = CompanionHostPreferenceStore(defaults: defaults)
+    let id = UUID(), clearID = UUID()
+    let probe = AcquisitionProbe(blockedID: UUID(), failedID: UUID(), catalogue: try acquisitionCatalogue())
+    let button = NSButton()
+    button.image = NSImage(size: NSSize(width: 12, height: 12))
+    let owner = CompanionHostComposition(button: button, store: store,
+        load: { try probe.load($0) },
+        saveSelection: { .installed(id: $0, catalogue: try probe.load($0)) },
+        clearSelection: { _ = try probe.load(clearID) },
+        makeCPU: { runtime in CompanionSharedCPURefresh(runtime: runtime, read: { throw CancellationError() }) })
+    defer { owner.stop() }
+    let editor = owner.assetSettings
+    owner.updateEnvironment(.init(releaseApproved: true, ownsMenuSurface: true))
+    editor.packIDText = id.uuidString
+    owner.settings.draft.enabled = true
+    #expect(!editor.canSelect && probe.started().isEmpty)
+    editor.saveCandidate()
+    #expect(editor.notice == .rejected && probe.started().isEmpty)
+    owner.settings.save()
+    #expect(editor.canSelect)
+    editor.packIDText = "not a UUID"
+    #expect(!editor.canSelect)
+    editor.packIDText = id.uuidString
+    #expect(probe.started().isEmpty)
+    editor.saveCandidate()
+    #expect(editor.isBusy && !editor.canOperate)
+    try await waitForAcquisition { !editor.isBusy }
+    #expect(editor.status == .selectionSaved(id) && editor.canOperate)
+    editor.requestClear()
+    let stale = try #require(editor.clearConfirmation)
+    owner.updateEnvironment(.init(releaseApproved: true, awake: false, ownsMenuSurface: true))
+    #expect(editor.clearConfirmation == nil && !editor.canOperate)
+    owner.updateEnvironment(.init(releaseApproved: true, ownsMenuSurface: true))
+    editor.confirmClear(stale)
+    #expect(probe.started() == [id])
+    editor.requestClear()
+    let token = try #require(editor.clearConfirmation)
+    editor.confirmClear(token)
+    editor.confirmClear(token)
+    try await waitForAcquisition { !editor.isBusy }
+    #expect(editor.status == .selectionCleared && probe.started() == [id, clearID])
+}
+
+@Test @MainActor func hostAssetEditorObservesCancelledWorkerDrainWithoutPolling() async throws {
+    let name = "SchneeBarTests.assetEditorDrain.\(UUID())"
+    let defaults = try #require(UserDefaults(suiteName: name))
+    defer { defaults.removePersistentDomain(forName: name) }
+    let store = CompanionHostPreferenceStore(defaults: defaults)
+    try store.save(.init(enabled: true, freeze: true))
+    let id = UUID()
+    let probe = AcquisitionProbe(blockedID: id, failedID: UUID(), catalogue: try acquisitionCatalogue())
+    defer { probe.release() }
+    let button = NSButton()
+    button.image = NSImage(size: NSSize(width: 12, height: 12))
+    let owner = CompanionHostComposition(button: button, store: store,
+        load: { try probe.load($0) },
+        saveSelection: { .installed(id: $0, catalogue: try probe.load($0)) },
+        makeCPU: { runtime in CompanionSharedCPURefresh(runtime: runtime, read: { throw CancellationError() }) })
+    defer { owner.stop() }
+    let editor = owner.assetSettings
+    owner.updateEnvironment(.init(releaseApproved: true, ownsMenuSurface: true))
+    editor.packIDText = id.uuidString
+    editor.saveCandidate()
+    try await waitForAcquisition { probe.started() == [id] }
+    owner.updateEnvironment(.init(releaseApproved: true, awake: false, ownsMenuSurface: true))
+    #expect(editor.isBusy && editor.status == .idle && !editor.canOperate)
+    owner.updateEnvironment(.init(releaseApproved: true, ownsMenuSurface: true))
+    #expect(editor.isBusy && !editor.canOperate)
+    probe.release()
+    try await waitForAcquisition { !editor.isBusy }
+    #expect(editor.canOperate && editor.status == .idle)
+    #expect(!owner.decision.rendersCharacter && probe.peakWorkers() == 1)
+    owner.stop()
+    #expect(!editor.canOperate)
 }

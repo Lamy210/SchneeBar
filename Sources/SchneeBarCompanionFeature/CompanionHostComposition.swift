@@ -67,6 +67,8 @@ public final class CompanionHostComposition {
         store: store, onCommittedRefresh: { [weak self] in self?.refreshPreferences() }
     )
 
+    public private(set) lazy var assetSettings = CompanionHostAssetSettingsModel(owner: self)
+
     /// No new status item, sampler, automatic event listener or CPU loop. The host must
     /// serialize its combined sampler demands and never reenter this owner
     /// synchronously from onDemandChanged.
@@ -109,6 +111,7 @@ public final class CompanionHostComposition {
             self.cpu.invalidate()
             self.publishDemand()
         }
+        acquisition.onDrained = { [weak self] in self?.assetSettings.sync() }
     }
 
     public var decision: CompanionHostPolicy.Decision { acquisition.decision }
@@ -238,6 +241,7 @@ public final class CompanionHostComposition {
         let active = !isStopped && binding.check()
         let next = Demand(cpu: active && runtime.wantsHostCPU,
             localEventSession: active ? runtime.localEventSession : nil)
+        assetSettings.sync()
         if demand.cpu && !next.cpu { cpu.invalidate() }
         guard demand != next else { return }
         demand = next
