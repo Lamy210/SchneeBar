@@ -1,0 +1,7 @@
+# C3v draft: opt-in lifecycle restoration
+
+Stacked on #427. The existing host may explicitly attach automatic read-only restoration, disabled by default. Each newly admitted asset session is eligible for at most one attempt, unless an explicit display/save/restore/clear/cancel has already handled that session. Only the existing committed preference and release/ownership/sleep policy admits work. No restore replaces an admitted catalogue. Failure, absent selection and invalid saved assets are not retried within that session. Resume from sleep or re-enable after a revoked asset session may read the committed record again.
+
+Use the same bounded acquisition slot. If a revoked worker is still draining, defer an eligible attempt until the idle callback, then recheck the session on the main actor after the queue finishes. Explicit requests and cancellation win; no polling, periodic retry, implicit repair or selection write. Disabling automatic restoration prevents future attempts but does not cancel an already admitted read; use the existing cancellation API. Terminal stop disables restoration and revokes outstanding work. Existing CPU/event/image ownership gates remain.
+
+Two host fixtures cover default-off, once-per-session, explicit selection precedence, wake restoration, blocked worker drain, explicit cancel and no overlapping workers. Native CI, actual app lifecycle wiring, real Mac behavior, artwork rights, ADR and main promotion remain pending. No production target dependency or shipping activation.
