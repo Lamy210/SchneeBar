@@ -240,3 +240,57 @@ private func hostCompositionCatalogue() throws -> CompanionAssetCatalog {
     owner.stop()
     #expect(!owner.restoreSavedAssetSelection())
 }
+
+
+@Test @MainActor func hostCompositionSelectionCommitAndClearPersistOnlyExplicitActions() async throws {
+    let name = "SchneeBarTests.hostCommit.\(UUID())"
+    let defaults = try #require(UserDefaults(suiteName: name))
+    defer { defaults.removePersistentDomain(forName: name) }
+    let store = CompanionHostPreferenceStore(defaults: defaults)
+    try store.save(.init(enabled: true, freeze: true, allowLocalEvents: true))
+    let tmp = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    let source = tmp.appendingPathComponent("fixture.schneerunner")
+    let root = tmp.appendingPathComponent("owned")
+    try FileManager.default.createDirectory(at: source, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: tmp) }
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false,
+        attributes: [.posixPermissions: NSNumber(value: 0o700)])
+    let gif = try #require(Data(base64Encoded: "R0lGODlhBAACAIEAAECA/wAAAAAAAAAAACH/C05FVFNDQVBFMi4wAwEAAAAh+QQACgAAACwAAAAABAACAAAIBwABCBwoMCAAIfkEARQAAQAsAAAAAAQAAgCB/0AAAAAAAAAAAAAACAcAAQgcKDAgADs="))
+    try gif.write(to: source.appendingPathComponent("run.gif"))
+    try Data(#"{"formatVersion":1,"name":"Fixture","defaultState":"run","clips":[{"state":"run","kind":"gif","path":"run.gif"}]}"#.utf8)
+        .write(to: source.appendingPathComponent("character.json"))
+    let installed = try CompanionOwnedPackStore.install(from: source, into: root)
+    let record = root.appendingPathComponent(".selection-v1")
+    let button = NSButton()
+    button.image = NSImage(size: NSSize(width: 12, height: 12))
+    let original = try #require(button.image)
+    let owner = CompanionHostComposition(button: button, store: store,
+        load: { try CompanionOwnedPackStore.load(id: $0, from: root) },
+        readSelection: { try CompanionOwnedPackStore.readSelection(in: root) },
+        saveSelection: { try CompanionOwnedPackStore.select(id: $0, in: root) },
+        clearSelection: { try CompanionOwnedPackStore.selectBuiltIn(in: root) },
+        makeCPU: { runtime in CompanionSharedCPURefresh(runtime: runtime, read: { throw CancellationError() }) })
+    defer { owner.stop() }
+    #expect(!owner.saveInstalledAssetSelection(installed.id))
+    owner.updateEnvironment(.init(releaseApproved: true, ownsMenuSurface: true))
+    #expect(owner.requestInstalledAsset(installed.id))
+    try await waitForHostComposition { !owner.isAssetWorkerBusy }
+    #expect(!FileManager.default.fileExists(atPath: record.path))
+    #expect(owner.saveInstalledAssetSelection(installed.id))
+    try await waitForHostComposition { !owner.isAssetWorkerBusy }
+    #expect(owner.assetStatus == .selectionSaved(installed.id))
+    let committed = try Data(contentsOf: record)
+    #expect(owner.demand.localEventSession != nil)
+    #expect(owner.saveInstalledAssetSelection(UUID()))
+    try await waitForHostComposition { !owner.isAssetWorkerBusy }
+    #expect(owner.assetStatus == .selectionCommitFailed)
+    #expect(try Data(contentsOf: record) == committed)
+    #expect(button.image === original && owner.demand.localEventSession == nil)
+    #expect(owner.restoreSavedAssetSelection())
+    try await waitForHostComposition { !owner.isAssetWorkerBusy }
+    #expect(owner.assetStatus == .loaded(installed.id))
+    #expect(owner.clearSavedAssetSelection())
+    try await waitForHostComposition { !owner.isAssetWorkerBusy }
+    #expect(owner.assetStatus == .selectionCleared && button.image === original)
+    #expect(!FileManager.default.fileExists(atPath: record.path))
+}
