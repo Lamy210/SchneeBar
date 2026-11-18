@@ -15,21 +15,29 @@ public final class CompanionOwnedAssetAcquisition {
 
     private let bridge: CompanionHostRuntimeBridge
     private enum Request: Sendable {
-        case installed(UUID), saved, save(UUID), clearSaved
-        var isMutation: Bool {
+        case installed(UUID), saved, save(UUID), clearSaved, inventory
+        var requiresExclusiveSlot: Bool {
             switch self {
-            case .save, .clearSaved: true
+            case .save, .clearSaved, .inventory: true
             case .installed, .saved: false
             }
         }
     }
     private enum CommitError: Error { case unexpectedSelection }
     private typealias Selection = CompanionOwnedPackStore.ReadOnlySelection
-    private let queue: CompanionImportQueue<Request, Selection>
+    private enum Output: Sendable {
+        case selection(Selection)
+        case inventory(CompanionOwnedPackStore.Inventory)
+    }
+    public enum InventoryStatus: Equatable, Sendable { case idle, loading, loaded, failed }
+    public private(set) var inventory: CompanionOwnedPackStore.Inventory?
+    public private(set) var inventoryStatus: InventoryStatus = .idle
+    private let queue: CompanionImportQueue<Request, Output>
+    private let canReadInventory: Bool
     private let canReadSelection: Bool
     private let canSaveSelection: Bool
     private let canClearSelection: Bool
-    private var mutationInFlight = false
+    private var exclusiveInFlight = false
     private var pending: CompanionHostRuntimeBridge.AssetRequest?
     public private(set) var status: Status = .idle
     /// The owner observes the final adopted result, not intermediate queue
@@ -42,33 +50,39 @@ public final class CompanionOwnedAssetAcquisition {
             try CompanionOwnedPackStore.load(id: id, from: privateRoot)
         }, readSelection: { try CompanionOwnedPackStore.readSelection(in: privateRoot) },
             saveSelection: { try CompanionOwnedPackStore.select(id: $0, in: privateRoot) },
-            clearSelection: { try CompanionOwnedPackStore.selectBuiltIn(in: privateRoot) })
+            clearSelection: { try CompanionOwnedPackStore.selectBuiltIn(in: privateRoot) },
+            readInventory: { try CompanionOwnedPackStore.inventory(in: privateRoot) })
     }
 
     init(bridge: CompanionHostRuntimeBridge,
          load: @escaping @Sendable (UUID) throws -> CompanionAssetCatalog,
          readSelection: (@Sendable () throws -> CompanionOwnedPackStore.ReadOnlySelection)? = nil,
          saveSelection: (@Sendable (UUID) throws -> CompanionOwnedPackStore.Selection)? = nil,
-         clearSelection: (@Sendable () throws -> Void)? = nil) {
+         clearSelection: (@Sendable () throws -> Void)? = nil,
+         readInventory: (@Sendable () throws -> CompanionOwnedPackStore.Inventory)? = nil) {
         self.bridge = bridge
         canReadSelection = readSelection != nil
         canSaveSelection = saveSelection != nil
         canClearSelection = clearSelection != nil
+        canReadInventory = readInventory != nil
         queue = CompanionImportQueue { request in
             switch request {
-            case .installed(let id): return .installed(id: id, catalogue: try load(id))
+            case .installed(let id): return .selection(.installed(id: id, catalogue: try load(id)))
             case .saved:
                 guard let readSelection else { throw CancellationError() }
-                return try readSelection()
+                return .selection(try readSelection())
             case .save(let id):
                 guard let saveSelection,
                       case let .installed(savedID, catalogue) = try saveSelection(id), savedID == id
                 else { throw CommitError.unexpectedSelection }
-                return .installed(id: savedID, catalogue: catalogue)
+                return .selection(.installed(id: savedID, catalogue: catalogue))
             case .clearSaved:
                 guard let clearSelection else { throw CommitError.unexpectedSelection }
                 try clearSelection()
-                return .builtIn
+                return .selection(.builtIn)
+            case .inventory:
+                guard let readInventory else { throw CancellationError() }
+                return .inventory(try readInventory())
             }
         }
         queue.onIdle = { [weak self] in self?.onDrained?() }
@@ -116,32 +130,67 @@ public final class CompanionOwnedAssetAcquisition {
         return submit(.clearSaved, status: .clearingSelection, failure: .selectionCommitFailed)
     }
 
+    /// Explicit metadata-only refresh. No catalogue replacement, CPU reset
+    /// or selection write. Share the existing worker slot.
+    @discardableResult
+    public func refreshInventory() -> Bool {
+        guard canReadInventory, !queue.isBusy else { return false }
+        guard let ticket = bridge.beginAssetRequest(),
+              let session = bridge.decision.assetSession else {
+            discardIfRevoked()
+            return false
+        }
+        pending = ticket
+        exclusiveInFlight = true
+        inventory = nil
+        inventoryStatus = .loading
+        queue.submit(.inventory) { [weak self] result in
+            guard let self, self.pending == ticket else { return }
+            self.pending = nil
+            self.exclusiveInFlight = false
+            self.bridge.refreshPreferences()
+            self.bridge.cancelAssetRequest(ticket)
+            guard self.bridge.decision.assetSession == session else {
+                self.cancel()
+                self.onCompletion?()
+                return
+            }
+            if case let .success(.inventory(value)) = result {
+                self.inventory = value
+                self.inventoryStatus = .loaded
+            } else {
+                self.inventoryStatus = .failed
+            }
+        }
+        return true
+    }
+
     private func submit(_ request: Request, status: Status, failure: Status) -> Bool {
-        guard !queue.isBusy || (!mutationInFlight && !request.isMutation) else { return false }
+        guard !queue.isBusy || (!exclusiveInFlight && !request.requiresExclusiveSlot) else { return false }
         guard let ticket = bridge.beginAssetRequest() else {
             discardIfRevoked()
             return false
         }
         pending = ticket
-        mutationInFlight = request.isMutation
+        exclusiveInFlight = request.requiresExclusiveSlot
         self.status = status
         queue.submit(request) { [weak self] result in
             guard let self, self.pending == ticket else { return }
             self.pending = nil
-            self.mutationInFlight = false
+            self.exclusiveInFlight = false
             let catalogue: CompanionAssetCatalog?
             let adoptedStatus: Status
             switch result {
-            case .success(.installed(let id, let value)):
+            case .success(.selection(.installed(let id, let value))):
                 catalogue = value
-                adoptedStatus = request.isMutation ? .selectionSaved(id) : .loaded(id)
-            case .success(.builtIn):
+                adoptedStatus = request.requiresExclusiveSlot ? .selectionSaved(id) : .loaded(id)
+            case .success(.selection(.builtIn)):
                 catalogue = nil
-                adoptedStatus = request.isMutation ? .selectionCleared : .noSavedSelection
-            case .success(.unavailable(let id)):
+                adoptedStatus = request.requiresExclusiveSlot ? .selectionCleared : .noSavedSelection
+            case .success(.selection(.unavailable(let id))):
                 catalogue = nil
                 adoptedStatus = .savedAssetUnavailable(id)
-            case .failure:
+            case .failure, .success(.inventory):
                 catalogue = nil
                 adoptedStatus = failure
             }
@@ -161,6 +210,8 @@ public final class CompanionOwnedAssetAcquisition {
             self.pending = nil
         }
         queue.cancel()
+        inventory = nil
+        inventoryStatus = .idle
         status = .idle
     }
 

@@ -284,3 +284,43 @@ private func acquisitionCatalogue() throws -> CompanionAssetCatalog {
     owner.stop()
     #expect(!editor.canOperate)
 }
+
+
+@Test @MainActor func hostInventoryReadSharesSlotAndDiscardsRevokedSnapshot() async throws {
+    let name = "SchneeBarTests.inventoryDrain.\(UUID())"
+    let defaults = try #require(UserDefaults(suiteName: name))
+    defer { defaults.removePersistentDomain(forName: name) }
+    let store = CompanionHostPreferenceStore(defaults: defaults)
+    try store.save(.init(enabled: true, freeze: true))
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false,
+        attributes: [.posixPermissions: NSNumber(value: 0o700)])
+    defer { try? FileManager.default.removeItem(at: root) }
+    let blocked = UUID()
+    let probe = AcquisitionProbe(blockedID: blocked, failedID: UUID(), catalogue: try acquisitionCatalogue())
+    defer { probe.release() }
+    let button = NSButton()
+    button.image = NSImage(size: NSSize(width: 12, height: 12))
+    let owner = CompanionHostComposition(button: button, store: store,
+        load: { try probe.load($0) },
+        saveSelection: { .installed(id: $0, catalogue: try probe.load($0)) },
+        readInventory: {
+            _ = try probe.load(blocked)
+            return try CompanionOwnedPackStore.inventory(in: root)
+        },
+        makeCPU: { runtime in CompanionSharedCPURefresh(runtime: runtime, read: { throw CancellationError() }) })
+    defer { owner.stop() }
+    let editor = owner.assetSettings
+    owner.updateEnvironment(.init(releaseApproved: true, ownsMenuSurface: true))
+    editor.refreshInventory()
+    try await waitForAcquisition { probe.started() == [blocked] }
+    #expect(editor.isBusy && editor.inventoryStatus == .loading)
+    #expect(!owner.requestInstalledAsset(UUID()) && !owner.saveInstalledAssetSelection(UUID()))
+    owner.updateEnvironment(.init(releaseApproved: true, awake: false, ownsMenuSurface: true))
+    owner.updateEnvironment(.init(releaseApproved: true, ownsMenuSurface: true))
+    #expect(!owner.refreshAssetInventory() && editor.isBusy && editor.entries.isEmpty)
+    probe.release()
+    try await waitForAcquisition { !editor.isBusy }
+    #expect(editor.inventoryStatus == .idle && editor.entries.isEmpty)
+    #expect(editor.canOperate && probe.peakWorkers() == 1)
+}
