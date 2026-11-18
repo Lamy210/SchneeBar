@@ -174,3 +174,25 @@ private func fixture(type: UTType, durations: [Double]) throws -> Data {
     }
     #expect(errors == 2)
 }
+
+
+@Test func packThumbnailDownscalesDefaultClipWithoutRetainingSourceDimensions() throws {
+    let canvas = try #require(CGContext(data: nil, width: 512, height: 256,
+        bitsPerComponent: 8, bytesPerRow: 512 * 4, space: CGColorSpaceCreateDeviceRGB(),
+        bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+    canvas.setFillColor(red: 0.25, green: 0.5, blue: 1, alpha: 1)
+    canvas.fill(CGRect(x: 0, y: 0, width: 512, height: 256))
+    let source = try #require(canvas.makeImage())
+    let data = NSMutableData()
+    let destination = try #require(CGImageDestinationCreateWithData(
+        data as CFMutableData, UTType.png.identifier as CFString, 1, nil))
+    CGImageDestinationAddImage(destination, source, nil)
+    try #require(CGImageDestinationFinalize(destination))
+    let large = try CompanionImageDecoder.decode(data as Data)
+    let small = try CompanionImageDecoder.decode(fixture(type: .png, durations: [0.1]))
+    let catalogue = try CompanionAssetCatalog(assets: [.idle: large, .run: small], defaultState: .idle)
+    let thumbnail = try CompanionPackThumbnail(catalogue: catalogue)
+    #expect(thumbnail.image.width == 128 && thumbnail.image.height == 64)
+    #expect(thumbnail.image.bitsPerComponent == 8 && thumbnail.image.bytesPerRow == 128 * 4)
+    #expect(catalogue.defaultAsset.frames[0].width == 512)
+}
