@@ -294,3 +294,58 @@ private func hostCompositionCatalogue() throws -> CompanionAssetCatalog {
     #expect(owner.assetStatus == .selectionCleared && button.image === original)
     #expect(!FileManager.default.fileExists(atPath: record.path))
 }
+
+
+@Test @MainActor func hostAssetPickerListsMetadataWithoutReplacingAdmittedCatalogue() async throws {
+    let name = "SchneeBarTests.hostPicker.\(UUID())"
+    let defaults = try #require(UserDefaults(suiteName: name))
+    defer { defaults.removePersistentDomain(forName: name) }
+    let store = CompanionHostPreferenceStore(defaults: defaults)
+    try store.save(.init(enabled: true, freeze: true, allowLocalEvents: true))
+    let tmp = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    let source = tmp.appendingPathComponent("fixture.schneerunner")
+    let root = tmp.appendingPathComponent("owned")
+    try FileManager.default.createDirectory(at: source, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: tmp) }
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false,
+        attributes: [.posixPermissions: NSNumber(value: 0o700)])
+    let gif = try #require(Data(base64Encoded: "R0lGODlhBAACAIEAAECA/wAAAAAAAAAAACH/C05FVFNDQVBFMi4wAwEAAAAh+QQACgAAACwAAAAABAACAAAIBwABCBwoMCAAIfkEARQAAQAsAAAAAAQAAgCB/0AAAAAAAAAAAAAACAcAAQgcKDAgADs="))
+    try gif.write(to: source.appendingPathComponent("run.gif"))
+    try Data(#"{"formatVersion":1,"name":"Fixture","defaultState":"run","clips":[{"state":"run","kind":"gif","path":"run.gif"}]}"#.utf8)
+        .write(to: source.appendingPathComponent("character.json"))
+    let good = try CompanionOwnedPackStore.install(from: source, into: root)
+    let broken = try CompanionOwnedPackStore.install(from: source, into: root)
+    let badManifest = try CompanionOwnedPackStore.install(from: source, into: root)
+    try Data([1]).write(to: root.appendingPathComponent(broken.id.uuidString.lowercased() + ".schneerunner/run.gif"))
+    try Data([2]).write(to: root.appendingPathComponent(badManifest.id.uuidString.lowercased() + ".schneerunner/character.json"))
+    _ = try CompanionOwnedPackStore.select(id: good.id, in: root)
+    let record = root.appendingPathComponent(".selection-v1")
+    let original = try Data(contentsOf: record)
+    let button = NSButton()
+    button.image = NSImage(size: NSSize(width: 12, height: 12))
+    let owner = CompanionHostComposition(button: button, store: store,
+        load: { try CompanionOwnedPackStore.load(id: $0, from: root) },
+        readSelection: { try CompanionOwnedPackStore.readSelection(in: root) },
+        readInventory: { try CompanionOwnedPackStore.inventory(in: root) },
+        makeCPU: { runtime in CompanionSharedCPURefresh(runtime: runtime, read: { throw CancellationError() }) })
+    defer { owner.stop() }
+    let editor = owner.assetSettings
+    owner.updateEnvironment(.init(releaseApproved: true, ownsMenuSurface: true))
+    editor.restoreSaved()
+    try await waitForHostComposition { !editor.isBusy }
+    let session = try #require(owner.demand.localEventSession)
+    editor.refreshInventory()
+    #expect(editor.isBusy && editor.inventoryStatus == .loading)
+    try await waitForHostComposition { !editor.isBusy }
+    #expect(editor.inventoryStatus == .loaded && editor.entries.count == 3)
+    #expect(editor.entries.first(where: { $0.id == broken.id })?.name == "Fixture")
+    #expect(editor.entries.first(where: { $0.id == badManifest.id })?.name == nil)
+    #expect(owner.demand.localEventSession == session && owner.assetStatus == .loaded(good.id))
+    editor.chooseListedPack(badManifest.id)
+    #expect(editor.candidateID == nil)
+    editor.chooseListedPack(good.id)
+    #expect(editor.listedID == good.id && editor.canSelect)
+    #expect(try Data(contentsOf: record) == original)
+    owner.updateEnvironment(.init(releaseApproved: true, awake: false, ownsMenuSurface: true))
+    #expect(editor.entries.isEmpty && editor.candidateID == nil && !editor.canOperate)
+}
