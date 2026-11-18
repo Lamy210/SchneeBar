@@ -59,6 +59,7 @@ public final class CompanionHostComposition {
     private let acquisition: CompanionOwnedAssetAcquisition
     private let cpu: CompanionSharedCPURefresh
     private let onDemandChanged: @MainActor (Demand) -> Void
+    private var localTransport: CompanionLocalEventSessionOwner?
     public private(set) var demand = Demand(cpu: false, localEventSession: nil)
     public private(set) var isStopped = false
 
@@ -66,7 +67,7 @@ public final class CompanionHostComposition {
         store: store, onCommittedRefresh: { [weak self] in self?.refreshPreferences() }
     )
 
-    /// No new status item, sampler, event listener or CPU loop. The host must
+    /// No new status item, sampler, automatic event listener or CPU loop. The host must
     /// serialize its combined sampler demands and never reenter this owner
     /// synchronously from onDemandChanged.
     public convenience init(button: NSButton, store: CompanionHostPreferenceStore,
@@ -144,6 +145,27 @@ public final class CompanionHostComposition {
         await cpu.refresh { !self.isStopped && self.binding.check() && isCurrent() }
     }
 
+    /// Separate, explicit transport attachment, off by default. The owner
+    /// still requires committed event opt-in and an admitted catalogue.
+    /// Choose this OR an external transport; do not register both.
+    public func enableLocalNotificationTransport() {
+        guard !isStopped, localTransport == nil else { return }
+        guard binding.check() else { stop(); return }
+        let transport = CompanionLocalEventSessionOwner { [weak self] session, kind, object in
+            self?.receiveLocalEvent(session: session, kind: kind) {
+                CompanionLocalNotificationSubscription.boundedPayload(object)
+            }
+        }
+        localTransport = transport
+        transport.update(session: demand.localEventSession)
+    }
+
+    public func disableLocalNotificationTransport() {
+        let transport = localTransport
+        localTransport = nil
+        transport?.stop()
+    }
+
     /// Transport entry point: an obsolete session or lost image slot must
     /// not even evaluate the untrusted payload. No privileged operation.
     @discardableResult
@@ -168,6 +190,7 @@ public final class CompanionHostComposition {
     public func stop() {
         guard !isStopped else { return }
         isStopped = true
+        disableLocalNotificationTransport()
         acquisition.stop()
         cpu.invalidate()
         binding.end()
@@ -181,6 +204,8 @@ public final class CompanionHostComposition {
         if demand.cpu && !next.cpu { cpu.invalidate() }
         guard demand != next else { return }
         demand = next
+        localTransport?.update(session: next.localEventSession)
+        guard demand == next else { return }
         onDemandChanged(next)
     }
 }
