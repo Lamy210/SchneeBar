@@ -55,7 +55,14 @@ public final class CompanionHostAssetSettingsModel {
     func sync() {
         let nextEntries = owner?.assetInventory?.entries ?? []
         let nextInventoryStatus = owner?.assetInventoryStatus ?? .idle
-        if entries != nextEntries { entries = nextEntries }
+        if entries != nextEntries {
+            // A previously selected listed ID must not silently remain the
+            // candidate after its metadata snapshot was invalidated.
+            if let id = listedID, !nextEntries.contains(where: { $0.id == id && $0.name != nil }) {
+                packIDText = ""
+            }
+            entries = nextEntries
+        }
         if inventoryStatus != nextInventoryStatus { inventoryStatus = nextInventoryStatus }
         let nextSession = owner?.decision.assetSession
         let nextStatus = owner?.assetStatus ?? .idle
