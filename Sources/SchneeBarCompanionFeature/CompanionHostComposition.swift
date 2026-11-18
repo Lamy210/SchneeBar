@@ -60,6 +60,8 @@ public final class CompanionHostComposition {
     private let cpu: CompanionSharedCPURefresh
     private let onDemandChanged: @MainActor (Demand) -> Void
     private var localTransport: CompanionLocalEventSessionOwner?
+    public private(set) var automaticAssetRestoreEnabled = false
+    private var handledRestoreSession: UUID?
     public private(set) var demand = Demand(cpu: false, localEventSession: nil)
     public private(set) var isStopped = false
 
@@ -114,7 +116,17 @@ public final class CompanionHostComposition {
             self.cpu.invalidate()
             self.publishDemand()
         }
-        acquisition.onDrained = { [weak self] in self?.publishDemand() }
+        acquisition.onDrained = { [weak self] in
+            guard let self else { return }
+            self.publishDemand()
+            // Queue idle callback is observation-only. Defer a pending
+            // lifecycle restore until after the queue's finish returns.
+            guard let session = self.pendingAutomaticRestoreSession else { return }
+            Task { @MainActor [weak self] in
+                guard let self, self.pendingAutomaticRestoreSession == session else { return }
+                self.restoreAutomaticallyIfNeeded()
+            }
+        }
     }
 
     public var decision: CompanionHostPolicy.Decision { acquisition.decision }
@@ -129,6 +141,7 @@ public final class CompanionHostComposition {
         guard environment.ownsMenuSurface, binding.check() else { stop(); return }
         acquisition.updateEnvironment(environment)
         publishDemand()
+        restoreAutomaticallyIfNeeded()
     }
 
     public func refreshPreferences() {
@@ -136,6 +149,7 @@ public final class CompanionHostComposition {
         guard binding.check() else { stop(); return }
         acquisition.refreshPreferences()
         publishDemand()
+        restoreAutomaticallyIfNeeded()
     }
 
     @discardableResult
@@ -143,6 +157,7 @@ public final class CompanionHostComposition {
         guard !isStopped else { return false }
         guard binding.check() else { stop(); return false }
         let accepted = acquisition.request(id)
+        if accepted { handledRestoreSession = decision.assetSession }
         publishDemand()
         return accepted
     }
@@ -153,6 +168,7 @@ public final class CompanionHostComposition {
         guard !isStopped else { return false }
         guard binding.check() else { stop(); return false }
         let accepted = acquisition.restoreSavedSelection()
+        if accepted { handledRestoreSession = decision.assetSession }
         publishDemand()
         return accepted
     }
@@ -163,6 +179,7 @@ public final class CompanionHostComposition {
         guard !isStopped else { return false }
         guard binding.check() else { stop(); return false }
         let accepted = acquisition.saveInstalledSelection(id)
+        if accepted { handledRestoreSession = decision.assetSession }
         publishDemand()
         return accepted
     }
@@ -173,6 +190,7 @@ public final class CompanionHostComposition {
         guard !isStopped else { return false }
         guard binding.check() else { stop(); return false }
         let accepted = acquisition.clearSavedSelection()
+        if accepted { handledRestoreSession = decision.assetSession }
         publishDemand()
         return accepted
     }
@@ -188,7 +206,41 @@ public final class CompanionHostComposition {
 
     public func cancelAssetRequest() {
         guard !isStopped else { return }
+        handledRestoreSession = decision.assetSession
         acquisition.cancel()
+        publishDemand()
+    }
+
+    /// Explicit host opt-in, off by default. A newly admitted asset session
+    /// gets at most one read-only restoration attempt; no periodic retries.
+    public func enableAutomaticAssetRestore() {
+        guard !isStopped else { return }
+        automaticAssetRestoreEnabled = true
+        restoreAutomaticallyIfNeeded()
+    }
+
+    /// Disable future automatic attempts. An already admitted read is not
+    /// cancelled by this toggle; cancelAssetRequest() explicitly revokes it.
+    public func disableAutomaticAssetRestore() {
+        automaticAssetRestoreEnabled = false
+    }
+
+    private var pendingAutomaticRestoreSession: UUID? {
+        guard automaticAssetRestoreEnabled, !isStopped,
+              let session = decision.assetSession, session != handledRestoreSession
+        else { return nil }
+        return session
+    }
+
+    private func restoreAutomaticallyIfNeeded() {
+        guard let session = pendingAutomaticRestoreSession else { return }
+        guard binding.check() else { stop(); return }
+        guard !acquisition.isBusy else { return }
+        // Never replace an already admitted selection or repeat a failed
+        // operation merely because the environment was refreshed.
+        handledRestoreSession = session
+        guard !decision.rendersCharacter, assetStatus == .idle else { return }
+        _ = acquisition.restoreSavedSelection()
         publishDemand()
     }
 
@@ -244,6 +296,7 @@ public final class CompanionHostComposition {
     public func stop() {
         guard !isStopped else { return }
         isStopped = true
+        disableAutomaticAssetRestore()
         disableLocalNotificationTransport()
         acquisition.stop()
         cpu.invalidate()
