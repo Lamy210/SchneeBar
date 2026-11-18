@@ -14,6 +14,40 @@ extension CompanionOwnedPackStore {
         case unavailable(id: UUID)
     }
 
+    /// An observation only. Unlike restoreSelection, this operation never
+    /// clears or repairs an unavailable saved choice.
+    public enum ReadOnlySelection: Sendable {
+        case builtIn
+        case installed(id: UUID, catalogue: CompanionAssetCatalog)
+        case unavailable(id: UUID)
+    }
+
+    /// Read and validate the committed choice under a single shared root
+    /// lock. Use in a cancellable host acquisition worker. Malformed or
+    /// unsafe selection records and root/lock errors propagate; they are
+    /// not interpreted as built-in and are never modified.
+    public static func readSelection(in privateRoot: URL) throws -> ReadOnlySelection {
+        try Task.checkCancellation()
+        let root = try openRoot(privateRoot)
+        defer { _ = Darwin.close(root) }
+        try lockRoot(root, exclusive: false)
+        guard let id = try selectedID(root) else {
+            try Task.checkCancellation()
+            return .builtIn
+        }
+        let catalogue: CompanionAssetCatalog
+        do {
+            catalogue = try CompanionAnimatedPackLoader.capture(openPack(id, root: root)).catalogue
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch {
+            try Task.checkCancellation()
+            return .unavailable(id: id)
+        }
+        try Task.checkCancellation()
+        return .installed(id: id, catalogue: catalogue)
+    }
+
     /// Explicit select: validate the whole catalogue before changing the
     /// preference. A rejected candidate leaves the previous choice intact.
     public static func select(id: UUID, in privateRoot: URL) throws -> Selection {
