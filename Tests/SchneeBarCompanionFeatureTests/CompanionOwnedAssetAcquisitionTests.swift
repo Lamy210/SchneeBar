@@ -477,3 +477,40 @@ private func acquisitionCatalogue() throws -> CompanionAssetCatalog {
     #expect(editor.candidatePreviewStatus == .loaded(next) && editor.candidateThumbnail != nil)
     #expect(!owner.decision.rendersCharacter && probe.peakWorkers() == 1)
 }
+
+
+@Test @MainActor func hostPackImportDrainsBeforeOtherRequestsAfterRevocation() async throws {
+    let name = "SchneeBarTests.importDrain.\(UUID())"
+    let defaults = try #require(UserDefaults(suiteName: name))
+    defer { defaults.removePersistentDomain(forName: name) }
+    let store = CompanionHostPreferenceStore(defaults: defaults)
+    try store.save(.init(enabled: true, freeze: true))
+    let id = UUID(), next = UUID()
+    let probe = AcquisitionProbe(blockedID: id, failedID: UUID(), catalogue: try acquisitionCatalogue())
+    defer { probe.release() }
+    let button = NSButton()
+    button.image = NSImage(size: NSSize(width: 12, height: 12))
+    let owner = CompanionHostComposition(button: button, store: store,
+        load: { try probe.load($0) },
+        installPack: { _ in _ = try probe.load(id); return id },
+        makeCPU: { runtime in CompanionSharedCPURefresh(runtime: runtime, read: { throw CancellationError() }) })
+    defer { owner.stop() }
+    owner.updateEnvironment(.init(releaseApproved: true, ownsMenuSurface: true))
+    let session = try #require(owner.decision.assetSession)
+    let url = FileManager.default.temporaryDirectory.appendingPathComponent("fixture.schneerunner")
+    #expect(owner.importAssetPack(from: url, session: session))
+    try await waitForAcquisition { probe.started() == [id] }
+    #expect(!owner.requestInstalledAsset(next) && !owner.importAssetPack(from: url, session: session))
+    owner.updateEnvironment(.init(releaseApproved: true, awake: false, ownsMenuSurface: true))
+    owner.updateEnvironment(.init(releaseApproved: true, ownsMenuSurface: true))
+    let current = try #require(owner.decision.assetSession)
+    #expect(current != session && owner.assetImportStatus == .idle)
+    #expect(!owner.importAssetPack(from: url, session: current) && !owner.requestInstalledAsset(next))
+    probe.release()
+    try await waitForAcquisition { !owner.isAssetWorkerBusy }
+    #expect(owner.assetImportStatus == .idle && !owner.decision.rendersCharacter)
+    #expect(!owner.importAssetPack(from: url, session: session))
+    #expect(owner.requestInstalledAsset(next))
+    try await waitForAcquisition { !owner.isAssetWorkerBusy }
+    #expect(owner.assetStatus == .loaded(next) && probe.peakWorkers() == 1)
+}
