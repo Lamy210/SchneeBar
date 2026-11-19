@@ -22,10 +22,25 @@ public enum CompanionOwnedPackStore {
         try install(from: source, into: privateRoot, beforePublish: {})
     }
 
+    /// Import one explicitly selected image as an owned v1 character pack.
+    public static func installImage(from source: URL, into privateRoot: URL) throws -> Installed {
+        try install(into: privateRoot, beforePublish: {}, capture: {
+            try CompanionSingleImageCapture.capture(source)
+        })
+    }
+
     // Internal fault injection seam, invoked only before the commit point.
     static func install(from source: URL, into privateRoot: URL,
                         maximumPacks: Int = maximumInstalledPacks,
                         beforePublish: () throws -> Void) throws -> Installed {
+        try install(into: privateRoot, maximumPacks: maximumPacks, beforePublish: beforePublish,
+                    capture: { try CompanionAnimatedPackLoader.capture(source) })
+    }
+
+    private static func install(into privateRoot: URL,
+                                maximumPacks: Int = maximumInstalledPacks,
+                                beforePublish: () throws -> Void,
+                                capture: () throws -> CompanionAnimatedPackLoader.Capture) throws -> Installed {
         try Task.checkCancellation()
         guard (1...maximumInstalledPacks).contains(maximumPacks) else {
             throw CompanionOwnedPackError.packLimit
@@ -38,7 +53,7 @@ public enum CompanionOwnedPackStore {
             throw CompanionOwnedPackError.recoveryRequired
         }
         guard inventory.ids.count + inventory.trashed.count < maximumPacks else { throw CompanionOwnedPackError.packLimit }
-        let capture = try CompanionAnimatedPackLoader.capture(source)
+        let capture = try capture()
         let id = UUID()
         let final = packName(id)
         let staging = stageName(UUID())
