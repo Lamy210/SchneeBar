@@ -12,6 +12,8 @@ public final class CompanionLocalEventSessionOwner {
     private let receive: Receive
     private var close: Stop?
     private var generation = UUID()
+    private var registeredGeneration: UUID?
+    private var reconciling = false
     public private(set) var session: UUID?
 
     public convenience init(receive: @escaping Receive) {
@@ -27,26 +29,44 @@ public final class CompanionLocalEventSessionOwner {
         self.receive = receive
     }
 
-    /// nil revokes reception. Repeating the same session is a no-op.
-    /// A synchronous callback during registration may revoke the session;
-    /// in that case close the returned registration rather than installing it.
+    /// nil revokes reception immediately. Reentrant updates change desired
+    /// state only; the outer registration transition drains before any new
+    /// transport opens. Even a reused session UUID gets a new generation.
     public func update(session next: UUID?) {
         guard session != next else { return }
-        let token = UUID()
-        generation = token
+        generation = UUID()
         session = next
-        let previous = close
-        close = nil
-        previous?()
-        guard generation == token, let next else { return }
-        let registration = open(next) { [weak self] received, kind, object in
-            guard let self, self.generation == token,
-                  self.session == next, received == next else { return }
-            self.receive(received, kind, object)
-        }
-        if generation == token {
-            close = registration
-        } else {
+        reconcile()
+    }
+
+    private func reconcile() {
+        guard !reconciling else { return }
+        reconciling = true
+        defer { reconciling = false }
+
+        while true {
+            if let previous = close {
+                if registeredGeneration == generation { return }
+                close = nil
+                registeredGeneration = nil
+                previous()
+                // Closing can synchronously change the desired session.
+                continue
+            }
+            guard let next = session else { return }
+            let token = generation
+            let registration = open(next) { [weak self] received, kind, object in
+                guard let self, self.generation == token,
+                      self.session == next, received == next else { return }
+                self.receive(received, kind, object)
+            }
+            if generation == token {
+                close = registration
+                registeredGeneration = token
+                return
+            }
+            // The open call returned after revocation/replacement.
+            // Close it completely before opening the latest desired session.
             registration()
         }
     }
