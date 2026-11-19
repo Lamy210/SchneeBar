@@ -70,6 +70,9 @@ public final class CompanionOwnedAssetAcquisition {
     public private(set) var status: Status = .idle
     /// The owner observes the final adopted result, not intermediate queue
     /// state. Must not synchronously reenter the acquisition adapter.
+    /// Optional host-owned publication gate. Must not synchronously reenter
+    /// this adapter. Checked even for metadata and already committed writes.
+    var canPublish: (@MainActor () -> Bool)?
     var onCompletion: (@MainActor () -> Void)?
     var onDrained: (@MainActor () -> Void)?
 
@@ -203,6 +206,11 @@ public final class CompanionOwnedAssetAcquisition {
         inventoryStatus = .loading
         queue.submit(.inventory) { [weak self] result in
             guard let self, self.pending == ticket else { return }
+            guard self.canPublish?() != false else {
+                self.stop()
+                self.onCompletion?()
+                return
+            }
             self.pending = nil
             self.exclusiveInFlight = false
             self.bridge.refreshPreferences()
@@ -238,6 +246,11 @@ public final class CompanionOwnedAssetAcquisition {
         previewStatus = .loading(id)
         queue.submit(.preview(id)) { [weak self] result in
             guard let self, self.pending == ticket else { return }
+            guard self.canPublish?() != false else {
+                self.stop()
+                self.onCompletion?()
+                return
+            }
             self.pending = nil
             self.exclusiveInFlight = false
             self.bridge.refreshPreferences()
@@ -275,6 +288,11 @@ public final class CompanionOwnedAssetAcquisition {
         importStatus = .importing
         queue.submit(.install(url, singleImage: singleImage)) { [weak self] result in
             guard let self, self.pending == ticket else { return }
+            guard self.canPublish?() != false else {
+                self.stop()
+                self.onCompletion?()
+                return
+            }
             self.pending = nil
             self.exclusiveInFlight = false
             self.bridge.refreshPreferences()
@@ -329,6 +347,11 @@ public final class CompanionOwnedAssetAcquisition {
         libraryStatus = .working(action)
         queue.submit(.manage(action)) { [weak self] result in
             guard let self, self.pending == ticket else { return }
+            guard self.canPublish?() != false else {
+                self.stop()
+                self.onCompletion?()
+                return
+            }
             self.pending = nil
             self.exclusiveInFlight = false
             self.bridge.refreshPreferences()
@@ -364,6 +387,11 @@ public final class CompanionOwnedAssetAcquisition {
         self.status = status
         queue.submit(request) { [weak self] result in
             guard let self, self.pending == ticket else { return }
+            guard self.canPublish?() != false else {
+                self.stop()
+                self.onCompletion?()
+                return
+            }
             self.pending = nil
             self.exclusiveInFlight = false
             let catalogue: CompanionAssetCatalog?
