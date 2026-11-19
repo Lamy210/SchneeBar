@@ -8,6 +8,12 @@ extension CompanionOwnedPackStore {
         try move(packName(id), to: trashName(id), in: privateRoot, deselecting: id)
     }
 
+    /// Host library management never implicitly clears the saved choice.
+    /// The check and move occur under the same exclusive root lock.
+    public static func trashUnselected(id: UUID, in privateRoot: URL) throws {
+        try move(packName(id), to: trashName(id), in: privateRoot, protecting: id)
+    }
+
     public static func restore(id: UUID, in privateRoot: URL) throws {
         try move(trashName(id), to: packName(id), in: privateRoot)
     }
@@ -25,7 +31,7 @@ extension CompanionOwnedPackStore {
     }
 
     private static func move(_ source: String, to destination: String, in url: URL,
-                             deselecting id: UUID? = nil) throws {
+                             deselecting id: UUID? = nil, protecting protectedID: UUID? = nil) throws {
         try Task.checkCancellation()
         let root = try openRoot(url)
         defer { _ = Darwin.close(root) }
@@ -38,6 +44,9 @@ extension CompanionOwnedPackStore {
         try requireIdentity(parent: root, name: source, expected: info)
         // Clear the persistent selection BEFORE moving the selected pack.
         // If rename subsequently fails, built-in is still the safe choice.
+        if let protectedID, try selectedID(root) == protectedID {
+            throw CompanionOwnedPackError.selectedPack
+        }
         if let id, try selectedID(root) == id {
             try clearSelection(root)
         }

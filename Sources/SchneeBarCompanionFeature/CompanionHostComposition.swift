@@ -85,6 +85,12 @@ public final class CompanionHostComposition {
             readInventory: { try CompanionOwnedPackStore.inventory(in: privateRoot) },
             installPack: { try CompanionOwnedPackStore.install(from: $0, into: privateRoot).id },
             installImage: { try CompanionOwnedPackStore.installImage(from: $0, into: privateRoot).id },
+            manageLibrary: { action in
+                switch action {
+                case .trash(let id): try CompanionOwnedPackStore.trashUnselected(id: id, in: privateRoot)
+                case .restore(let id): try CompanionOwnedPackStore.restore(id: id, in: privateRoot)
+                }
+            },
             makeCPU: { CompanionSharedCPURefresh(runtime: $0, sampler: sampler) },
             onDemandChanged: onDemandChanged)
     }
@@ -97,6 +103,7 @@ public final class CompanionHostComposition {
          readInventory: (@Sendable () throws -> CompanionOwnedPackStore.Inventory)? = nil,
          installPack: (@Sendable (URL) throws -> UUID)? = nil,
          installImage: (@Sendable (URL) throws -> UUID)? = nil,
+         manageLibrary: (@Sendable (CompanionOwnedAssetAcquisition.LibraryAction) throws -> Void)? = nil,
          makeCPU: (CompanionRuntimeCoordinator) -> CompanionSharedCPURefresh,
          onDemandChanged: @escaping @MainActor (Demand) -> Void = { _ in }) {
         let binding = Binding(button: button)
@@ -107,7 +114,8 @@ public final class CompanionHostComposition {
         let bridge = CompanionHostRuntimeBridge(store: store, runtime: runtime)
         let acquisition = CompanionOwnedAssetAcquisition(bridge: bridge, load: load,
             readSelection: readSelection, saveSelection: saveSelection, clearSelection: clearSelection,
-            readInventory: readInventory, installPack: installPack, installImage: installImage)
+            readInventory: readInventory, installPack: installPack, installImage: installImage,
+            manageLibrary: manageLibrary)
         self.binding = binding
         self.store = store
         self.runtime = runtime
@@ -140,6 +148,8 @@ public final class CompanionHostComposition {
     public var assetPreviewStatus: CompanionOwnedAssetAcquisition.PreviewStatus { acquisition.previewStatus }
     public var assetThumbnail: CompanionPackThumbnail? { acquisition.thumbnail }
     public var assetImportStatus: CompanionOwnedAssetAcquisition.ImportStatus { acquisition.importStatus }
+    public var assetLibraryStatus: CompanionOwnedAssetAcquisition.LibraryStatus { acquisition.libraryStatus }
+    public var displayedPackID: UUID? { acquisition.displayedPackID }
     /// Retain this owner until false after stop before creating a successor.
     public var isAssetWorkerBusy: Bool { acquisition.isBusy }
 
@@ -228,6 +238,19 @@ public final class CompanionHostComposition {
         guard binding.check() else { stop(); return false }
         guard decision.assetSession == session else { return false }
         let accepted = acquisition.importPack(from: url, singleImage: singleImage)
+        publishDemand()
+        return accepted
+    }
+
+    public func canManageAssetLibrary(_ action: CompanionOwnedAssetAcquisition.LibraryAction) -> Bool {
+        !isStopped && acquisition.canManage(action)
+    }
+
+    @discardableResult
+    public func manageAssetLibrary(_ action: CompanionOwnedAssetAcquisition.LibraryAction) -> Bool {
+        guard !isStopped else { return false }
+        guard binding.check() else { stop(); return false }
+        let accepted = acquisition.manage(action)
         publishDemand()
         return accepted
     }
