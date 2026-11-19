@@ -89,6 +89,9 @@ public final class CompanionHostComposition {
                 switch action {
                 case .trash(let id): try CompanionOwnedPackStore.trashUnselected(id: id, in: privateRoot)
                 case .restore(let id): try CompanionOwnedPackStore.restore(id: id, in: privateRoot)
+                case .purge(let id): try CompanionOwnedPackStore.purgeUnselectedTrash(id: id, in: privateRoot)
+                case .discardStage(let id): try CompanionOwnedPackStore.discardAbandonedStage(id: id, in: privateRoot)
+                case .discardPendingSelection: try CompanionOwnedPackStore.discardPendingSelection(in: privateRoot)
                 }
             },
             makeCPU: { CompanionSharedCPURefresh(runtime: $0, sampler: sampler) },
