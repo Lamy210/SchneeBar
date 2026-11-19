@@ -14,7 +14,14 @@ public final class CompanionOwnedAssetAcquisition {
     }
 
     public enum LibraryAction: Equatable, Sendable {
-        case trash(UUID), restore(UUID)
+        case trash(UUID), restore(UUID), purge(UUID), discardStage(UUID), discardPendingSelection
+
+        public var requiresTypedConfirmation: Bool {
+            switch self {
+            case .purge, .discardStage, .discardPendingSelection: true
+            case .trash, .restore: false
+            }
+        }
     }
     public enum LibraryStatus: Equatable, Sendable {
         case idle, working(LibraryAction), completed(LibraryAction), failed(LibraryAction)
@@ -79,6 +86,9 @@ public final class CompanionOwnedAssetAcquisition {
                 switch action {
                 case .trash(let id): try CompanionOwnedPackStore.trashUnselected(id: id, in: privateRoot)
                 case .restore(let id): try CompanionOwnedPackStore.restore(id: id, in: privateRoot)
+                case .purge(let id): try CompanionOwnedPackStore.purgeUnselectedTrash(id: id, in: privateRoot)
+                case .discardStage(let id): try CompanionOwnedPackStore.discardAbandonedStage(id: id, in: privateRoot)
+                case .discardPendingSelection: try CompanionOwnedPackStore.discardPendingSelection(in: privateRoot)
                 }
             })
     }
@@ -283,7 +293,7 @@ public final class CompanionOwnedAssetAcquisition {
         return true
     }
 
-    /// Reversible library changes only. A current inventory is required;
+    /// Explicit library changes only. A current inventory is required;
     /// the store checks the persisted selection again under its root lock.
     public func canManage(_ action: LibraryAction) -> Bool {
         guard canManageLibrary, !queue.isBusy, decision.assetSession != nil,
@@ -294,6 +304,13 @@ public final class CompanionOwnedAssetAcquisition {
             return inventory.entries.contains { $0.id == id }
         case .restore(let id):
             return inventory.trashedIDs.contains(id)
+        case .purge(let id):
+            guard !decision.rendersCharacter || (admittedID != nil && admittedID != id) else { return false }
+            return inventory.trashedIDs.contains(id)
+        case .discardStage(let id):
+            return inventory.abandonedStageIDs.contains(id)
+        case .discardPendingSelection:
+            return inventory.pendingSelectionRecovery
         }
     }
 
