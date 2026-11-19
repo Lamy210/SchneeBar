@@ -646,3 +646,39 @@ private func hostCompositionCatalogue() throws -> CompanionAssetCatalog {
     #expect(editor.abandonedStageIDs.isEmpty && !editor.pendingSelectionRecovery)
     #expect(editor.unknownEntryCount == 1 && !editor.inventoryAllowsImport)
 }
+
+
+@Test @MainActor func hostCPUCompletionRevokesDemandBeforeReturningAfterImageLoss() async throws {
+    let name = "SchneeBarTests.cpuOwnership.\(UUID())"
+    let defaults = try #require(UserDefaults(suiteName: name))
+    defer { defaults.removePersistentDomain(forName: name) }
+    let store = CompanionHostPreferenceStore(defaults: defaults)
+    try store.save(.init(enabled: true, allowLocalEvents: true))
+    let catalogue = try hostCompositionCatalogue()
+    let button = NSButton()
+    button.image = NSImage(size: NSSize(width: 12, height: 12))
+    let external = NSImage(size: NSSize(width: 16, height: 16))
+    var reads = 0
+    var demands: [CompanionHostComposition.Demand] = []
+    let owner = CompanionHostComposition(button: button, store: store,
+        load: { _ in catalogue },
+        makeCPU: { runtime in
+            CompanionSharedCPURefresh(runtime: runtime, read: {
+                reads += 1
+                button.image = external
+                return .init(id: UUID(), epoch: UUID(), capturedAt: .now, percentage: 100)
+            })
+        },
+        onDemandChanged: { demands.append($0) })
+    defer { owner.stop() }
+    owner.updateEnvironment(.init(releaseApproved: true, ownsMenuSurface: true))
+    #expect(owner.requestInstalledAsset(UUID()))
+    try await waitForHostComposition { !owner.isAssetWorkerBusy }
+    #expect(owner.demand.cpu && owner.demand.localEventSession != nil)
+    await owner.refreshCPU(isCurrent: { true })
+    #expect(owner.isStopped && !owner.demand.cpu && owner.demand.localEventSession == nil)
+    #expect(demands.last?.cpu == false && demands.last?.localEventSession == nil)
+    #expect(button.image === external && reads == 1)
+    await owner.refreshCPU(isCurrent: { true })
+    #expect(reads == 1)
+}
