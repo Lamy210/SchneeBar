@@ -46,7 +46,15 @@ public actor FocusCountdownStore {
 
     public func load() throws -> FocusCountdown? {
         guard fileURL.isFileURL else { throw StoreError.invalidBackingFile }
-        guard let data = try read(fileURL) else { return nil }
+        let bytes: Data?
+        do {
+            bytes = try read(fileURL)
+        } catch BoundedRegularFileReadError.unsafeBackingFile {
+            throw StoreError.invalidBackingFile
+        } catch BoundedRegularFileReadError.payloadTooLarge {
+            throw StoreError.payloadTooLarge
+        }
+        guard let data = bytes else { return nil }
         guard data.count <= Self.maximumRecordBytes else { throw StoreError.payloadTooLarge }
         return try JSONDecoder().decode(FocusCountdown.self, from: data)
     }
