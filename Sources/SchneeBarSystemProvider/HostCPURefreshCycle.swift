@@ -8,9 +8,9 @@ public enum HostCPURefreshCycle {
     @discardableResult
     public static func run(
         sampler: HostCPUSampler, widget: Bool, companion: Bool,
-        force: Bool = false, isCurrent: () -> Bool,
-        refreshWidget: () async -> Void,
-        refreshCompanion: () async -> Void
+        force: Bool = false, isCurrent: @MainActor () -> Bool,
+        refreshWidget: @MainActor () async -> Void,
+        refreshCompanion: @MainActor () async -> Void
     ) async -> Bool {
         await run(plan: { await sampler.refreshPlan() }, widget: widget,
             companion: companion, force: force, isCurrent: isCurrent,
@@ -19,10 +19,10 @@ public enum HostCPURefreshCycle {
 
     @discardableResult
     static func run(
-        plan: () async -> HostCPURefreshPlan, widget: Bool, companion: Bool,
-        force: Bool = false, isCurrent: () -> Bool,
-        refreshWidget: () async -> Void,
-        refreshCompanion: () async -> Void
+        plan: @MainActor () async -> HostCPURefreshPlan, widget: Bool, companion: Bool,
+        force: Bool = false, isCurrent: @MainActor () -> Bool,
+        refreshWidget: @MainActor () async -> Void,
+        refreshCompanion: @MainActor () async -> Void
     ) async -> Bool {
         guard !Task.isCancelled, isCurrent() else { return false }
         if widget {
