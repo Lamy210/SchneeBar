@@ -1,0 +1,7 @@
+# C4b draft: serialized local event registration transitions
+
+Based on merged #433. Treat session as desired state and registration as separately owned state. Every changed desired session immediately revokes the previous generation, including a return to the same UUID after another change. Reentrant updates inside open or stop callbacks only replace desired state. The outer reconciliation must close any stale returned registration completely before opening the latest desired one; do not register intermediate requests superseded while closing. No duplicate active registrations, no stale payload delivery, no extra worker or timer.
+
+A synchronous callback may be accepted during its current registration's opening; if it changes the desired session, subsequent callbacks from that generation are rejected immediately. Closing callbacks never regain authority. A transport must eventually return from its synchronous open and close calls and must not continuously request new sessions; this is a serialized ownership protocol, not a timeout or external transport failure recovery mechanism.
+
+Two deterministic regression fixtures simulate replacement while opening and coalescing replacement while closing, including a reused UUID and actual peak active registrations. Existing stop-while-opening and late-callback tests remain. Shipping App dependency, production transport attachment, real Mac testing, rights, ADR and main promotion are not changed.
