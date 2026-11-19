@@ -309,13 +309,12 @@ final class MenuBarController: NSObject {
         guard isCurrentRuntime(generation), configurationRevision == revision,
               !Task.isCancelled else { return }
         let cpuID = cpuProvider.descriptor.id
-        if cpuDemandEnabled,
-           await cpuSampler.refreshPlan().requiresRefresh(.widget),
-           isCurrentRuntime(generation), configurationRevision == revision, !Task.isCancelled {
-            _ = await widgetEngine.refreshIfEnabled(id: cpuID)
-        }
-        guard isCurrentRuntime(generation), configurationRevision == revision,
-              !Task.isCancelled else { return }
+        guard await HostCPURefreshCycle.run(
+            sampler: cpuSampler, widget: cpuDemandEnabled, companion: false,
+            isCurrent: { self.isCurrentRuntime(generation) && self.configurationRevision == revision },
+            refreshWidget: { _ = await self.widgetEngine.refreshIfEnabled(id: cpuID) },
+            refreshCompanion: {}
+        ) else { return }
         if forceOtherWidgets {
             _ = await widgetEngine.refreshAll(excluding: [cpuID])
         } else {
