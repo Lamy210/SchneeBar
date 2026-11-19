@@ -15,7 +15,7 @@ public struct FocusReminderSchedule: Equatable, Sendable, Codable {
 
     /// Gregorian civil date in the supplied time zone, independent of its
     /// identifier. The scheduling calendar itself need not be Gregorian.
-    public struct CivilDay: Equatable, Comparable, Sendable {
+    public struct CivilDay: Equatable, Comparable, Sendable, Codable {
         public let year: Int
         public let month: Int
         public let day: Int
@@ -25,7 +25,7 @@ public struct FocusReminderSchedule: Equatable, Sendable, Codable {
         }
     }
 
-    public struct Occurrence: Equatable, Sendable {
+    public struct Occurrence: Equatable, Sendable, Codable {
         public let reminderID: UUID
         public let date: Date
         public let civilDay: CivilDay?
@@ -58,7 +58,7 @@ public struct FocusReminderSchedule: Equatable, Sendable, Codable {
     public func next(after now: Date, calendar: Calendar,
                      lastObserved: Occurrence? = nil) throws -> Occurrence? {
         guard Self.valid(now) else { throw ValidationError.invalidClock }
-        if let lastObserved, lastObserved.reminderID != id { throw ValidationError.invalidCursor }
+        if let lastObserved, !validCursor(lastObserved) { throw ValidationError.invalidCursor }
         let hour: Int, minute: Int, days: [Int]?
         switch rule {
         case .once(let date):
@@ -103,6 +103,19 @@ public struct FocusReminderSchedule: Equatable, Sendable, Codable {
             day = start
         }
         throw ValidationError.searchLimit
+    }
+
+    // Structural validation only: the original scheduling time zone is not
+    // persisted. The owner still supplies a genuinely committed cursor.
+    func validCursor(_ occurrence: Occurrence) -> Bool {
+        guard occurrence.reminderID == id, Self.valid(occurrence.date) else { return false }
+        if case .once(let date) = rule {
+            return occurrence.civilDay == nil && occurrence.date == date
+        }
+        guard let day = occurrence.civilDay, (1...9999).contains(day.year), (1...12).contains(day.month) else { return false }
+        let leap = day.year.isMultiple(of: 4) && (!day.year.isMultiple(of: 100) || day.year.isMultiple(of: 400))
+        let lengths = [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+        return (1...lengths[day.month - 1]).contains(day.day)
     }
 
     private static func civilDay(for date: Date, in calendar: Calendar) throws -> CivilDay {
