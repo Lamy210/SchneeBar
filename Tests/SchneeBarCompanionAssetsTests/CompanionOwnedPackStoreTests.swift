@@ -466,3 +466,32 @@ private func withStore(_ body: (URL, URL) throws -> Void) throws {
         #expect(try CompanionOwnedPackStore.load(id: existing.id, from: target).defaultAsset.frames.count == 2)
     }
 }
+
+
+@Test func ownedTrashUnselectedProtectsCommittedRecordAndRestoresWithoutSelection() throws {
+    try withStore { source, target in
+        let selected = try CompanionOwnedPackStore.install(from: source, into: target)
+        let spare = try CompanionOwnedPackStore.install(from: source, into: target)
+        _ = try CompanionOwnedPackStore.select(id: selected.id, in: target)
+        let record = target.appendingPathComponent(".selection-v1")
+        let original = try Data(contentsOf: record)
+        #expect(throws: CompanionOwnedPackError.selectedPack) {
+            try CompanionOwnedPackStore.trashUnselected(id: selected.id, in: target)
+        }
+        try CompanionOwnedPackStore.trashUnselected(id: spare.id, in: target)
+        let inventory = try CompanionOwnedPackStore.inventory(in: target)
+        #expect(inventory.entries.map(\.id) == [selected.id])
+        #expect(inventory.trashedIDs == [spare.id])
+        #expect(try Data(contentsOf: record) == original)
+        try CompanionOwnedPackStore.restore(id: spare.id, in: target)
+        #expect(try CompanionOwnedPackStore.load(id: spare.id, from: target).defaultAsset.frames.count == 2)
+        #expect(try Data(contentsOf: record) == original)
+        let malformed = Data("invalid".utf8)
+        try malformed.write(to: record)
+        #expect(throws: CompanionOwnedPackError.invalidSelection) {
+            try CompanionOwnedPackStore.trashUnselected(id: spare.id, in: target)
+        }
+        #expect(try Data(contentsOf: record) == malformed)
+        #expect(try CompanionOwnedPackStore.inventory(in: target).entries.count == 2)
+    }
+}
