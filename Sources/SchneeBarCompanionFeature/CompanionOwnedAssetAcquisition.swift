@@ -13,12 +13,23 @@ public final class CompanionOwnedAssetAcquisition {
         case savingSelection(UUID), clearingSelection, selectionSaved(UUID), selectionCleared, selectionCommitFailed
     }
 
+    public enum LibraryAction: Equatable, Sendable {
+        case trash(UUID), restore(UUID)
+    }
+    public enum LibraryStatus: Equatable, Sendable {
+        case idle, working(LibraryAction), completed(LibraryAction), failed(LibraryAction)
+    }
+    public private(set) var libraryStatus: LibraryStatus = .idle
+    // Independent of transient operation status; cancel preserves an admitted catalogue.
+    private var admittedID: UUID?
+    public var displayedPackID: UUID? { decision.rendersCharacter ? admittedID : nil }
+    private let canManageLibrary: Bool
     private let bridge: CompanionHostRuntimeBridge
     private enum Request: Sendable {
-        case installed(UUID), saved, save(UUID), clearSaved, inventory, preview(UUID), install(URL, singleImage: Bool)
+        case installed(UUID), saved, save(UUID), clearSaved, inventory, preview(UUID), install(URL, singleImage: Bool), manage(LibraryAction)
         var requiresExclusiveSlot: Bool {
             switch self {
-            case .save, .clearSaved, .inventory, .preview, .install: true
+            case .save, .clearSaved, .inventory, .preview, .install, .manage: true
             case .installed, .saved: false
             }
         }
@@ -30,6 +41,7 @@ public final class CompanionOwnedAssetAcquisition {
         case inventory(CompanionOwnedPackStore.Inventory)
         case preview(CompanionPackThumbnail)
         case installedPack(UUID)
+        case managed
     }
     public enum InventoryStatus: Equatable, Sendable { case idle, loading, loaded, failed }
     public private(set) var inventory: CompanionOwnedPackStore.Inventory?
@@ -62,7 +74,13 @@ public final class CompanionOwnedAssetAcquisition {
             clearSelection: { try CompanionOwnedPackStore.selectBuiltIn(in: privateRoot) },
             readInventory: { try CompanionOwnedPackStore.inventory(in: privateRoot) },
             installPack: { try CompanionOwnedPackStore.install(from: $0, into: privateRoot).id },
-            installImage: { try CompanionOwnedPackStore.installImage(from: $0, into: privateRoot).id })
+            installImage: { try CompanionOwnedPackStore.installImage(from: $0, into: privateRoot).id },
+            manageLibrary: { action in
+                switch action {
+                case .trash(let id): try CompanionOwnedPackStore.trashUnselected(id: id, in: privateRoot)
+                case .restore(let id): try CompanionOwnedPackStore.restore(id: id, in: privateRoot)
+                }
+            })
     }
 
     init(bridge: CompanionHostRuntimeBridge,
@@ -72,7 +90,8 @@ public final class CompanionOwnedAssetAcquisition {
          clearSelection: (@Sendable () throws -> Void)? = nil,
          readInventory: (@Sendable () throws -> CompanionOwnedPackStore.Inventory)? = nil,
          installPack: (@Sendable (URL) throws -> UUID)? = nil,
-         installImage: (@Sendable (URL) throws -> UUID)? = nil) {
+         installImage: (@Sendable (URL) throws -> UUID)? = nil,
+         manageLibrary: (@Sendable (LibraryAction) throws -> Void)? = nil) {
         self.bridge = bridge
         canReadSelection = readSelection != nil
         canSaveSelection = saveSelection != nil
@@ -80,6 +99,7 @@ public final class CompanionOwnedAssetAcquisition {
         canReadInventory = readInventory != nil
         canInstallPack = installPack != nil
         canInstallImage = installImage != nil
+        canManageLibrary = manageLibrary != nil
         queue = CompanionImportQueue { request in
             switch request {
             case .installed(let id): return .selection(.installed(id: id, catalogue: try load(id)))
@@ -105,6 +125,10 @@ public final class CompanionOwnedAssetAcquisition {
                 let scoped = url.startAccessingSecurityScopedResource()
                 defer { if scoped { url.stopAccessingSecurityScopedResource() } }
                 return .installedPack(try install(url))
+            case .manage(let action):
+                guard let manageLibrary else { throw CancellationError() }
+                try manageLibrary(action)
+                return .managed
             }
         }
         queue.onIdle = { [weak self] in self?.onDrained?() }
@@ -259,6 +283,53 @@ public final class CompanionOwnedAssetAcquisition {
         return true
     }
 
+    /// Reversible library changes only. A current inventory is required;
+    /// the store checks the persisted selection again under its root lock.
+    public func canManage(_ action: LibraryAction) -> Bool {
+        guard canManageLibrary, !queue.isBusy, decision.assetSession != nil,
+              let inventory else { return false }
+        switch action {
+        case .trash(let id):
+            guard !decision.rendersCharacter || (admittedID != nil && admittedID != id) else { return false }
+            return inventory.entries.contains { $0.id == id }
+        case .restore(let id):
+            return inventory.trashedIDs.contains(id)
+        }
+    }
+
+    @discardableResult
+    public func manage(_ action: LibraryAction) -> Bool {
+        guard canManage(action), let ticket = bridge.beginAssetRequest(),
+              let session = bridge.decision.assetSession else {
+            discardIfRevoked()
+            return false
+        }
+        pending = ticket
+        exclusiveInFlight = true
+        clearPreview()
+        inventory = nil
+        inventoryStatus = .idle
+        libraryStatus = .working(action)
+        queue.submit(.manage(action)) { [weak self] result in
+            guard let self, self.pending == ticket else { return }
+            self.pending = nil
+            self.exclusiveInFlight = false
+            self.bridge.refreshPreferences()
+            self.bridge.cancelAssetRequest(ticket)
+            guard self.bridge.decision.assetSession == session else {
+                self.cancel()
+                self.onCompletion?()
+                return
+            }
+            if case .success(.managed) = result {
+                self.libraryStatus = .completed(action)
+            } else {
+                self.libraryStatus = .failed(action)
+            }
+        }
+        return true
+    }
+
     private func clearPreview() {
         thumbnail = nil
         previewStatus = .idle
@@ -280,9 +351,11 @@ public final class CompanionOwnedAssetAcquisition {
             self.exclusiveInFlight = false
             let catalogue: CompanionAssetCatalog?
             let adoptedStatus: Status
+            var nextID: UUID?
             switch result {
             case .success(.selection(.installed(let id, let value))):
                 catalogue = value
+                nextID = id
                 adoptedStatus = request.requiresExclusiveSlot ? .selectionSaved(id) : .loaded(id)
             case .success(.selection(.builtIn)):
                 catalogue = nil
@@ -290,12 +363,13 @@ public final class CompanionOwnedAssetAcquisition {
             case .success(.selection(.unavailable(let id))):
                 catalogue = nil
                 adoptedStatus = .savedAssetUnavailable(id)
-            case .failure, .success(.inventory), .success(.preview), .success(.installedPack):
+            case .failure, .success(.inventory), .success(.preview), .success(.installedPack), .success(.managed):
                 catalogue = nil
                 adoptedStatus = failure
             }
-            self.status = self.bridge.completeAssetRequest(ticket, catalogue: catalogue)
-                ? adoptedStatus : .idle
+            let adopted = self.bridge.completeAssetRequest(ticket, catalogue: catalogue)
+            self.status = adopted ? adoptedStatus : .idle
+            self.admittedID = adopted ? nextID : nil
             self.onCompletion?()
         }
         return true
@@ -311,6 +385,8 @@ public final class CompanionOwnedAssetAcquisition {
         }
         queue.cancel()
         importStatus = .idle
+        libraryStatus = .idle
+        if !decision.rendersCharacter { admittedID = nil }
         clearPreview()
         inventory = nil
         inventoryStatus = .idle
