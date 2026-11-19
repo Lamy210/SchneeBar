@@ -93,3 +93,16 @@ private func localCalendar(_ zone: String) throws -> Calendar {
         try JSONDecoder().decode(FocusReminderSchedule.self, from: JSONSerialization.data(withJSONObject: record))
     }
 }
+
+@Test func focusReminderRejectsDecodedInvalidCivilCursor() throws {
+    let schedule = try FocusReminderSchedule(rule: .daily(hour: 9, minute: 0))
+    let tokyo = try localCalendar("Asia/Tokyo")
+    let now = try instant("2026-11-20T00:00:00Z")
+    let occurrence = try #require(try schedule.next(after: now, calendar: tokyo))
+    var record = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(occurrence)) as? [String: Any])
+    record["civilDay"] = ["year": 2026, "month": 2, "day": 30]
+    let invalid = try JSONDecoder().decode(FocusReminderSchedule.Occurrence.self, from: JSONSerialization.data(withJSONObject: record))
+    #expect(throws: FocusReminderSchedule.ValidationError.invalidCursor) {
+        try schedule.next(after: now, calendar: tokyo, lastObserved: invalid)
+    }
+}
