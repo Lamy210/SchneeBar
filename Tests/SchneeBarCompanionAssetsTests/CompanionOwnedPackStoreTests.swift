@@ -495,3 +495,29 @@ private func withStore(_ body: (URL, URL) throws -> Void) throws {
         #expect(try CompanionOwnedPackStore.inventory(in: target).entries.count == 2)
     }
 }
+
+
+@Test func ownedPurgeUnselectedProtectsDanglingAndMalformedSelection() throws {
+    try withStore { source, target in
+        let pack = try CompanionOwnedPackStore.install(from: source, into: target)
+        _ = try CompanionOwnedPackStore.select(id: pack.id, in: target)
+        let record = target.appendingPathComponent(".selection-v1")
+        let saved = try Data(contentsOf: record)
+        try CompanionOwnedPackStore.trash(id: pack.id, in: target)
+        try #require(FileManager.default.createFile(atPath: record.path, contents: saved,
+            attributes: [.posixPermissions: NSNumber(value: 0o600)]))
+        #expect(throws: CompanionOwnedPackError.selectedPack) {
+            try CompanionOwnedPackStore.purgeUnselectedTrash(id: pack.id, in: target)
+        }
+        #expect(try Data(contentsOf: record) == saved)
+        try Data("bad".utf8).write(to: record)
+        #expect(throws: CompanionOwnedPackError.invalidSelection) {
+            try CompanionOwnedPackStore.purgeUnselectedTrash(id: pack.id, in: target)
+        }
+        #expect(try CompanionOwnedPackStore.inventory(in: target).trashedIDs == [pack.id])
+        try CompanionOwnedPackStore.selectBuiltIn(in: target)
+        try CompanionOwnedPackStore.purgeUnselectedTrash(id: pack.id, in: target)
+        #expect(try CompanionOwnedPackStore.inventory(in: target).trashedIDs.isEmpty)
+        #expect(try Data(contentsOf: source.appendingPathComponent("original.gif")) == Data(base64Encoded: ownedGIF))
+    }
+}
