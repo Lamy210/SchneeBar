@@ -410,3 +410,59 @@ private func withStore(_ body: (URL, URL) throws -> Void) throws {
         }
     }
 }
+
+
+@Test func ownedSingleImageImportCanonicalizesStaticAndPreservesAnimatedBytes() throws {
+    try withStore { source, target in
+        let selected = try CompanionOwnedPackStore.install(from: source, into: target)
+        _ = try CompanionOwnedPackStore.select(id: selected.id, in: target)
+        let record = target.appendingPathComponent(".selection-v1")
+        let original = try Data(contentsOf: record)
+        let fixtures: [(String, String, CompanionPackManifest.Kind, String, Int, Bool)] = [
+            ("static.png", "iVBORw0KGgoAAAANSUhEUgAAAAQAAAACCAYAAAB/qH1jAAAAE0lEQVR4nGOUSznxnwEJMDGgAQBG3gJNNKg6iwAAAABJRU5ErkJggg==", .singleImage, "run.png", 8, true),
+            ("static.gif", "R0lGODdhBAACAIEAAB5kyAAAAAAAAAAAACwAAAAABAACAAAIBwABCBwoMCAAOw==", .singleImage, "run.png", 8, false),
+            ("static.webp", "UklGRjoAAABXRUJQVlA4IC4AAADQAQCdASoEAAIAAUAmJaACdLoB+AADsAD+8Bvf/1wH5wH5wH8WP/zYFc1z7mgA", .singleImage, "run.png", 8, false),
+            ("animated.gif", ownedGIF, .gif, "run.gif", 2, true),
+            ("animated.png", "iVBORw0KGgoAAAANSUhEUgAAAAQAAAACCAYAAAB/qH1jAAAACGFjVEwAAAACAAAAAPONk3AAAAAaZmNUTAAAAAAAAAAEAAAAAgAAAAAAAAAAAAEACgAAdYjXEwAAABNJREFUeJxjlEs58Z8BCTAxoAEARt4CTTSoOosAAAAaZmNUTAAAAAEAAAAEAAAAAgAAAAAAAAAAAAEABQAA5ad6+gAAABdmZEFUAAAAAnicYzyRIvefAQkwMaABAEgyAk3VrAMWAAAAAElFTkSuQmCC", .apng, "run.png", 2, true),
+            ("animated.webp", "UklGRogAAABXRUJQVlA4WAoAAAACAAAAAwAAAQAAQU5JTQYAAAAAAAAAAABBTk1GKgAAAAAAAAAAAAMAAAEAAGQAAAJWUDhMEQAAAC8DQAAAB1CyehS5/4GI6H8AAEFOTUYqAAAAAAAAAAAAAwAAAQAAyAAAAFZQOEwRAAAALwNAAAAHULIi16P/gYjofwAA", .webP, "run.webp", 2, true)
+        ]
+        for (name, encoded, kind, canonical, frames, preservesBytes) in fixtures {
+            let bytes = try #require(Data(base64Encoded: encoded))
+            // Extension is deliberately misleading: image type is determined by ImageIO.
+            let input = source.appendingPathComponent(name + ".bin")
+            try bytes.write(to: input)
+            let installed = try CompanionOwnedPackStore.installImage(from: input, into: target)
+            let pack = target.appendingPathComponent(CompanionOwnedPackStore.packName(installed.id))
+            let manifest = try CompanionPackManifest.decode(Data(contentsOf: pack.appendingPathComponent("character.json")))
+            #expect(manifest.name == "Imported image" && manifest.clips.first?.kind == kind)
+            let canonicalBytes = try Data(contentsOf: pack.appendingPathComponent(canonical))
+            if preservesBytes { #expect(canonicalBytes == bytes) }
+            else { #expect(canonicalBytes.starts(with: [137, 80, 78, 71, 13, 10, 26, 10])) }
+            let reloaded = try CompanionOwnedPackStore.load(id: installed.id, from: target)
+            #expect(reloaded.defaultAsset.frames.count == frames)
+            #expect(reloaded.defaultAsset.clip.durations == installed.catalogue.defaultAsset.clip.durations)
+            #expect(try Data(contentsOf: input) == bytes)
+            #expect(try Data(contentsOf: record) == original)
+        }
+        #expect(try CompanionOwnedPackStore.inventory(in: target).entries.count == 7)
+    }
+}
+
+@Test func ownedSingleImageImportRejectsLinksAndInvalidBytesWithoutPublishing() throws {
+    try withStore { source, target in
+        let existing = try CompanionOwnedPackStore.install(from: source, into: target)
+        let names = try FileManager.default.contentsOfDirectory(atPath: target.path).sorted()
+        let link = source.appendingPathComponent("link.gif")
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: source.appendingPathComponent("original.gif"))
+        #expect(throws: CompanionFileReadError.openFailed) {
+            try CompanionOwnedPackStore.installImage(from: link, into: target)
+        }
+        let invalid = source.appendingPathComponent("invalid.png")
+        try Data([1, 2, 3]).write(to: invalid)
+        #expect(throws: (any Error).self) {
+            try CompanionOwnedPackStore.installImage(from: invalid, into: target)
+        }
+        #expect(try FileManager.default.contentsOfDirectory(atPath: target.path).sorted() == names)
+        #expect(try CompanionOwnedPackStore.load(id: existing.id, from: target).defaultAsset.frames.count == 2)
+    }
+}
