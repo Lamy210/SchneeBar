@@ -11,7 +11,8 @@ private let origin = Date(timeIntervalSince1970: 1_700_000_000)
     let wake = origin.addingTimeInterval(600)
     #expect(try restored.remaining(at: wake) == 0)
     #expect(restored == original)
-    let completion = try #require(restored.reconcile(at: wake))
+    let reconciled = try restored.reconcile(at: wake)
+    let completion = try #require(reconciled)
     #expect(completion.countdownID == original.id)
     #expect(completion.deadline == origin.addingTimeInterval(60))
     #expect(try restored.reconcile(at: wake) == nil)
@@ -97,4 +98,33 @@ private let origin = Date(timeIntervalSince1970: 1_700_000_000)
     #expect(throws: FocusCountdown.ValidationError.invalidRecord) {
         try JSONDecoder().decode(FocusCountdown.self, from: JSONSerialization.data(withJSONObject: json))
     }
+}
+
+@Test func focusCountdownHonorsMaximumAndExactDeadline() throws {
+    let duration = FocusCountdown.maximumDuration
+    var timer = try FocusCountdown(duration: duration, now: origin)
+    let deadline = origin.addingTimeInterval(duration)
+    let before = deadline.addingTimeInterval(-1)
+    #expect(try timer.remaining(at: before) == 1)
+    #expect(try timer.reconcile(at: before) == nil)
+    #expect(timer.phase == .running(deadline: deadline))
+    let completion = try timer.reconcile(at: deadline)
+    #expect(completion?.deadline == deadline && completion?.countdownID == timer.id)
+    #expect(timer.phase == .completed(deadline: deadline))
+    #expect(try timer.reconcile(at: deadline) == nil)
+}
+
+@Test func focusCountdownFailedResumePreservesPausedRecordAndAllowsCancel() throws {
+    var timer = try FocusCountdown(duration: 60, now: origin)
+    #expect(try timer.pause(at: origin.addingTimeInterval(10)) == nil)
+    let paused = timer
+    let nearDateLimit = Date(timeIntervalSince1970: 253_402_300_799)
+    #expect(throws: FocusCountdown.ValidationError.invalidClock) {
+        try timer.resume(at: nearDateLimit)
+    }
+    #expect(timer == paused)
+    #expect(try timer.cancel(at: origin.addingTimeInterval(100)) == nil)
+    try timer.resume(at: origin.addingTimeInterval(101))
+    #expect(timer.phase == .cancelled)
+    #expect(try timer.reconcile(at: origin.addingTimeInterval(1000)) == nil)
 }
