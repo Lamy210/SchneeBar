@@ -1,0 +1,9 @@
+# C3y draft: explicit single-image owned import
+
+Based on merged #430. Add a file chooser mode for PNG/GIF/WebP (including APNG). The same one-use modal token, current asset session, inventory precondition, and exclusive worker slot apply. Detect actual content type by existing bounded ImageIO preflight, not extension. Read the explicitly selected local regular file once using the existing descriptor reader; reject links and malformed inputs. Do not retain source URLs or bookmarks.
+
+Create a canonical owned v1 pack with a generic Imported image name and the run default. Preserve animated GIF/APNG/WebP bytes and authored timing under the existing decoder limits. Static PNG remains the original bytes; one-frame GIF/WebP are normalized to PNG (metadata need not be preserved). Static images use existing singleImage procedural bob animation, not an authored multi-state animation. The normalized encoded output must fit the existing encoded byte budget, source and generated frames must pass the static pack pixel budget. ImageIO intermediate decode and PNG encoding allocations are not bounded by the retained catalogue size. No source directory staging or implicit format guessing.
+
+Reuse the same root lock, capacity/recovery checks, staging, canonical manifest generation, cleanup and exclusive rename as folder import. No implicit selection, rendering or selection-record mutation. Cancellation does not roll back an already committed rename; refresh the inventory before retry. No new worker or polling.
+
+Three regression fixtures cover six static/animated format cases and reload equivalence, malformed/link rejection with existing pack preservation, and the editor mode/one-use token with a real owned import. Native CI, platform ImageIO format support on actual Macs, panel/accessibility, library recovery, shipping wiring, ADR/rights and main promotion remain unverified. No production target dependency change.

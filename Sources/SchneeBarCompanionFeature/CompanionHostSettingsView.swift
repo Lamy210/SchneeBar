@@ -116,6 +116,8 @@ private struct CompanionHostAssetSettingsSection: View {
                 .disabled(!model.canOperate)
             Button("Import character pack…") { model.choosePackToImport() }
                 .disabled(!model.canImport)
+            Button("Import image (PNG, GIF, WebP)…") { model.choosePackToImport(singleImage: true) }
+                .disabled(!model.canImport)
             if model.inventoryStatus == .loaded && !model.inventoryAllowsImport {
                 Text("Library is full or requires recovery before importing.")
                     .foregroundStyle(.secondary)
@@ -127,7 +129,7 @@ private struct CompanionHostAssetSettingsSection: View {
             case .failed: Text("Import could not be verified. Refresh the library before retrying.")
                 .foregroundStyle(.secondary)
             }
-            Text("Import copies a pack into the private library. It does not select or display it.")
+            Text("Import copies a pack or image into the private library. Static images use the standard bob animation. It does not select or display the imported pack.")
                 .foregroundStyle(.secondary)
             Picker("Installed pack", selection: Binding<UUID?>(
                 get: { model.listedID }, set: { model.chooseListedPack($0) }

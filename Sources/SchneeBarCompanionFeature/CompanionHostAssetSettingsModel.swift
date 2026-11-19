@@ -3,6 +3,7 @@ import Foundation
 import Observation
 import SchneeBarCompanionAssets
 import SchneeBarCompanionCore
+import UniformTypeIdentifiers
 
 /// An isolated editor for the host-owned library. Never writes on draft
 /// changes and never polls the worker. The caller still owns release approval.
@@ -24,6 +25,7 @@ public final class CompanionHostAssetSettingsModel {
     public private(set) var inventoryStatus: CompanionOwnedAssetAcquisition.InventoryStatus = .idle
     private var assetSession: UUID?
     private var importPanelSession: UUID?
+    private var importSingleImage = false
     public private(set) var importStatus: CompanionOwnedAssetAcquisition.ImportStatus = .idle
     public private(set) var inventoryAllowsImport = false
     private var previewCandidate: UUID?
@@ -77,22 +79,24 @@ public final class CompanionHostAssetSettingsModel {
 
     /// Native chooser is explicit. Keep one panel token and fence the result
     /// against both the editor and the host session, including sleep/wake.
-    public func choosePackToImport() {
-        guard let token = beginImportChoice() else { return }
+    public func choosePackToImport(singleImage: Bool = false) {
+        guard let token = beginImportChoice(singleImage: singleImage) else { return }
         let panel = NSOpenPanel()
-        panel.canChooseFiles = false
-        panel.canChooseDirectories = true
+        panel.canChooseFiles = singleImage
+        panel.canChooseDirectories = !singleImage
+        if singleImage { panel.allowedContentTypes = [.png, .gif, .webP] }
         panel.allowsMultipleSelection = false
         panel.treatsFilePackagesAsDirectories = true
         let url = panel.runModal() == .OK ? panel.url : nil
         completeImportChoice(token, url: url)
     }
 
-    func beginImportChoice() -> UUID? {
+    func beginImportChoice(singleImage: Bool = false) -> UUID? {
         sync()
         guard canImport else { notice = .rejected; return nil }
         let token = UUID()
         importPanelSession = token
+        importSingleImage = singleImage
         return token
     }
 
@@ -100,9 +104,11 @@ public final class CompanionHostAssetSettingsModel {
         sync()
         guard importPanelSession == token else { return }
         importPanelSession = nil
+        let singleImage = importSingleImage
+        importSingleImage = false
         guard let url else { return }
         guard canImport, let owner, let session = assetSession else { notice = .rejected; return }
-        notice = owner.importAssetPack(from: url, session: session) ? .none : .rejected
+        notice = owner.importAssetPack(from: url, session: session, singleImage: singleImage) ? .none : .rejected
     }
 
     public func refreshInventory() {
@@ -143,6 +149,7 @@ public final class CompanionHostAssetSettingsModel {
             nextBusy != isBusy || nextAvailability != availability {
             clearConfirmation = nil
             importPanelSession = nil
+            importSingleImage = false
             assetSession = nextSession
             status = nextStatus
             isBusy = nextBusy

@@ -15,7 +15,7 @@ public final class CompanionOwnedAssetAcquisition {
 
     private let bridge: CompanionHostRuntimeBridge
     private enum Request: Sendable {
-        case installed(UUID), saved, save(UUID), clearSaved, inventory, preview(UUID), install(URL)
+        case installed(UUID), saved, save(UUID), clearSaved, inventory, preview(UUID), install(URL, singleImage: Bool)
         var requiresExclusiveSlot: Bool {
             switch self {
             case .save, .clearSaved, .inventory, .preview, .install: true
@@ -41,6 +41,7 @@ public final class CompanionOwnedAssetAcquisition {
     public enum ImportStatus: Equatable, Sendable { case idle, importing, installed(UUID), failed }
     public private(set) var importStatus: ImportStatus = .idle
     private let canInstallPack: Bool
+    private let canInstallImage: Bool
     private let canReadInventory: Bool
     private let canReadSelection: Bool
     private let canSaveSelection: Bool
@@ -60,7 +61,8 @@ public final class CompanionOwnedAssetAcquisition {
             saveSelection: { try CompanionOwnedPackStore.select(id: $0, in: privateRoot) },
             clearSelection: { try CompanionOwnedPackStore.selectBuiltIn(in: privateRoot) },
             readInventory: { try CompanionOwnedPackStore.inventory(in: privateRoot) },
-            installPack: { try CompanionOwnedPackStore.install(from: $0, into: privateRoot).id })
+            installPack: { try CompanionOwnedPackStore.install(from: $0, into: privateRoot).id },
+            installImage: { try CompanionOwnedPackStore.installImage(from: $0, into: privateRoot).id })
     }
 
     init(bridge: CompanionHostRuntimeBridge,
@@ -69,13 +71,15 @@ public final class CompanionOwnedAssetAcquisition {
          saveSelection: (@Sendable (UUID) throws -> CompanionOwnedPackStore.Selection)? = nil,
          clearSelection: (@Sendable () throws -> Void)? = nil,
          readInventory: (@Sendable () throws -> CompanionOwnedPackStore.Inventory)? = nil,
-         installPack: (@Sendable (URL) throws -> UUID)? = nil) {
+         installPack: (@Sendable (URL) throws -> UUID)? = nil,
+         installImage: (@Sendable (URL) throws -> UUID)? = nil) {
         self.bridge = bridge
         canReadSelection = readSelection != nil
         canSaveSelection = saveSelection != nil
         canClearSelection = clearSelection != nil
         canReadInventory = readInventory != nil
         canInstallPack = installPack != nil
+        canInstallImage = installImage != nil
         queue = CompanionImportQueue { request in
             switch request {
             case .installed(let id): return .selection(.installed(id: id, catalogue: try load(id)))
@@ -96,11 +100,11 @@ public final class CompanionOwnedAssetAcquisition {
                 return .inventory(try readInventory())
             case .preview(let id):
                 return .preview(try CompanionPackThumbnail(catalogue: load(id)))
-            case .install(let url):
-                guard let installPack else { throw CancellationError() }
+            case .install(let url, let singleImage):
+                guard let install = singleImage ? installImage : installPack else { throw CancellationError() }
                 let scoped = url.startAccessingSecurityScopedResource()
                 defer { if scoped { url.stopAccessingSecurityScopedResource() } }
-                return .installedPack(try installPack(url))
+                return .installedPack(try install(url))
             }
         }
         queue.onIdle = { [weak self] in self?.onDrained?() }
@@ -222,8 +226,8 @@ public final class CompanionOwnedAssetAcquisition {
     /// Explicit copy into the private library. Never select or adopt the
     /// returned catalogue. The store enforces its own slot and recovery limits.
     @discardableResult
-    public func importPack(from url: URL) -> Bool {
-        guard canInstallPack, !queue.isBusy, url.isFileURL else { return false }
+    public func importPack(from url: URL, singleImage: Bool = false) -> Bool {
+        guard (singleImage ? canInstallImage : canInstallPack), !queue.isBusy, url.isFileURL else { return false }
         guard let ticket = bridge.beginAssetRequest(),
               let session = bridge.decision.assetSession else {
             discardIfRevoked()
@@ -235,7 +239,7 @@ public final class CompanionOwnedAssetAcquisition {
         inventory = nil
         inventoryStatus = .idle
         importStatus = .importing
-        queue.submit(.install(url)) { [weak self] result in
+        queue.submit(.install(url, singleImage: singleImage)) { [weak self] result in
             guard let self, self.pending == ticket else { return }
             self.pending = nil
             self.exclusiveInFlight = false
