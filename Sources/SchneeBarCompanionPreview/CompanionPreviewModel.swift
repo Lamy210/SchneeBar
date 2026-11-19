@@ -537,39 +537,36 @@ final class CompanionPreviewModel: NSObject, ObservableObject {
 
     private func refreshOnce(widget: Bool, companion: Bool, revision expected: UUID,
                              force: Bool) async {
-        let firstPlan = await sampler.refreshPlan()
-        guard revision == expected, !Task.isCancelled else { return }
-        if widget && (force || firstPlan.requiresRefresh(.widget)) {
-            do {
-                let sample = try await sampler.sample(for: HostCPUConsumer.widget)
-                guard revision == expected, !Task.isCancelled else { return }
-                cpuText = "Total CPU \(Int(sample.percentage.rounded()))%"
-            } catch is CancellationError {
-                // Revoked lease is not a counter failure.
-            } catch {
-                guard revision == expected, !Task.isCancelled else { return }
-                cpuText = "Total CPU unavailable"
+        guard await HostCPURefreshCycle.run(
+            sampler: sampler, widget: widget, companion: companion, force: force,
+            isCurrent: { self.revision == expected },
+            refreshWidget: {
+                do {
+                    let sample = try await self.sampler.sample(for: .widget)
+                    guard self.revision == expected, !Task.isCancelled else { return }
+                    self.cpuText = "Total CPU \(Int(sample.percentage.rounded()))%"
+                } catch is CancellationError {
+                    // Revoked lease is not a counter failure.
+                } catch {
+                    guard self.revision == expected, !Task.isCancelled else { return }
+                    self.cpuText = "Total CPU unavailable"
+                }
+            },
+            refreshCompanion: {
+                guard let request = self.runtime.beginCPURequest() else { return }
+                do {
+                    let sample = try await self.sampler.sample(for: .companion)
+                    guard self.revision == expected, !Task.isCancelled else { return }
+                    self.runtime.acceptCPU(request, id: sample.id, epoch: sample.epoch,
+                        capturedAt: sample.capturedAt, hostPercentage: sample.percentage)
+                } catch is CancellationError {
+                    // Revoked lease is not a counter failure.
+                } catch {
+                    guard self.revision == expected, !Task.isCancelled else { return }
+                    self.runtime.cpuUnavailable(request)
+                }
             }
-        }
-        // Re-read after the widget: it might have just acquired a new
-        // observation that the companion has not yet consumed.
-        let secondPlan = await sampler.refreshPlan()
-        guard revision == expected, !Task.isCancelled else { return }
-        if companion && (force || secondPlan.requiresRefresh(.companion)),
-           let request = runtime.beginCPURequest() {
-            do {
-                let sample = try await sampler.sample(for: HostCPUConsumer.companion)
-                guard revision == expected, !Task.isCancelled else { return }
-                runtime.acceptCPU(request, id: sample.id, epoch: sample.epoch,
-                    capturedAt: sample.capturedAt, hostPercentage: sample.percentage)
-            } catch is CancellationError {
-                // Revoked lease is not a counter failure.
-            } catch {
-                guard revision == expected, !Task.isCancelled else { return }
-                runtime.cpuUnavailable(request)
-            }
-        }
-        guard revision == expected, !Task.isCancelled else { return }
+        ) else { return }
         updatePresentation()
     }
 
