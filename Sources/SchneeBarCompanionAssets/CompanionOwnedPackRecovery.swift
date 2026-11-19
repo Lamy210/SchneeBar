@@ -24,6 +24,12 @@ extension CompanionOwnedPackStore {
         try purge(trashName(id), in: privateRoot)
     }
 
+    /// Host purge refuses a tombstone referenced by a committed selection,
+    /// even if an external change left that selection dangling.
+    public static func purgeUnselectedTrash(id: UUID, in privateRoot: URL) throws {
+        try purge(trashName(id), in: privateRoot, protecting: id)
+    }
+
     /// After explicit confirmation, reclaim an abandoned import stage.
     /// Exclusive root lock excludes any cooperating live import.
     public static func discardAbandonedStage(id: UUID, in privateRoot: URL) throws {
@@ -72,11 +78,12 @@ extension CompanionOwnedPackStore {
     /// Before *any* unlink, validate the entire bounded, canonical generated
     /// layout. A partial stage may contain incomplete/empty regular files or
     /// missing entries; no arbitrary descendants, links, or unknown names.
-    private static func purge(_ name: String, in url: URL) throws {
+    private static func purge(_ name: String, in url: URL, protecting id: UUID? = nil) throws {
         try Task.checkCancellation()
         let root = try openRoot(url)
         defer { _ = Darwin.close(root) }
         try lockRoot(root, exclusive: true)
+        if let id, try selectedID(root) == id { throw CompanionOwnedPackError.selectedPack }
         let fd = try openPrivateChild(name, root: root)
         defer { _ = Darwin.close(fd) }
         var info = stat()
