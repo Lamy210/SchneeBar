@@ -123,6 +123,33 @@ public actor FocusReminderCollectionStore {
         return entry
     }
 
+    /// A changed rule is a new schedule identity. Preserve the title and
+    /// enabled intent, but do not carry the old occurrence cursor or ticket.
+    /// A failed validation, replan or write cannot revoke the old record.
+    public func replaceRule(id: UUID, rule: FocusReminderSchedule.Rule,
+                            at now: Date, calendar: Calendar) throws -> Entry {
+        var snapshot = try load()
+        guard let index = snapshot.entries.firstIndex(where: { $0.id == id }) else {
+            throw StoreError.staleReminder
+        }
+        let previous = snapshot.entries[index]
+        guard previous.state.origin == .native else { throw FocusReminderState.StateError.importedInactive }
+        let schedule = try FocusReminderSchedule(rule: rule)
+        // Compare canonical rules, not the randomly generated candidate ID.
+        guard schedule.rule != previous.state.schedule.rule else { return previous }
+        guard !snapshot.entries.contains(where: { $0.id == schedule.id }) else {
+            throw StoreError.duplicateIdentity
+        }
+        var state = FocusReminderState(schedule: schedule, origin: previous.state.origin)
+        try state.setEnabled(previous.state.enabled)
+        if state.enabled { try state.replan(at: now, calendar: calendar) }
+        let replacement = try Entry(title: previous.title, state: state)
+        snapshot.entries[index] = replacement
+        snapshot.entries.sort { $0.id.uuidString < $1.id.uuidString }
+        try save(snapshot)
+        return replacement
+    }
+
     /// Removing an entry revokes its ticket in the same transaction. All
     /// state operations remain gated by the existing FocusReminderState.
     public func apply(id: UUID, command: Command, at now: Date) throws -> Result {
