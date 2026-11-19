@@ -414,3 +414,49 @@ private func hostCompositionCatalogue() throws -> CompanionAssetCatalog {
     #expect(editor.entries.count == 2 && editor.entries.contains(where: { $0.id == id }))
     #expect(editor.canImport)
 }
+
+
+@Test @MainActor func hostSingleImageImportRoutesChooserModeWithoutSelecting() async throws {
+    let name = "SchneeBarTests.imageImport.\(UUID())"
+    let defaults = try #require(UserDefaults(suiteName: name))
+    defer { defaults.removePersistentDomain(forName: name) }
+    let store = CompanionHostPreferenceStore(defaults: defaults)
+    try store.save(.init(enabled: true, freeze: true))
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false,
+        attributes: [.posixPermissions: NSNumber(value: 0o700)])
+    defer { try? FileManager.default.removeItem(at: root) }
+    let input = root.deletingLastPathComponent().appendingPathComponent(UUID().uuidString + ".png")
+    let bytes = try #require(Data(base64Encoded: "iVBORw0KGgoAAAANSUhEUgAAAAQAAAACCAYAAAB/qH1jAAAAE0lEQVR4nGOUSznxnwEJMDGgAQBG3gJNNKg6iwAAAABJRU5ErkJggg=="))
+    try bytes.write(to: input)
+    defer { try? FileManager.default.removeItem(at: input) }
+    let button = NSButton()
+    button.image = NSImage(size: NSSize(width: 12, height: 12))
+    let original = try #require(button.image)
+    let owner = CompanionHostComposition(button: button, store: store,
+        load: { try CompanionOwnedPackStore.load(id: $0, from: root) },
+        readInventory: { try CompanionOwnedPackStore.inventory(in: root) },
+        installPack: { try CompanionOwnedPackStore.install(from: $0, into: root).id },
+        installImage: { try CompanionOwnedPackStore.installImage(from: $0, into: root).id },
+        makeCPU: { runtime in CompanionSharedCPURefresh(runtime: runtime, read: { throw CancellationError() }) })
+    defer { owner.stop() }
+    let editor = owner.assetSettings
+    owner.updateEnvironment(.init(releaseApproved: true, ownsMenuSurface: true))
+    editor.refreshInventory()
+    try await waitForHostComposition { !editor.isBusy }
+    let stale = try #require(editor.beginImportChoice(singleImage: true))
+    editor.completeImportChoice(stale, url: nil)
+    let token = try #require(editor.beginImportChoice(singleImage: true))
+    editor.completeImportChoice(stale, url: input)
+    #expect(!editor.isBusy)
+    editor.completeImportChoice(token, url: input)
+    try await waitForHostComposition { !editor.isBusy }
+    guard case .installed(let id) = editor.importStatus else { Issue.record("Expected installed image"); return }
+    #expect(button.image === original && !owner.decision.rendersCharacter)
+    #expect(!FileManager.default.fileExists(atPath: root.appendingPathComponent(".selection-v1").path))
+    #expect(try Data(contentsOf: input) == bytes)
+    #expect(try CompanionOwnedPackStore.load(id: id, from: root).defaultAsset.frames.count == 8)
+    editor.refreshInventory()
+    try await waitForHostComposition { !editor.isBusy }
+    #expect(editor.entries.map(\.id) == [id])
+}
