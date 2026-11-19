@@ -64,6 +64,18 @@ public actor FocusCountdownStore {
     /// A caller must not replay an uncertain external notification.
     public func apply(_ command: Command, at now: Date) throws -> Result {
         let old = try load()
+        let result = try Self.transition(command, from: old, at: now)
+        if result.countdown != old {
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.sortedKeys]
+            let data = try encoder.encode(result.countdown)
+            guard data.count <= Self.maximumRecordBytes else { throw StoreError.payloadTooLarge }
+            try write(data, fileURL)
+        }
+        return result
+    }
+
+    static func transition(_ command: Command, from old: FocusCountdown?, at now: Date) throws -> Result {
         var next: FocusCountdown
         var completion: FocusCountdown.Completion?
         switch command {
@@ -88,13 +100,6 @@ public actor FocusCountdownStore {
             }
         }
 
-        if next != old {
-            let encoder = JSONEncoder()
-            encoder.outputFormatting = [.sortedKeys]
-            let data = try encoder.encode(next)
-            guard data.count <= Self.maximumRecordBytes else { throw StoreError.payloadTooLarge }
-            try write(data, fileURL)
-        }
         return Result(countdown: next, completion: completion)
     }
 }
