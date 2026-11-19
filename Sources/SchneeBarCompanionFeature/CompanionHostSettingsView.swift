@@ -174,6 +174,43 @@ private struct CompanionHostAssetSettingsSection: View {
                 Button("Save selection") { model.saveCandidate() }
             }
             .disabled(!model.canSelect)
+            Button("Move selected pack to Trash…", role: .destructive) { model.requestTrashCandidate() }
+                .disabled(!model.canTrashCandidate)
+            Text("Displayed and saved packs are protected. Clear the saved choice and stop displaying a pack before moving it.")
+                .foregroundStyle(.secondary)
+            if !model.trashedIDs.isEmpty {
+                Text("Trashed packs").font(.headline)
+                ForEach(model.trashedIDs, id: \.self) { id in
+                    HStack {
+                        Text(id.uuidString).font(.caption).textSelection(.enabled)
+                        Spacer()
+                        Button("Restore…") { model.requestRestoreTrash(id) }
+                            .disabled(!model.canRestoreTrash(id))
+                    }
+                }
+            }
+            if let confirmation = model.libraryConfirmation {
+                VStack(alignment: .leading) {
+                    switch confirmation.action {
+                    case .trash(let id):
+                        Text("Move pack \(id.uuidString) to Trash? It remains recoverable and reserves its library slot.")
+                    case .restore(let id):
+                        Text("Restore pack \(id.uuidString)? This does not select it.")
+                    }
+                    HStack {
+                        Button("Cancel") { model.cancelLibraryAction() }
+                        Button("Confirm") { model.confirmLibraryAction(confirmation.token) }
+                    }
+                }
+            }
+            switch model.libraryStatus {
+            case .idle: EmptyView()
+            case .working: Text("Updating library…")
+            case .completed: Text("Library updated. Refresh installed packs.")
+            case .failed:
+                Text("Library update could not be verified. The pack may be protected or unavailable. Refresh before retrying.")
+                    .foregroundStyle(.secondary)
+            }
             HStack {
                 Button("Restore saved") { model.restoreSaved() }
                 Button("Clear saved selection…", role: .destructive) { model.requestClear() }
