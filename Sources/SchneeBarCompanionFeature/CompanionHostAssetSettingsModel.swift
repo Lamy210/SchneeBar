@@ -30,7 +30,13 @@ public final class CompanionHostAssetSettingsModel {
         public let token: UUID
         public let action: CompanionOwnedAssetAcquisition.LibraryAction
     }
-    public private(set) var libraryConfirmation: LibraryConfirmation?
+    public private(set) var libraryConfirmation: LibraryConfirmation? {
+        didSet { if oldValue != libraryConfirmation { recoveryConfirmationText = "" } }
+    }
+    public var recoveryConfirmationText = ""
+    public private(set) var abandonedStageIDs: [UUID] = []
+    public private(set) var pendingSelectionRecovery = false
+    public private(set) var unknownEntryCount = 0
     public private(set) var trashedIDs: [UUID] = []
     public private(set) var displayedPackID: UUID?
     public private(set) var libraryStatus: CompanionOwnedAssetAcquisition.LibraryStatus = .idle
@@ -140,11 +146,42 @@ public final class CompanionHostAssetSettingsModel {
         libraryConfirmation = .init(token: UUID(), action: .restore(id))
     }
 
+    public func canPurgeTrash(_ id: UUID) -> Bool {
+        canOperate && trashedIDs.contains(id) && owner?.canManageAssetLibrary(.purge(id)) == true
+    }
+
+    public func requestPurgeTrash(_ id: UUID) {
+        requestRecovery(.purge(id))
+    }
+
+    public func requestDiscardStage(_ id: UUID) {
+        requestRecovery(.discardStage(id))
+    }
+
+    public func requestDiscardPendingSelection() {
+        requestRecovery(.discardPendingSelection)
+    }
+
+    public func canRecover(_ action: CompanionOwnedAssetAcquisition.LibraryAction) -> Bool {
+        canOperate && action.requiresTypedConfirmation && owner?.canManageAssetLibrary(action) == true
+    }
+
+    private func requestRecovery(_ action: CompanionOwnedAssetAcquisition.LibraryAction) {
+        sync()
+        guard canRecover(action) else { notice = .rejected; return }
+        libraryConfirmation = .init(token: UUID(), action: action)
+    }
+
+    public var canConfirmLibraryAction: Bool {
+        guard let confirmation = libraryConfirmation, canOperate else { return false }
+        return !confirmation.action.requiresTypedConfirmation || recoveryConfirmationText == "DELETE"
+    }
+
     public func cancelLibraryAction() { libraryConfirmation = nil }
 
     public func confirmLibraryAction(_ token: UUID) {
         sync()
-        guard let confirmation = libraryConfirmation, confirmation.token == token else { return }
+        guard let confirmation = libraryConfirmation, confirmation.token == token, canConfirmLibraryAction else { return }
         libraryConfirmation = nil
         guard canOperate, let owner, owner.canManageAssetLibrary(confirmation.action) else {
             notice = .rejected
@@ -168,6 +205,15 @@ public final class CompanionHostAssetSettingsModel {
     func sync() {
         let nextEntries = owner?.assetInventory?.entries ?? []
         let nextTrash = owner?.assetInventory?.trashedIDs ?? []
+        let nextStages = owner?.assetInventory?.abandonedStageIDs ?? []
+        let nextPending = owner?.assetInventory?.pendingSelectionRecovery ?? false
+        let nextUnknown = owner?.assetInventory?.unknownEntryCount ?? 0
+        if nextStages != abandonedStageIDs || nextPending != pendingSelectionRecovery || nextUnknown != unknownEntryCount {
+            libraryConfirmation = nil
+            abandonedStageIDs = nextStages
+            pendingSelectionRecovery = nextPending
+            unknownEntryCount = nextUnknown
+        }
         let nextDisplayed = owner?.displayedPackID
         let nextLibraryStatus = owner?.assetLibraryStatus ?? .idle
         if nextTrash != trashedIDs || nextDisplayed != displayedPackID || nextLibraryStatus != libraryStatus {

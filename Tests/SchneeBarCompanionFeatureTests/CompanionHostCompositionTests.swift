@@ -494,6 +494,9 @@ private func hostCompositionCatalogue() throws -> CompanionAssetCatalog {
             switch action {
             case .trash(let id): try CompanionOwnedPackStore.trashUnselected(id: id, in: root)
             case .restore(let id): try CompanionOwnedPackStore.restore(id: id, in: root)
+                case .purge(let id): try CompanionOwnedPackStore.purgeUnselectedTrash(id: id, in: root)
+                case .discardStage(let id): try CompanionOwnedPackStore.discardAbandonedStage(id: id, in: root)
+                case .discardPendingSelection: try CompanionOwnedPackStore.discardPendingSelection(in: root)
             }
         },
         makeCPU: { runtime in CompanionSharedCPURefresh(runtime: runtime, read: { throw CancellationError() }) })
@@ -544,4 +547,102 @@ private func hostCompositionCatalogue() throws -> CompanionAssetCatalog {
     editor.refreshInventory()
     try await waitForHostComposition { !editor.isBusy }
     #expect(editor.trashedIDs.isEmpty && editor.entries.count == 3)
+}
+
+
+@Test @MainActor func hostLibraryRecoveryRequiresTypedConfirmationAndPreservesCommittedChoice() async throws {
+    let name = "SchneeBarTests.libraryRecovery.\(UUID())"
+    let defaults = try #require(UserDefaults(suiteName: name))
+    defer { defaults.removePersistentDomain(forName: name) }
+    let store = CompanionHostPreferenceStore(defaults: defaults)
+    try store.save(.init(enabled: true, freeze: true))
+    let tmp = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    let source = tmp.appendingPathComponent("fixture.schneerunner")
+    let root = tmp.appendingPathComponent("owned")
+    let fm = FileManager.default
+    try fm.createDirectory(at: source, withIntermediateDirectories: true)
+    defer { try? fm.removeItem(at: tmp) }
+    try fm.createDirectory(at: root, withIntermediateDirectories: false,
+        attributes: [.posixPermissions: NSNumber(value: 0o700)])
+    let gif = try #require(Data(base64Encoded: "R0lGODlhBAACAIEAAECA/wAAAAAAAAAAACH/C05FVFNDQVBFMi4wAwEAAAAh+QQACgAAACwAAAAABAACAAAIBwABCBwoMCAAIfkEARQAAQAsAAAAAAQAAgCB/0AAAAAAAAAAAAAACAcAAQgcKDAgADs="))
+    try gif.write(to: source.appendingPathComponent("run.gif"))
+    try Data(#"{"formatVersion":1,"name":"Fixture","defaultState":"run","clips":[{"state":"run","kind":"gif","path":"run.gif"}]}"#.utf8)
+        .write(to: source.appendingPathComponent("character.json"))
+    let saved = try CompanionOwnedPackStore.install(from: source, into: root)
+    let spare = try CompanionOwnedPackStore.install(from: source, into: root)
+    _ = try CompanionOwnedPackStore.select(id: saved.id, in: root)
+    try CompanionOwnedPackStore.trashUnselected(id: spare.id, in: root)
+    let record = root.appendingPathComponent(".selection-v1")
+    let original = try Data(contentsOf: record)
+    let stageID = UUID()
+    let stage = root.appendingPathComponent(".stage-" + stageID.uuidString.lowercased())
+    try fm.createDirectory(at: stage, withIntermediateDirectories: false,
+        attributes: [.posixPermissions: NSNumber(value: 0o700)])
+    let pending = root.appendingPathComponent(".selection-pending")
+    try #require(fm.createFile(atPath: pending.path, contents: Data("unfinished".utf8),
+        attributes: [.posixPermissions: NSNumber(value: 0o600)]))
+    let unknown = root.appendingPathComponent("unknown")
+    try Data([42]).write(to: unknown)
+    let button = NSButton()
+    button.image = NSImage(size: NSSize(width: 12, height: 12))
+    let owner = CompanionHostComposition(button: button, store: store,
+        load: { try CompanionOwnedPackStore.load(id: $0, from: root) },
+        readInventory: { try CompanionOwnedPackStore.inventory(in: root) },
+        manageLibrary: { action in
+            switch action {
+            case .trash(let id): try CompanionOwnedPackStore.trashUnselected(id: id, in: root)
+            case .restore(let id): try CompanionOwnedPackStore.restore(id: id, in: root)
+            case .purge(let id): try CompanionOwnedPackStore.purgeUnselectedTrash(id: id, in: root)
+            case .discardStage(let id): try CompanionOwnedPackStore.discardAbandonedStage(id: id, in: root)
+            case .discardPendingSelection: try CompanionOwnedPackStore.discardPendingSelection(in: root)
+            }
+        },
+        makeCPU: { runtime in CompanionSharedCPURefresh(runtime: runtime, read: { throw CancellationError() }) })
+    defer { owner.stop() }
+    let editor = owner.assetSettings
+    owner.updateEnvironment(.init(releaseApproved: true, ownsMenuSurface: true))
+    editor.refreshInventory()
+    try await waitForHostComposition { !editor.isBusy }
+    #expect(editor.trashedIDs == [spare.id] && editor.abandonedStageIDs == [stageID])
+    #expect(editor.pendingSelectionRecovery && editor.unknownEntryCount == 1)
+    #expect(!editor.inventoryAllowsImport)
+    editor.requestPurgeTrash(spare.id)
+    let stale = try #require(editor.libraryConfirmation).token
+    editor.recoveryConfirmationText = "delete"
+    editor.confirmLibraryAction(stale)
+    #expect(!editor.isBusy && !editor.canConfirmLibraryAction)
+    editor.recoveryConfirmationText = "DELETE"
+    editor.requestDiscardStage(stageID)
+    #expect(editor.recoveryConfirmationText.isEmpty && !editor.canConfirmLibraryAction)
+    editor.confirmLibraryAction(stale)
+    #expect(!editor.isBusy)
+    let stageToken = try #require(editor.libraryConfirmation).token
+    editor.recoveryConfirmationText = "DELETE"
+    editor.confirmLibraryAction(stageToken)
+    editor.confirmLibraryAction(stageToken)
+    try await waitForHostComposition { !editor.isBusy }
+    #expect(editor.libraryStatus == .completed(.discardStage(stageID)))
+    #expect(!fm.fileExists(atPath: stage.path))
+    editor.refreshInventory()
+    try await waitForHostComposition { !editor.isBusy }
+    editor.requestDiscardPendingSelection()
+    editor.recoveryConfirmationText = "DELETE"
+    editor.confirmLibraryAction(try #require(editor.libraryConfirmation).token)
+    try await waitForHostComposition { !editor.isBusy }
+    #expect(editor.libraryStatus == .completed(.discardPendingSelection))
+    #expect(!fm.fileExists(atPath: pending.path))
+    editor.refreshInventory()
+    try await waitForHostComposition { !editor.isBusy }
+    editor.requestPurgeTrash(spare.id)
+    editor.recoveryConfirmationText = "DELETE"
+    editor.confirmLibraryAction(try #require(editor.libraryConfirmation).token)
+    try await waitForHostComposition { !editor.isBusy }
+    #expect(editor.libraryStatus == .completed(.purge(spare.id)))
+    #expect(try Data(contentsOf: record) == original)
+    #expect(try Data(contentsOf: unknown) == Data([42]))
+    editor.refreshInventory()
+    try await waitForHostComposition { !editor.isBusy }
+    #expect(editor.entries.map(\.id) == [saved.id] && editor.trashedIDs.isEmpty)
+    #expect(editor.abandonedStageIDs.isEmpty && !editor.pendingSelectionRecovery)
+    #expect(editor.unknownEntryCount == 1 && !editor.inventoryAllowsImport)
 }
