@@ -21,6 +21,23 @@ let project = Project(
             sources: ["Sources/SchneeBarCore/**"]
         ),
         .target(
+            name: "SchneeBarFocusCore",
+            destinations: .macOS,
+            product: .staticFramework,
+            bundleId: "dev.lamy.schneebar.focus-core",
+            deploymentTargets: deploymentTarget,
+            sources: ["Sources/SchneeBarFocusCore/**"]
+        ),
+        .target(
+            name: "SchneeBarFocusCoreTests",
+            destinations: .macOS,
+            product: .unitTests,
+            bundleId: "dev.lamy.schneebar.focus-core-tests",
+            deploymentTargets: deploymentTarget,
+            sources: ["Tests/SchneeBarFocusCoreTests/**"],
+            dependencies: [.target(name: "SchneeBarFocusCore")]
+        ),
+        .target(
             name: "SchneeBarCompanionCore",
             destinations: .macOS,
             product: .staticFramework,
