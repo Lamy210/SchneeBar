@@ -6,7 +6,7 @@ public enum CompanionOwnedPackError: Error, Equatable {
     case unsafeRoot, createFailed, writeFailed, publishFailed, cleanupFailed
     case busy, inventoryLimit, recoveryRequired, packLimit, missingPack
     case unsafeCleanup, moveFailed
-    case invalidSelection, selectionWriteFailed
+    case invalidSelection, selectionWriteFailed, selectedPack
 }
 
 /// A single import transaction. Caller supplies an existing app-owned,
