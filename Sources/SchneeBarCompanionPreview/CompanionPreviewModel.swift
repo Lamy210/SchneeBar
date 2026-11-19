@@ -74,7 +74,7 @@ final class CompanionPreviewModel: NSObject, ObservableObject {
         }
         return coordinator
     }()
-    private var transition: Task<Void, Never>?
+    private let cpuTransitions: HostCPUDemandTransitions
     private var refresh: Task<Void, Never>?
     private var revision = UUID()
     private var sleeping = false
@@ -100,6 +100,7 @@ final class CompanionPreviewModel: NSObject, ObservableObject {
         self.imageQueue = imageQueue ?? CompanionSingleFileImporter.makeQueue()
         self.libraryRoot = libraryRoot ?? (allowHeadlessPresentation ? nil : PreviewPackLibrary.defaultRoot())
         self.sampler = sampler
+        self.cpuTransitions = HostCPUDemandTransitions(sampler: sampler)
         self.conflictingApplication = conflictingApplication
         self.makeStatusItem = makeStatusItem
         self.systemReduceMotion = systemReduceMotion
@@ -459,7 +460,6 @@ final class CompanionPreviewModel: NSObject, ObservableObject {
 
     private func reconcile() {
         reconcileImageSession()
-        let old = transition
         refresh?.cancel()
         refresh = nil
         revision = UUID()
@@ -482,9 +482,7 @@ final class CompanionPreviewModel: NSObject, ObservableObject {
         updatePresentation()
         let sampler = sampler
         let waitForNextPoll = waitForNextPoll
-        transition = Task { @MainActor [weak self] in
-            await old?.value
-            await sampler.reconcileDemand(widget: widget, companion: companion, sleeping: asleep)
+        cpuTransitions.enqueue(widget: widget, companion: companion, sleeping: asleep) { [weak self] in
             guard let self, self.revision == expected else { return }
             guard widget || companion else { return }
             self.refresh = Task { @MainActor [weak self] in
@@ -586,13 +584,7 @@ final class CompanionPreviewModel: NSObject, ObservableObject {
         imageQueue.cancel()
         refresh?.cancel()
         if let item { NSStatusBar.system.removeStatusItem(item) }
-        let pending = transition
-        let sampler = sampler
-        // Drain demand changes without retaining the dying model, then revoke
-        // both consumers. Renderer deinit independently cancels its frame task.
-        Task {
-            await pending?.value
-            await sampler.reconcileDemand(widget: false, companion: false, sleeping: true)
-        }
+        // Drain demand changes without retaining the dying model.
+        cpuTransitions.finish()
     }
 }

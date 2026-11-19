@@ -16,7 +16,8 @@ final class MenuBarController: NSObject {
     private let widgetEngine: WidgetEngine
     private let cpuSampler: HostCPUSampler
     private let cpuProvider: CPUWidgetProvider
-    private var configurationTask: Task<Void, Never>?
+    private let cpuTransitions: HostCPUDemandTransitions
+    private var configurationTask: Task<Void, Never>? { cpuTransitions.latest }
     private var configurationRevision = UUID()
     private var cpuDemandEnabled = false
     private let workspaceNotificationCenter: NotificationCenter
@@ -45,6 +46,7 @@ final class MenuBarController: NSObject {
         let sampler = HostCPUSampler()
         let provider = CPUWidgetProvider(sampler: sampler)
         cpuSampler = sampler
+        cpuTransitions = HostCPUDemandTransitions(sampler: sampler)
         cpuProvider = provider
         widgetEngine = WidgetEngine(providers: [
             ClockWidgetProvider(),
@@ -78,18 +80,11 @@ final class MenuBarController: NSObject {
         configureAndStartWidgetRuntime()
     }
 
-    deinit {
+    isolated deinit {
         refreshTask?.cancel()
         refreshSleepTask?.cancel()
         immediateActivityRefreshTask?.cancel()
-        let pending = configurationTask
-        pending?.cancel()
-        // Drain earlier transitions before the final suspend, without retaining self.
-        let sampler = cpuSampler
-        Task {
-            await pending?.value
-            await sampler.reconcileDemand(widget: false, companion: false, sleeping: true)
-        }
+        cpuTransitions.finish()
         workspaceNotificationCenter.removeObserver(self)
     }
 
@@ -328,8 +323,6 @@ final class MenuBarController: NSObject {
     private func enqueueConfiguration(
         _ configuration: SchneeBarCore.WidgetConfiguration?, sleeping: Bool
     ) -> Task<Void, Never> {
-        let previous = configurationTask
-        let sampler = cpuSampler
         let engine = widgetEngine
         let descriptor = cpuProvider.descriptor
         let enabled = !sleeping && (configuration?.isEnabled(descriptor) ?? false)
@@ -345,10 +338,7 @@ final class MenuBarController: NSObject {
             apply(snapshots: remaining, diagnostics: diagnostics)
         }
 
-        let task = Task { @MainActor in
-            await previous?.value
-            guard !Task.isCancelled else { return }
-            await sampler.reconcileDemand(widget: enabled, companion: false, sleeping: sleeping)
+        return cpuTransitions.enqueue(widget: enabled, companion: false, sleeping: sleeping) {
             if let configuration {
                 await engine.setConfiguration(
                     configuration, invalidatingRuntimeOf: resetCPU ? descriptor.id : nil
@@ -357,8 +347,6 @@ final class MenuBarController: NSObject {
                 await engine.invalidateRuntime(id: descriptor.id)
             }
         }
-        configurationTask = task
-        return task
     }
 
     private func isCurrentRuntime(_ generation: WidgetRuntimeLifecycle.Generation) -> Bool {
