@@ -186,7 +186,30 @@ private struct CompanionHostAssetSettingsSection: View {
                         Spacer()
                         Button("Restore…") { model.requestRestoreTrash(id) }
                             .disabled(!model.canRestoreTrash(id))
+                        Button("Delete permanently…", role: .destructive) { model.requestPurgeTrash(id) }
+                            .disabled(!model.canPurgeTrash(id))
                     }
+                }
+            }
+            if !model.abandonedStageIDs.isEmpty || model.pendingSelectionRecovery || model.unknownEntryCount > 0 {
+                Text("Library recovery").font(.headline)
+                ForEach(model.abandonedStageIDs, id: \.self) { id in
+                    HStack {
+                        Text(id.uuidString).font(.caption).textSelection(.enabled)
+                        Spacer()
+                        Button("Discard incomplete import…", role: .destructive) { model.requestDiscardStage(id) }
+                            .disabled(!model.canRecover(.discardStage(id)))
+                    }
+                }
+                if model.pendingSelectionRecovery {
+                    Button("Discard pending selection…", role: .destructive) { model.requestDiscardPendingSelection() }
+                        .disabled(!model.canRecover(.discardPendingSelection))
+                    Text("The last committed choice is kept. Pending changes are never replayed.")
+                        .foregroundStyle(.secondary)
+                }
+                if model.unknownEntryCount > 0 {
+                    Text("Unknown library entries: \(model.unknownEntryCount). Automatic cleanup is unavailable.")
+                        .foregroundStyle(.secondary)
                 }
             }
             if let confirmation = model.libraryConfirmation {
@@ -196,10 +219,22 @@ private struct CompanionHostAssetSettingsSection: View {
                         Text("Move pack \(id.uuidString) to Trash? It remains recoverable and reserves its library slot.")
                     case .restore(let id):
                         Text("Restore pack \(id.uuidString)? This does not select it.")
+                    case .purge(let id):
+                        Text("Permanently delete trashed pack \(id.uuidString)? This cannot be undone.")
+                    case .discardStage(let id):
+                        Text("Discard incomplete import \(id.uuidString)? Its staged data cannot be recovered.")
+                    case .discardPendingSelection:
+                        Text("Discard the uncommitted selection record? The committed record is kept.")
+                    }
+                    if confirmation.action.requiresTypedConfirmation {
+                        TextField("Type DELETE to confirm", text: $model.recoveryConfirmationText)
                     }
                     HStack {
                         Button("Cancel") { model.cancelLibraryAction() }
-                        Button("Confirm") { model.confirmLibraryAction(confirmation.token) }
+                        Button("Confirm", role: confirmation.action.requiresTypedConfirmation ? .destructive : nil) {
+                            model.confirmLibraryAction(confirmation.token)
+                        }
+                        .disabled(!model.canConfirmLibraryAction)
                     }
                 }
             }
