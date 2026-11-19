@@ -514,3 +514,63 @@ private func acquisitionCatalogue() throws -> CompanionAssetCatalog {
     try await waitForAcquisition { !owner.isAssetWorkerBusy }
     #expect(owner.assetStatus == .loaded(next) && probe.peakWorkers() == 1)
 }
+
+
+@Test @MainActor func ownedAssetPublicationGateRejectsResultBeforeAnyFrameIsAdopted() async throws {
+    let name = "SchneeBarTests.publicationGate.\(UUID())"
+    let defaults = try #require(UserDefaults(suiteName: name))
+    defer { defaults.removePersistentDomain(forName: name) }
+    let store = CompanionHostPreferenceStore(defaults: defaults)
+    try store.save(.init(enabled: true, freeze: true, allowLocalEvents: true))
+    let id = UUID()
+    let probe = AcquisitionProbe(blockedID: id, failedID: UUID(), catalogue: try acquisitionCatalogue())
+    defer { probe.release() }
+    var frames = 0
+    var allowed = true
+    let runtime = CompanionRuntimeCoordinator(renderer: CompanionMenuBarRenderer(
+        onFrame: { _ in frames += 1 }, onClear: {}))
+    let bridge = CompanionHostRuntimeBridge(store: store, runtime: runtime)
+    let loader = CompanionOwnedAssetAcquisition(bridge: bridge, load: { try probe.load($0) })
+    defer { loader.stop() }
+    loader.canPublish = { allowed }
+    loader.updateEnvironment(.init(releaseApproved: true, ownsMenuSurface: true))
+    #expect(loader.request(id))
+    try await waitForAcquisition { probe.started() == [id] }
+    allowed = false
+    probe.release()
+    try await waitForAcquisition { !loader.isBusy }
+    #expect(frames == 0 && loader.status == .idle)
+    #expect(loader.decision.availability == .releaseBlocked)
+    #expect(runtime.localEventSession == nil && !runtime.wantsHostCPU)
+}
+
+@Test @MainActor func hostAssetCompletionLosesOwnershipWithoutAdoptingOrPublishingDemand() async throws {
+    let name = "SchneeBarTests.completionOwnership.\(UUID())"
+    let defaults = try #require(UserDefaults(suiteName: name))
+    defer { defaults.removePersistentDomain(forName: name) }
+    let store = CompanionHostPreferenceStore(defaults: defaults)
+    try store.save(.init(enabled: true, allowLocalEvents: true))
+    let id = UUID()
+    let probe = AcquisitionProbe(blockedID: id, failedID: UUID(), catalogue: try acquisitionCatalogue())
+    defer { probe.release() }
+    let button = NSButton()
+    button.image = NSImage(size: NSSize(width: 12, height: 12))
+    var demandActivated = false
+    let owner = CompanionHostComposition(button: button, store: store,
+        load: { try probe.load($0) },
+        makeCPU: { runtime in CompanionSharedCPURefresh(runtime: runtime, read: { throw CancellationError() }) },
+        onDemandChanged: { demand in
+            if demand.cpu || demand.localEventSession != nil { demandActivated = true }
+        })
+    defer { owner.stop() }
+    owner.updateEnvironment(.init(releaseApproved: true, ownsMenuSurface: true))
+    #expect(owner.requestInstalledAsset(id))
+    try await waitForAcquisition { probe.started() == [id] }
+    let external = NSImage(size: NSSize(width: 16, height: 16))
+    button.image = external
+    probe.release()
+    try await waitForAcquisition { !owner.isAssetWorkerBusy }
+    #expect(owner.isStopped && owner.assetStatus == .idle && !demandActivated)
+    #expect(owner.displayedPackID == nil && owner.demand.localEventSession == nil && !owner.demand.cpu)
+    #expect(button.image === external && !owner.assetSettings.canOperate)
+}
