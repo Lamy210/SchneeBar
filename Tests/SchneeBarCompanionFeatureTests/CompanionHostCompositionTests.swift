@@ -494,6 +494,9 @@ private func hostCompositionCatalogue() throws -> CompanionAssetCatalog {
             switch action {
             case .trash(let id): try CompanionOwnedPackStore.trashUnselected(id: id, in: root)
             case .restore(let id): try CompanionOwnedPackStore.restore(id: id, in: root)
+                case .purge(let id): try CompanionOwnedPackStore.purgeUnselectedTrash(id: id, in: root)
+                case .discardStage(let id): try CompanionOwnedPackStore.discardAbandonedStage(id: id, in: root)
+                case .discardPendingSelection: try CompanionOwnedPackStore.discardPendingSelection(in: root)
             }
         },
         makeCPU: { runtime in CompanionSharedCPURefresh(runtime: runtime, read: { throw CancellationError() }) })
