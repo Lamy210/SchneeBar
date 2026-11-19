@@ -63,6 +63,18 @@ public actor FocusPomodoroStore {
     /// a newly advanced phase. No notification dispatch here.
     public func apply(_ command: Command, at now: Date) throws -> Result {
         let old = try load()
+        let result = try Self.transition(command, from: old, at: now)
+        if result.session != old {
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.sortedKeys]
+            let bytes = try encoder.encode(result.session)
+            guard bytes.count <= Self.maximumRecordBytes else { throw StoreError.payloadTooLarge }
+            try write(bytes, fileURL)
+        }
+        return result
+    }
+
+    static func transition(_ command: Command, from old: FocusPomodoro?, at now: Date) throws -> Result {
         var next: FocusPomodoro
         var completion: FocusPomodoro.Completion?
         switch command {
@@ -83,13 +95,6 @@ public actor FocusPomodoroStore {
             case .advance: try next.advance(step: step, at: now)
             case .cancel: completion = try next.cancel(step: step, at: now)
             }
-        }
-        if next != old {
-            let encoder = JSONEncoder()
-            encoder.outputFormatting = [.sortedKeys]
-            let bytes = try encoder.encode(next)
-            guard bytes.count <= Self.maximumRecordBytes else { throw StoreError.payloadTooLarge }
-            try write(bytes, fileURL)
         }
         return Result(session: next, completion: completion)
     }
