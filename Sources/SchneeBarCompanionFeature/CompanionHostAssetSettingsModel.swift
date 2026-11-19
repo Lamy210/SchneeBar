@@ -13,7 +13,7 @@ public final class CompanionHostAssetSettingsModel {
     public enum ActionNotice: Equatable, Sendable { case none, rejected }
     public var packIDText = "" {
         didSet {
-            if packIDText != oldValue { previewCandidate = nil }
+            if packIDText != oldValue { previewCandidate = nil; libraryConfirmation = nil }
         }
     }
     public private(set) var notice: ActionNotice = .none
@@ -26,6 +26,14 @@ public final class CompanionHostAssetSettingsModel {
     private var assetSession: UUID?
     private var importPanelSession: UUID?
     private var importSingleImage = false
+    public struct LibraryConfirmation: Equatable, Sendable {
+        public let token: UUID
+        public let action: CompanionOwnedAssetAcquisition.LibraryAction
+    }
+    public private(set) var libraryConfirmation: LibraryConfirmation?
+    public private(set) var trashedIDs: [UUID] = []
+    public private(set) var displayedPackID: UUID?
+    public private(set) var libraryStatus: CompanionOwnedAssetAcquisition.LibraryStatus = .idle
     public private(set) var importStatus: CompanionOwnedAssetAcquisition.ImportStatus = .idle
     public private(set) var inventoryAllowsImport = false
     private var previewCandidate: UUID?
@@ -111,6 +119,44 @@ public final class CompanionHostAssetSettingsModel {
         notice = owner.importAssetPack(from: url, session: session, singleImage: singleImage) ? .none : .rejected
     }
 
+    public var canTrashCandidate: Bool {
+        guard canOperate, let id = listedID, id != displayedPackID else { return false }
+        return owner?.canManageAssetLibrary(.trash(id)) == true
+    }
+
+    public func requestTrashCandidate() {
+        sync()
+        guard canTrashCandidate, let id = listedID else { notice = .rejected; return }
+        libraryConfirmation = .init(token: UUID(), action: .trash(id))
+    }
+
+    public func canRestoreTrash(_ id: UUID) -> Bool {
+        canOperate && trashedIDs.contains(id) && owner?.canManageAssetLibrary(.restore(id)) == true
+    }
+
+    public func requestRestoreTrash(_ id: UUID) {
+        sync()
+        guard canRestoreTrash(id) else { notice = .rejected; return }
+        libraryConfirmation = .init(token: UUID(), action: .restore(id))
+    }
+
+    public func cancelLibraryAction() { libraryConfirmation = nil }
+
+    public func confirmLibraryAction(_ token: UUID) {
+        sync()
+        guard let confirmation = libraryConfirmation, confirmation.token == token else { return }
+        libraryConfirmation = nil
+        guard canOperate, let owner, owner.canManageAssetLibrary(confirmation.action) else {
+            notice = .rejected
+            return
+        }
+        if case .trash(let id) = confirmation.action, listedID != id {
+            notice = .rejected
+            return
+        }
+        notice = owner.manageAssetLibrary(confirmation.action) ? .none : .rejected
+    }
+
     public func refreshInventory() {
         sync()
         guard canOperate, let owner else { notice = .rejected; return }
@@ -121,10 +167,20 @@ public final class CompanionHostAssetSettingsModel {
     /// A stale destructive confirmation must not survive any relevant change.
     func sync() {
         let nextEntries = owner?.assetInventory?.entries ?? []
+        let nextTrash = owner?.assetInventory?.trashedIDs ?? []
+        let nextDisplayed = owner?.displayedPackID
+        let nextLibraryStatus = owner?.assetLibraryStatus ?? .idle
+        if nextTrash != trashedIDs || nextDisplayed != displayedPackID || nextLibraryStatus != libraryStatus {
+            libraryConfirmation = nil
+            trashedIDs = nextTrash
+            displayedPackID = nextDisplayed
+            libraryStatus = nextLibraryStatus
+        }
         inventoryAllowsImport = owner?.assetInventory?.canInstall == true
         importStatus = owner?.assetImportStatus ?? .idle
         let nextInventoryStatus = owner?.assetInventoryStatus ?? .idle
         if entries != nextEntries {
+            libraryConfirmation = nil
             // A previously selected listed ID must not silently remain the
             // candidate after its metadata snapshot was invalidated.
             if let id = listedID, !nextEntries.contains(where: { $0.id == id && $0.name != nil }) {
@@ -148,6 +204,7 @@ public final class CompanionHostAssetSettingsModel {
         if nextSession != assetSession || nextStatus != status ||
             nextBusy != isBusy || nextAvailability != availability {
             clearConfirmation = nil
+            libraryConfirmation = nil
             importPanelSession = nil
             importSingleImage = false
             assetSession = nextSession
