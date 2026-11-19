@@ -72,3 +72,78 @@ private final class SubscriptionProbe {
     owner.stop()
     #expect(closes == 1)
 }
+
+
+@Test @MainActor func eventSessionOwnerSerializesReplacementDuringOpen() throws {
+    let first = UUID(), second = UUID()
+    var active = 0, peak = 0
+    var actions: [String] = []
+    var deliveries: [UUID] = []
+    var replace: (@MainActor () -> Void)?
+    var old: CompanionLocalEventSessionOwner.Receive?
+    let owner = CompanionLocalEventSessionOwner(open: { id, callback in
+        active += 1
+        peak = max(peak, active)
+        actions.append("open-" + id.uuidString)
+        if id == first {
+            old = callback
+            callback(id, .build, nil)
+            // Replacement invalidates the old callback immediately, even
+            // though open has yet to return its cancellation closure.
+            callback(id, .build, nil)
+        }
+        return {
+            actions.append("close-" + id.uuidString)
+            active -= 1
+        }
+    }, receive: { id, _, _ in
+        deliveries.append(id)
+        if id == first { replace?() }
+    })
+    replace = { [weak owner] in owner?.update(session: second) }
+    owner.update(session: first)
+    #expect(owner.session == second && active == 1 && peak == 1)
+    #expect(actions == ["open-" + first.uuidString, "close-" + first.uuidString, "open-" + second.uuidString])
+    let stale = try #require(old)
+    stale(first, .build, nil)
+    #expect(deliveries == [first])
+    owner.stop()
+    #expect(active == 0)
+}
+
+@Test @MainActor func eventSessionOwnerCoalescesReplacementDuringCloseAndRejectsReusedUUID() throws {
+    let first = UUID(), skipped = UUID()
+    var active = 0, peak = 0, opens = 0
+    var actions: [String] = []
+    var callbacks: [CompanionLocalEventSessionOwner.Receive] = []
+    var deliveries = 0
+    var duringClose: (@MainActor () -> Void)?
+    let owner = CompanionLocalEventSessionOwner(open: { id, callback in
+        opens += 1
+        active += 1
+        peak = max(peak, active)
+        actions.append("open-" + id.uuidString)
+        callbacks.append(callback)
+        return {
+            actions.append("close-start-" + id.uuidString)
+            callback(id, .build, nil)
+            duringClose?()
+            active -= 1
+            actions.append("close-end-" + id.uuidString)
+        }
+    }, receive: { _, _, _ in deliveries += 1 })
+    owner.update(session: first)
+    duringClose = { [weak owner] in owner?.update(session: first) }
+    owner.update(session: skipped)
+    #expect(owner.session == first && active == 1 && peak == 1 && opens == 2)
+    #expect(actions == ["open-" + first.uuidString, "close-start-" + first.uuidString,
+        "close-end-" + first.uuidString, "open-" + first.uuidString])
+    let old = try #require(callbacks.first)
+    let renewed = try #require(callbacks.last)
+    old(first, .build, nil)
+    renewed(first, .build, nil)
+    #expect(deliveries == 1)
+    duringClose = nil
+    owner.stop()
+    #expect(active == 0)
+}
