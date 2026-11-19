@@ -460,3 +460,88 @@ private func hostCompositionCatalogue() throws -> CompanionAssetCatalog {
     try await waitForHostComposition { !editor.isBusy }
     #expect(editor.entries.map(\.id) == [id])
 }
+
+
+@Test @MainActor func hostLibraryTrashProtectsDisplayedAndSavedPacksAndConsumesConfirmation() async throws {
+    let name = "SchneeBarTests.libraryTrash.\(UUID())"
+    let defaults = try #require(UserDefaults(suiteName: name))
+    defer { defaults.removePersistentDomain(forName: name) }
+    let store = CompanionHostPreferenceStore(defaults: defaults)
+    try store.save(.init(enabled: true, freeze: true, allowLocalEvents: true))
+    let tmp = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    let source = tmp.appendingPathComponent("fixture.schneerunner")
+    let root = tmp.appendingPathComponent("owned")
+    try FileManager.default.createDirectory(at: source, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: tmp) }
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false,
+        attributes: [.posixPermissions: NSNumber(value: 0o700)])
+    let gif = try #require(Data(base64Encoded: "R0lGODlhBAACAIEAAECA/wAAAAAAAAAAACH/C05FVFNDQVBFMi4wAwEAAAAh+QQACgAAACwAAAAABAACAAAIBwABCBwoMCAAIfkEARQAAQAsAAAAAAQAAgCB/0AAAAAAAAAAAAAACAcAAQgcKDAgADs="))
+    try gif.write(to: source.appendingPathComponent("run.gif"))
+    try Data(#"{"formatVersion":1,"name":"Fixture","defaultState":"run","clips":[{"state":"run","kind":"gif","path":"run.gif"}]}"#.utf8)
+        .write(to: source.appendingPathComponent("character.json"))
+    let shown = try CompanionOwnedPackStore.install(from: source, into: root)
+    let saved = try CompanionOwnedPackStore.install(from: source, into: root)
+    let spare = try CompanionOwnedPackStore.install(from: source, into: root)
+    _ = try CompanionOwnedPackStore.select(id: saved.id, in: root)
+    let record = root.appendingPathComponent(".selection-v1")
+    let original = try Data(contentsOf: record)
+    let button = NSButton()
+    button.image = NSImage(size: NSSize(width: 12, height: 12))
+    let owner = CompanionHostComposition(button: button, store: store,
+        load: { try CompanionOwnedPackStore.load(id: $0, from: root) },
+        readInventory: { try CompanionOwnedPackStore.inventory(in: root) },
+        manageLibrary: { action in
+            switch action {
+            case .trash(let id): try CompanionOwnedPackStore.trashUnselected(id: id, in: root)
+            case .restore(let id): try CompanionOwnedPackStore.restore(id: id, in: root)
+            }
+        },
+        makeCPU: { runtime in CompanionSharedCPURefresh(runtime: runtime, read: { throw CancellationError() }) })
+    defer { owner.stop() }
+    let editor = owner.assetSettings
+    owner.updateEnvironment(.init(releaseApproved: true, ownsMenuSurface: true))
+    #expect(owner.requestInstalledAsset(shown.id))
+    try await waitForHostComposition { !editor.isBusy }
+    owner.cancelAssetRequest() // Cancelling status must not forget the displayed ID.
+    editor.refreshInventory()
+    try await waitForHostComposition { !editor.isBusy }
+    #expect(owner.displayedPackID == shown.id && owner.assetStatus == .idle)
+    #expect(!owner.manageAssetLibrary(.trash(shown.id)))
+    editor.chooseListedPack(saved.id)
+    editor.requestTrashCandidate()
+    let protectedToken = try #require(editor.libraryConfirmation).token
+    editor.confirmLibraryAction(protectedToken)
+    try await waitForHostComposition { !editor.isBusy }
+    #expect(editor.libraryStatus == .failed(.trash(saved.id)))
+    #expect(try Data(contentsOf: record) == original)
+    editor.refreshInventory()
+    try await waitForHostComposition { !editor.isBusy }
+    let eventSession = try #require(owner.demand.localEventSession)
+    let image = try #require(button.image)
+    editor.chooseListedPack(spare.id)
+    editor.requestTrashCandidate()
+    let stale = try #require(editor.libraryConfirmation).token
+    editor.chooseListedPack(saved.id)
+    editor.confirmLibraryAction(stale)
+    #expect(!editor.isBusy)
+    editor.chooseListedPack(spare.id)
+    editor.requestTrashCandidate()
+    let token = try #require(editor.libraryConfirmation).token
+    editor.confirmLibraryAction(token)
+    editor.confirmLibraryAction(token)
+    try await waitForHostComposition { !editor.isBusy }
+    #expect(editor.libraryStatus == .completed(.trash(spare.id)))
+    #expect(owner.displayedPackID == shown.id && owner.demand.localEventSession == eventSession)
+    #expect(button.image === image && editor.entries.isEmpty)
+    editor.refreshInventory()
+    try await waitForHostComposition { !editor.isBusy }
+    #expect(editor.trashedIDs == [spare.id])
+    editor.requestRestoreTrash(spare.id)
+    editor.confirmLibraryAction(try #require(editor.libraryConfirmation).token)
+    try await waitForHostComposition { !editor.isBusy }
+    #expect(editor.libraryStatus == .completed(.restore(spare.id)))
+    #expect(try Data(contentsOf: record) == original)
+    editor.refreshInventory()
+    try await waitForHostComposition { !editor.isBusy }
+    #expect(editor.trashedIDs.isEmpty && editor.entries.count == 3)
+}
