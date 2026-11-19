@@ -349,3 +349,68 @@ private func hostCompositionCatalogue() throws -> CompanionAssetCatalog {
     owner.updateEnvironment(.init(releaseApproved: true, awake: false, ownsMenuSurface: true))
     #expect(editor.entries.isEmpty && editor.candidateID == nil && !editor.canOperate)
 }
+
+
+@Test @MainActor func hostPackImportCopiesWithoutSelectingAndRejectsOldPanelToken() async throws {
+    let name = "SchneeBarTests.hostImport.\(UUID())"
+    let defaults = try #require(UserDefaults(suiteName: name))
+    defer { defaults.removePersistentDomain(forName: name) }
+    let store = CompanionHostPreferenceStore(defaults: defaults)
+    try store.save(.init(enabled: true, freeze: true, allowLocalEvents: true))
+    let tmp = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    let source = tmp.appendingPathComponent("fixture.schneerunner")
+    let root = tmp.appendingPathComponent("owned")
+    try FileManager.default.createDirectory(at: source, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: tmp) }
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false,
+        attributes: [.posixPermissions: NSNumber(value: 0o700)])
+    let gif = try #require(Data(base64Encoded: "R0lGODlhBAACAIEAAECA/wAAAAAAAAAAACH/C05FVFNDQVBFMi4wAwEAAAAh+QQACgAAACwAAAAABAACAAAIBwABCBwoMCAAIfkEARQAAQAsAAAAAAQAAgCB/0AAAAAAAAAAAAAACAcAAQgcKDAgADs="))
+    try gif.write(to: source.appendingPathComponent("run.gif"))
+    try Data(#"{"formatVersion":1,"name":"Fixture","defaultState":"run","clips":[{"state":"run","kind":"gif","path":"run.gif"}]}"#.utf8)
+        .write(to: source.appendingPathComponent("character.json"))
+    let initial = try CompanionOwnedPackStore.install(from: source, into: root)
+    _ = try CompanionOwnedPackStore.select(id: initial.id, in: root)
+    let record = root.appendingPathComponent(".selection-v1")
+    let original = try Data(contentsOf: record)
+    let button = NSButton()
+    button.image = NSImage(size: NSSize(width: 12, height: 12))
+    let owner = CompanionHostComposition(button: button, store: store,
+        load: { try CompanionOwnedPackStore.load(id: $0, from: root) },
+        readInventory: { try CompanionOwnedPackStore.inventory(in: root) },
+        installPack: { try CompanionOwnedPackStore.install(from: $0, into: root).id },
+        makeCPU: { runtime in CompanionSharedCPURefresh(runtime: runtime, read: { throw CancellationError() }) })
+    defer { owner.stop() }
+    let editor = owner.assetSettings
+    owner.updateEnvironment(.init(releaseApproved: true, ownsMenuSurface: true))
+    #expect(!editor.canImport)
+    editor.refreshInventory()
+    try await waitForHostComposition { !editor.isBusy }
+    #expect(editor.canImport)
+    let stale = try #require(editor.beginImportChoice())
+    owner.updateEnvironment(.init(releaseApproved: true, awake: false, ownsMenuSurface: true))
+    owner.updateEnvironment(.init(releaseApproved: true, ownsMenuSurface: true))
+    editor.completeImportChoice(stale, url: source)
+    #expect(!owner.isAssetWorkerBusy)
+    #expect(try CompanionOwnedPackStore.inventory(in: root).entries.count == 1)
+    #expect(owner.requestInstalledAsset(initial.id))
+    try await waitForHostComposition { !editor.isBusy }
+    editor.refreshInventory()
+    try await waitForHostComposition { !editor.isBusy }
+    let session = try #require(owner.demand.localEventSession)
+    let image = try #require(button.image)
+    let token = try #require(editor.beginImportChoice())
+    editor.completeImportChoice(token, url: source)
+    editor.completeImportChoice(token, url: source)
+    #expect(editor.isBusy && editor.importStatus == .importing)
+    try await waitForHostComposition { !editor.isBusy }
+    guard case .installed(let id) = editor.importStatus else { Issue.record("Expected imported ID"); return }
+    #expect(id != initial.id)
+    #expect(owner.assetStatus == .loaded(initial.id) && owner.demand.localEventSession == session)
+    #expect(button.image === image && editor.entries.isEmpty && !editor.canImport)
+    #expect(try Data(contentsOf: record) == original)
+    #expect(try Data(contentsOf: source.appendingPathComponent("run.gif")) == gif)
+    editor.refreshInventory()
+    try await waitForHostComposition { !editor.isBusy }
+    #expect(editor.entries.count == 2 && editor.entries.contains(where: { $0.id == id }))
+    #expect(editor.canImport)
+}

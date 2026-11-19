@@ -114,6 +114,21 @@ private struct CompanionHostAssetSettingsSection: View {
                 .foregroundStyle(.secondary)
             Button("Refresh installed packs") { model.refreshInventory() }
                 .disabled(!model.canOperate)
+            Button("Import character pack…") { model.choosePackToImport() }
+                .disabled(!model.canImport)
+            if model.inventoryStatus == .loaded && !model.inventoryAllowsImport {
+                Text("Library is full or requires recovery before importing.")
+                    .foregroundStyle(.secondary)
+            }
+            switch model.importStatus {
+            case .idle: EmptyView()
+            case .importing: Text("Validating and copying character pack…")
+            case .installed: Text("Pack imported. Refresh installed packs to choose it.")
+            case .failed: Text("Import could not be verified. Refresh the library before retrying.")
+                .foregroundStyle(.secondary)
+            }
+            Text("Import copies a pack into the private library. It does not select or display it.")
+                .foregroundStyle(.secondary)
             Picker("Installed pack", selection: Binding<UUID?>(
                 get: { model.listedID }, set: { model.chooseListedPack($0) }
             )) {

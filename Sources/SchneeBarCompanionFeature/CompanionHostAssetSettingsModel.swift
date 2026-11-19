@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import Observation
 import SchneeBarCompanionAssets
@@ -22,6 +23,9 @@ public final class CompanionHostAssetSettingsModel {
     public private(set) var entries: [CompanionOwnedPackStore.Entry] = []
     public private(set) var inventoryStatus: CompanionOwnedAssetAcquisition.InventoryStatus = .idle
     private var assetSession: UUID?
+    private var importPanelSession: UUID?
+    public private(set) var importStatus: CompanionOwnedAssetAcquisition.ImportStatus = .idle
+    public private(set) var inventoryAllowsImport = false
     private var previewCandidate: UUID?
     private var previewStatus: CompanionOwnedAssetAcquisition.PreviewStatus = .idle
     private var thumbnail: CompanionPackThumbnail?
@@ -38,6 +42,7 @@ public final class CompanionHostAssetSettingsModel {
         return UUID(uuidString: packIDText.trimmingCharacters(in: .whitespacesAndNewlines))
     }
     public var canSelect: Bool { canOperate && candidateID != nil }
+    public var canImport: Bool { canOperate && inventoryAllowsImport && importPanelSession == nil }
     public var listedID: UUID? {
         guard let id = candidateID, entries.contains(where: { $0.id == id && $0.name != nil }) else { return nil }
         return id
@@ -70,6 +75,36 @@ public final class CompanionHostAssetSettingsModel {
         else { previewCandidate = nil; notice = .rejected }
     }
 
+    /// Native chooser is explicit. Keep one panel token and fence the result
+    /// against both the editor and the host session, including sleep/wake.
+    public func choosePackToImport() {
+        guard let token = beginImportChoice() else { return }
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.treatsFilePackagesAsDirectories = true
+        let url = panel.runModal() == .OK ? panel.url : nil
+        completeImportChoice(token, url: url)
+    }
+
+    func beginImportChoice() -> UUID? {
+        sync()
+        guard canImport else { notice = .rejected; return nil }
+        let token = UUID()
+        importPanelSession = token
+        return token
+    }
+
+    func completeImportChoice(_ token: UUID, url: URL?) {
+        sync()
+        guard importPanelSession == token else { return }
+        importPanelSession = nil
+        guard let url else { return }
+        guard canImport, let owner, let session = assetSession else { notice = .rejected; return }
+        notice = owner.importAssetPack(from: url, session: session) ? .none : .rejected
+    }
+
     public func refreshInventory() {
         sync()
         guard canOperate, let owner else { notice = .rejected; return }
@@ -80,6 +115,8 @@ public final class CompanionHostAssetSettingsModel {
     /// A stale destructive confirmation must not survive any relevant change.
     func sync() {
         let nextEntries = owner?.assetInventory?.entries ?? []
+        inventoryAllowsImport = owner?.assetInventory?.canInstall == true
+        importStatus = owner?.assetImportStatus ?? .idle
         let nextInventoryStatus = owner?.assetInventoryStatus ?? .idle
         if entries != nextEntries {
             // A previously selected listed ID must not silently remain the
@@ -105,6 +142,7 @@ public final class CompanionHostAssetSettingsModel {
         if nextSession != assetSession || nextStatus != status ||
             nextBusy != isBusy || nextAvailability != availability {
             clearConfirmation = nil
+            importPanelSession = nil
             assetSession = nextSession
             status = nextStatus
             isBusy = nextBusy
