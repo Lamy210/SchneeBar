@@ -126,8 +126,13 @@ public final class CompanionHostComposition {
         self.cpu = makeCPU(runtime)
         self.onDemandChanged = onDemandChanged
         binding.onLoss = { [weak self] in self?.stop() }
+        acquisition.canPublish = { [weak self] in
+            guard let self, !self.isStopped else { return false }
+            return self.binding.check()
+        }
         acquisition.onCompletion = { [weak self] in
             guard let self, !self.isStopped else { return }
+            guard self.binding.check() else { self.stop(); return }
             self.cpu.invalidate()
             self.publishDemand()
         }
@@ -303,6 +308,9 @@ public final class CompanionHostComposition {
         guard !isStopped else { return }
         guard binding.check() else { stop(); return }
         await cpu.refresh { !self.isStopped && self.binding.check() && isCurrent() }
+        // A lost image detected by the post-read guard must also revoke
+        // leases and transport demand before returning to the host loop.
+        if !isStopped && !binding.check() { stop() }
     }
 
     /// Separate, explicit transport attachment, off by default. The owner
@@ -359,7 +367,11 @@ public final class CompanionHostComposition {
     }
 
     private func publishDemand() {
-        let active = !isStopped && binding.check()
+        if !isStopped && !binding.check() {
+            stop()
+            return
+        }
+        let active = !isStopped
         let next = Demand(cpu: active && runtime.wantsHostCPU,
             localEventSession: active ? runtime.localEventSession : nil)
         assetSettings.sync()
