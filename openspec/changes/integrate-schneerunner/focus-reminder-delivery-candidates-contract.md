@@ -1,0 +1,7 @@
+# E3f draft: read-only notification scheduling candidates
+
+Based on merged #448. Project enabled native collection entries into bounded, title-free candidate values (reminder ID, ticket ID, regular/snooze kind, absolute deadline). At most two per reminder (128 total with existing 64-entry bound). Sort by ascending deadline, regular before snooze at an equal deadline, then reminder UUID and ticket UUID. This tie-break is a deterministic enumeration order, not a guarantee of delivery. Query earliest deadline or due/overdue prefix at a valid supplied clock instant (inclusive equality). No implicit wall-clock reads.
+
+The snapshot can become stale at any time: revalidate each ticket with the authoritative actor and supplied current calendar for a regular claim. Disabling, deleting, replacing rules or a new regular claim may invalidate candidate IDs. Never treat a snapshot or successful claim as a notification receipt. The owner must separately decide late-delivery, permission, retry and durable outbox policy; no OS registration, cancellation, side effects or state-format change in this slice. No shipping wiring, migration, rights/ADR or main promotion changes.
+
+Regression coverage: exact deadline, stable tie order across reminders, disabled/imported exclusion, snooze projection and tie with regular, stale candidate rejection after disable, empty state and invalid clock. Native CI pending at authoring.
