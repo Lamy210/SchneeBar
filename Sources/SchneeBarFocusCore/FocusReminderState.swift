@@ -93,7 +93,9 @@ public struct FocusReminderState: Equatable, Sendable, Codable {
             throw StateError.snoozeWindowExpired
         }
         let deadline = now.addingTimeInterval(seconds)
-        guard Self.validDate(deadline), deadline > now else { throw StateError.invalidClock }
+        guard Self.validDate(deadline), (60...3600).contains(deadline.timeIntervalSince(now)) else {
+            throw StateError.invalidClock
+        }
         pendingSnooze = SnoozeTicket(id: UUID(), occurrence: occurrence, requestedAt: now, deadline: deadline)
         snoozeOpportunity = nil
     }
