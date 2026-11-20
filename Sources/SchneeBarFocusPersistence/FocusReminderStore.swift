@@ -7,6 +7,7 @@ import SchneeBarFocusCore
 public actor FocusReminderStore {
     public enum Command: Sendable {
         case setEnabled(Bool), replan(Calendar), claim(ticketID: UUID, calendar: Calendar)
+        case snooze(sourceTicketID: UUID, seconds: TimeInterval), claimSnooze(ticketID: UUID)
     }
     public enum StoreError: Error, Equatable, Sendable {
         case existingRecord, staleReminder, invalidBackingFile, payloadTooLarge
@@ -14,6 +15,7 @@ public actor FocusReminderStore {
     public struct Result: Equatable, Sendable {
         public let state: FocusReminderState
         public let claimed: FocusReminderSchedule.Occurrence?
+        public let claimedSnooze: FocusReminderState.SnoozeTicket?
     }
 
     public static let maximumRecordBytes = 16 * 1024
@@ -62,13 +64,16 @@ public actor FocusReminderStore {
         guard let old = try load(), old.schedule.id == id else { throw StoreError.staleReminder }
         var next = old
         var claimed: FocusReminderSchedule.Occurrence?
+        var claimedSnooze: FocusReminderState.SnoozeTicket?
         switch command {
         case .setEnabled(let value): try next.setEnabled(value)
         case .replan(let calendar): try next.replan(at: now, calendar: calendar)
         case .claim(let ticketID, let calendar): claimed = try next.claim(ticketID: ticketID, at: now, calendar: calendar)
+        case .snooze(let sourceTicketID, let seconds): try next.snooze(sourceTicketID: sourceTicketID, seconds: seconds, at: now)
+        case .claimSnooze(let ticketID): claimedSnooze = try next.claimSnooze(ticketID: ticketID, at: now)
         }
         if next != old { try save(next) }
-        return Result(state: next, claimed: claimed)
+        return Result(state: next, claimed: claimed, claimedSnooze: claimedSnooze)
     }
 
     private func save(_ state: FocusReminderState) throws {
