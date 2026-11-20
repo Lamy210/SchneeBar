@@ -122,7 +122,7 @@ private func withFocusNotificationIntent(
             try await gateway.submit(intent)
         }
         let saved = try await store.load()
-            #expect(saved.outbox == [intent])
+        #expect(saved.outbox == [intent])
         #expect(await port.snapshot().submitted.isEmpty)
     }
 }
