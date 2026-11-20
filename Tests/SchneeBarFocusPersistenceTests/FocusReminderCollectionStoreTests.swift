@@ -141,7 +141,7 @@ private func withCollection(_ body: (URL) async throws -> Void) async throws {
         try large.write(to: file, options: .atomic)
         await #expect(throws: FocusReminderCollectionStore.StoreError.capacityExceeded) { try await store.load() }
         #expect(try Data(contentsOf: file) == large)
-        json["version"] = 2
+        json["version"] = 3
         json["entries"] = [row]
         let future = try JSONSerialization.data(withJSONObject: json)
         try future.write(to: file, options: .atomic)
