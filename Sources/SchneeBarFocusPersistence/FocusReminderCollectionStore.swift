@@ -6,11 +6,13 @@ import SchneeBarFocusCore
 /// single-reminder file or Runner storage. No OS notification effects.
 public actor FocusReminderCollectionStore {
     public static let maximumEntries = 64
+    public static let maximumOutboxEntries = 128
     public static let maximumRecordBytes = 256 * 1024
 
     public enum StoreError: Error, Equatable, Sendable {
         case invalidTitle, capacityExceeded, duplicateIdentity, staleReminder
         case unsupportedVersion, invalidBackingFile, payloadTooLarge
+        case outboxFull, staleOutbox, invalidOutbox
     }
 
     public struct Entry: Equatable, Sendable, Codable {
@@ -40,12 +42,14 @@ public actor FocusReminderCollectionStore {
 
     public struct Snapshot: Equatable, Sendable, Codable {
         public fileprivate(set) var entries: [Entry] = []
+        public fileprivate(set) var outbox: [FocusReminderOutboxRecord] = []
         fileprivate init() {}
-        private enum CodingKeys: String, CodingKey { case version, entries }
+        private enum CodingKeys: String, CodingKey { case version, entries, outbox }
 
         public init(from decoder: Decoder) throws {
             let record = try decoder.container(keyedBy: CodingKeys.self)
-            guard try record.decode(Int.self, forKey: .version) == 1 else { throw StoreError.unsupportedVersion }
+            let version = try record.decode(Int.self, forKey: .version)
+            guard version == 1 || version == 2 else { throw StoreError.unsupportedVersion }
             var list = try record.nestedUnkeyedContainer(forKey: .entries)
             if let count = list.count, count > FocusReminderCollectionStore.maximumEntries {
                 throw StoreError.capacityExceeded
@@ -58,12 +62,30 @@ public actor FocusReminderCollectionStore {
                 entries.append(entry)
             }
             entries.sort { $0.id.uuidString < $1.id.uuidString }
+            if version == 1 {
+                guard !record.contains(.outbox) else { throw StoreError.invalidOutbox }
+            } else {
+                outbox = try record.decode([FocusReminderOutboxRecord].self, forKey: .outbox)
+                guard outbox.count <= FocusReminderCollectionStore.maximumOutboxEntries else {
+                    throw StoreError.outboxFull
+                }
+                var recordIDs = Set<UUID>()
+                var ticketIDs = Set<UUID>()
+                for intent in outbox {
+                    guard recordIDs.insert(intent.id).inserted,
+                          ticketIDs.insert(intent.ticketID).inserted,
+                          entries.contains(where: {
+                              $0.id == intent.reminderID && $0.state.enabled && $0.state.origin == .native
+                          }) else { throw StoreError.invalidOutbox }
+                }
+            }
         }
 
         public func encode(to encoder: Encoder) throws {
             var record = encoder.container(keyedBy: CodingKeys.self)
-            try record.encode(1, forKey: .version)
+            try record.encode(2, forKey: .version)
             try record.encode(entries, forKey: .entries)
+            try record.encode(outbox, forKey: .outbox)
         }
     }
 
@@ -75,6 +97,7 @@ public actor FocusReminderCollectionStore {
         public let snapshot: Snapshot
         public let claimed: FocusReminderSchedule.Occurrence?
         public let claimedSnooze: FocusReminderState.SnoozeTicket?
+        public let enqueued: FocusReminderOutboxRecord?
     }
 
     private let fileURL: URL
@@ -146,6 +169,9 @@ public actor FocusReminderCollectionStore {
         if state.enabled { try state.replan(at: now, calendar: calendar) }
         let replacement = try Entry(title: previous.title, state: state)
         snapshot.entries[index] = replacement
+        // An edited rule replaces the reminder identity. Cancel its queued
+        // intents in the same commit, before any OS-side cancellation.
+        snapshot.outbox.removeAll { $0.reminderID == id }
         snapshot.entries.sort { $0.id.uuidString < $1.id.uuidString }
         try save(snapshot)
         return replacement
@@ -159,26 +185,73 @@ public actor FocusReminderCollectionStore {
         var next = old
         var claimed: FocusReminderSchedule.Occurrence?
         var claimedSnooze: FocusReminderState.SnoozeTicket?
+        var enqueued: FocusReminderOutboxRecord?
         switch command {
         case .rename(let title):
             guard Entry.validTitle(title) else { throw StoreError.invalidTitle }
             next.entries[index].title = title
         case .remove:
             next.entries.remove(at: index)
+            next.outbox.removeAll { $0.reminderID == id }
         case .update(let action):
             switch action {
-            case .setEnabled(let value): try next.entries[index].state.setEnabled(value)
+            case .setEnabled(let value):
+                try next.entries[index].state.setEnabled(value)
+                if !value { next.outbox.removeAll { $0.reminderID == id } }
             case .replan(let calendar): try next.entries[index].state.replan(at: now, calendar: calendar)
             case .claim(let ticketID, let calendar):
                 claimed = try next.entries[index].state.claim(ticketID: ticketID, at: now, calendar: calendar)
+                // A newer regular claim supersedes any older pending snooze.
+                next.outbox.removeAll { $0.reminderID == id && $0.kind == .snooze }
+                if let claimed {
+                    let intent = FocusReminderOutboxRecord(
+                        reminderID: id, ticketID: ticketID, kind: .regular,
+                        deadline: claimed.date, claimedAt: now
+                    )
+                    try Self.enqueue(intent, into: &next)
+                    enqueued = intent
+                }
             case .snooze(let sourceTicketID, let seconds):
                 try next.entries[index].state.snooze(sourceTicketID: sourceTicketID, seconds: seconds, at: now)
+                // A user snooze action makes an unacknowledged original
+                // delivery obsolete; never replay it after restart.
+                next.outbox.removeAll {
+                    $0.reminderID == id && $0.ticketID == sourceTicketID && $0.kind == .regular
+                }
             case .claimSnooze(let ticketID):
                 claimedSnooze = try next.entries[index].state.claimSnooze(ticketID: ticketID, at: now)
+                if let claimedSnooze {
+                    let intent = FocusReminderOutboxRecord(
+                        reminderID: id, ticketID: ticketID, kind: .snooze,
+                        deadline: claimedSnooze.deadline, claimedAt: now
+                    )
+                    try Self.enqueue(intent, into: &next)
+                    enqueued = intent
+                }
             }
         }
         if next != old { try save(next) }
-        return Result(snapshot: next, claimed: claimed, claimedSnooze: claimedSnooze)
+        return Result(snapshot: next, claimed: claimed, claimedSnooze: claimedSnooze, enqueued: enqueued)
+    }
+
+    /// Acknowledgement means adapter acceptance, NOT user presentation.
+    /// A failure to persist leaves the intent queued for an idempotent retry.
+    public func acknowledge(outboxID: UUID) throws -> Snapshot {
+        var snapshot = try load()
+        guard snapshot.outbox.contains(where: { $0.id == outboxID }) else {
+            throw StoreError.staleOutbox
+        }
+        snapshot.outbox.removeAll { $0.id == outboxID }
+        try save(snapshot)
+        return snapshot
+    }
+
+    private static func enqueue(_ intent: FocusReminderOutboxRecord, into snapshot: inout Snapshot) throws {
+        guard snapshot.outbox.count < maximumOutboxEntries else { throw StoreError.outboxFull }
+        guard !snapshot.outbox.contains(where: { $0.id == intent.id || $0.ticketID == intent.ticketID }) else {
+            throw StoreError.invalidOutbox
+        }
+        snapshot.outbox.append(intent)
     }
 
     private func save(_ snapshot: Snapshot) throws {
