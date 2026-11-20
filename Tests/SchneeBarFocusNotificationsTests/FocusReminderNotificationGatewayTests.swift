@@ -67,7 +67,8 @@ private func withFocusNotificationIntent(
         ] {
             let port = FocusNotificationCenterStub(authorization: status)
             let gateway = FocusReminderNotificationGateway(center: port)
-            #expect(try await gateway.submit(intent) == .authorizationUnavailable)
+            let outcome = try await gateway.submit(intent)
+            #expect(outcome == .authorizationUnavailable)
             let result = await port.snapshot()
             #expect(result.checks == 1 && result.submitted.isEmpty && result.removed.isEmpty)
         }
@@ -79,7 +80,8 @@ private func withFocusNotificationIntent(
         for status: FocusReminderNotificationAuthorization in [.authorized, .provisional] {
             let port = FocusNotificationCenterStub(authorization: status)
             let gateway = FocusReminderNotificationGateway(center: port)
-            #expect(try await gateway.submit(intent) == .accepted)
+            let outcome = try await gateway.submit(intent)
+            #expect(outcome == .accepted)
             let request = try #require(await port.snapshot().submitted.first)
             #expect(request.identifier == FocusReminderNotificationGateway.identifier(for: intent.id))
             #expect(request.identifier.hasPrefix("dev.lamy.schneebar.focus."))
@@ -90,7 +92,8 @@ private func withFocusNotificationIntent(
             #expect(!text.contains("github-delivery-recovery"))
             #expect(!text.contains(intent.reminderID.uuidString))
             // Adapter acceptance does not silently ACK the authoritative outbox.
-            #expect(try await store.load().outbox == [intent])
+            let saved = try await store.load()
+            #expect(saved.outbox == [intent])
         }
     }
 }
@@ -99,8 +102,9 @@ private func withFocusNotificationIntent(
     try await withFocusNotificationIntent { intent, _ in
         let port = FocusNotificationCenterStub(authorization: .authorized)
         let gateway = FocusReminderNotificationGateway(center: port)
-        #expect(try await gateway.submit(intent) == .accepted)
-        #expect(try await gateway.submit(intent) == .accepted)
+        let firstOutcome = try await gateway.submit(intent)
+        let secondOutcome = try await gateway.submit(intent)
+        #expect(firstOutcome == .accepted && secondOutcome == .accepted)
         await gateway.cancel(outboxID: intent.id)
         let state = await port.snapshot()
         let id = FocusReminderNotificationGateway.identifier(for: intent.id)
@@ -117,7 +121,8 @@ private func withFocusNotificationIntent(
         await #expect(throws: FocusNotificationStubError.rejected) {
             try await gateway.submit(intent)
         }
-        #expect(try await store.load().outbox == [intent])
+        let saved = try await store.load()
+            #expect(saved.outbox == [intent])
         #expect(await port.snapshot().submitted.isEmpty)
     }
 }
