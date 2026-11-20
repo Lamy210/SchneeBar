@@ -74,6 +74,7 @@ public actor FocusReminderCollectionStore {
     public struct Result: Equatable, Sendable {
         public let snapshot: Snapshot
         public let claimed: FocusReminderSchedule.Occurrence?
+        public let claimedSnooze: FocusReminderState.SnoozeTicket?
     }
 
     private let fileURL: URL
@@ -157,6 +158,7 @@ public actor FocusReminderCollectionStore {
         guard let index = old.entries.firstIndex(where: { $0.id == id }) else { throw StoreError.staleReminder }
         var next = old
         var claimed: FocusReminderSchedule.Occurrence?
+        var claimedSnooze: FocusReminderState.SnoozeTicket?
         switch command {
         case .rename(let title):
             guard Entry.validTitle(title) else { throw StoreError.invalidTitle }
@@ -169,10 +171,14 @@ public actor FocusReminderCollectionStore {
             case .replan(let calendar): try next.entries[index].state.replan(at: now, calendar: calendar)
             case .claim(let ticketID, let calendar):
                 claimed = try next.entries[index].state.claim(ticketID: ticketID, at: now, calendar: calendar)
+            case .snooze(let sourceTicketID, let seconds):
+                try next.entries[index].state.snooze(sourceTicketID: sourceTicketID, seconds: seconds, at: now)
+            case .claimSnooze(let ticketID):
+                claimedSnooze = try next.entries[index].state.claimSnooze(ticketID: ticketID, at: now)
             }
         }
         if next != old { try save(next) }
-        return Result(snapshot: next, claimed: claimed)
+        return Result(snapshot: next, claimed: claimed, claimedSnooze: claimedSnooze)
     }
 
     private func save(_ snapshot: Snapshot) throws {
