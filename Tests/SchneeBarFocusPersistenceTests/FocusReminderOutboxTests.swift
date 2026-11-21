@@ -196,14 +196,12 @@ private func prepareOutboxReminder(_ store: FocusReminderCollectionStore, at due
         let firstAfterDuplicate = try Data(contentsOf: file)
         #expect(firstAfterDuplicate == before)
         await #expect(throws: FocusReminderCollectionStore.StoreError.staleOutbox) {
-            let unknown = try JSONDecoder().decode(FocusReminderOutboxRecord.self,
-                from: Data(JSONEncoder().encode(first)))
-            let fake = try JSONSerialization.jsonObject(with: JSONEncoder().encode(unknown))
-            var changed = try #require(fake as? [String: Any])
+            let source = try JSONEncoder().encode(first)
+            var changed = try #require(JSONSerialization.jsonObject(with: source) as? [String: Any])
             changed["ticketID"] = UUID().uuidString
             let stale = try JSONDecoder().decode(FocusReminderOutboxRecord.self,
                 from: JSONSerialization.data(withJSONObject: changed))
-            try await store.acknowledgeObserved(records: [first, stale])
+            try await store.acknowledgeObserved(records: [second, stale])
         }
         #expect(try Data(contentsOf: file) == before)
         #expect(try await store.acknowledgeObserved(records: []).outbox.count == 2)
