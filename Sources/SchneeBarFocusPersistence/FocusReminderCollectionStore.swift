@@ -246,6 +246,29 @@ public actor FocusReminderCollectionStore {
         return snapshot
     }
 
+    /// Commit a set of OS-observed accepted requests in a single file write.
+    /// The caller MUST first verify affirmative, authorized OS request evidence.
+    /// Compare the complete immutable intent, not only its ID: a stale
+    /// inspection must not consume a changed/cancelled outbox record.
+    ///
+    /// This is only an acknowledgement of OS acceptance, not presentation.
+    /// Empty input is a read-only no-op; duplicates and any stale record
+    /// fail closed without acknowledging even the otherwise valid subset.
+    public func acknowledgeObserved(records: [FocusReminderOutboxRecord]) throws -> Snapshot {
+        var snapshot = try load()
+        guard !records.isEmpty else { return snapshot }
+        guard records.count <= Self.maximumOutboxEntries else { throw StoreError.invalidOutbox }
+        let identifiers = records.map(\.id)
+        guard Set(identifiers).count == records.count else { throw StoreError.invalidOutbox }
+        for candidate in records {
+            guard snapshot.outbox.contains(candidate) else { throw StoreError.staleOutbox }
+        }
+        let accepted = Set(identifiers)
+        snapshot.outbox.removeAll { accepted.contains($0.id) }
+        try save(snapshot)
+        return snapshot
+    }
+
     private static func enqueue(_ intent: FocusReminderOutboxRecord, into snapshot: inout Snapshot) throws {
         guard snapshot.outbox.count < maximumOutboxEntries else { throw StoreError.outboxFull }
         guard !snapshot.outbox.contains(where: { $0.id == intent.id || $0.ticketID == intent.ticketID }) else {

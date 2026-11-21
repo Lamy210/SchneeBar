@@ -174,3 +174,63 @@ private func prepareOutboxReminder(_ store: FocusReminderCollectionStore, at due
         await #expect(throws: FocusReminderCollectionStore.StoreError.unsupportedVersion) { try await store.load() }
     }
 }
+
+
+@Test func reminderObservedBatchAckIsAllOrNothingAndReplaySafe() async throws {
+    try await withOutboxFile { file in
+        let store = FocusReminderCollectionStore(fileURL: file)
+        let (a, aTicket) = try await prepareOutboxReminder(store)
+        let otherDue = outboxDue.addingTimeInterval(60)
+        let (b, bTicket) = try await prepareOutboxReminder(store, at: otherDue)
+        let aClaim = try await store.apply(id: a.id,
+            command: .update(.claim(ticketID: aTicket.id, calendar: outboxCalendar)), at: outboxDue)
+        let bClaim = try await store.apply(id: b.id,
+            command: .update(.claim(ticketID: bTicket.id, calendar: outboxCalendar)), at: otherDue)
+        let first = try #require(aClaim.enqueued)
+        let second = try #require(bClaim.enqueued)
+        let before = try Data(contentsOf: file)
+
+        await #expect(throws: FocusReminderCollectionStore.StoreError.invalidOutbox) {
+            try await store.acknowledgeObserved(records: [first, first])
+        }
+        let firstAfterDuplicate = try Data(contentsOf: file)
+        #expect(firstAfterDuplicate == before)
+        await #expect(throws: FocusReminderCollectionStore.StoreError.staleOutbox) {
+            let source = try JSONEncoder().encode(first)
+            var changed = try #require(JSONSerialization.jsonObject(with: source) as? [String: Any])
+            changed["ticketID"] = UUID().uuidString
+            let stale = try JSONDecoder().decode(FocusReminderOutboxRecord.self,
+                from: JSONSerialization.data(withJSONObject: changed))
+            try await store.acknowledgeObserved(records: [second, stale])
+        }
+        #expect(try Data(contentsOf: file) == before)
+        #expect(try await store.acknowledgeObserved(records: []).outbox.count == 2)
+        #expect(try Data(contentsOf: file) == before)
+
+        let committed = try await store.acknowledgeObserved(records: [second, first])
+        #expect(committed.outbox.isEmpty)
+        #expect(try await store.load().outbox.isEmpty)
+        await #expect(throws: FocusReminderCollectionStore.StoreError.staleOutbox) {
+            try await store.acknowledgeObserved(records: [first])
+        }
+    }
+}
+
+@Test func reminderObservedBatchAckWriteFailureKeepsEntireQueue() async throws {
+    enum Failure: Error { case write }
+    try await withOutboxFile { file in
+        let store = FocusReminderCollectionStore(fileURL: file)
+        let (entry, ticket) = try await prepareOutboxReminder(store)
+        let claimed = try await store.apply(id: entry.id,
+            command: .update(.claim(ticketID: ticket.id, calendar: outboxCalendar)), at: outboxDue)
+        let intent = try #require(claimed.enqueued)
+        let before = try Data(contentsOf: file)
+        let failed = FocusReminderCollectionStore(fileURL: file,
+            read: { try Data(contentsOf: $0) }, write: { _, _ in throw Failure.write })
+        await #expect(throws: Failure.write) {
+            try await failed.acknowledgeObserved(records: [intent])
+        }
+        #expect(try Data(contentsOf: file) == before)
+        #expect(try await store.load().outbox == [intent])
+    }
+}
