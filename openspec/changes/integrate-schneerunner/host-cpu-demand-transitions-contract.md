@@ -1,0 +1,7 @@
+# C4e draft: serialized host CPU demand transitions
+
+Based on merged #434/#435, independent of #436. Both MenuBarController and developer preview use one HostCPUDemandTransitions per existing sampler. Enqueue demand changes and short configuration callbacks in FIFO order; preserve every intermediate disable/sleep transition instead of coalescing away lease revocation. The returned task is an observation handle, not cooperative cancellation authority for the transition. A terminal finish drains earlier operations and then suspends with both leases revoked; later submissions cannot reactivate through that owner. No autonomous timer, new sampler, measurement loop, or production CompanionFeature dependency. Shipping demand remains companion false.
+
+Callbacks must complete promptly and may not wait on a later transition or capture a dying owner strongly. Callers fence asynchronous presentation with their existing runtime generation and must not mix direct sampler lease operations with this owner. Terminal suspension is asynchronous; await its handle when proof of completed release is required. This is not an external sampler cross-owner lock.
+
+Two fixtures check actual sampler plans after ordered transitions including cancellation of the sleep handle, and final suspension after queued work with late submissions rejected. Full native CI and real Mac acceptance remain required. Rights, ADR approval and main promotion unchanged.

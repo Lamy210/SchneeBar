@@ -1,0 +1,7 @@
+# C4d draft: host completion ownership fence
+
+Based on merged #434 and #435. The composition supplies an optional non-reentrant publication predicate to the asset acquisition adapter. Check the current image ownership immediately before adopting each asynchronous result (selected asset, inventory, preview, import and library mutation). If denied, revoke the adapter's runtime, pending operation and UI result before notifying the owner. A revoked native operation that already committed filesystem changes is not rolled back. The existing exclusive worker and current-session checks remain.
+
+If image ownership is lost while CPU acquisition is suspended, reject the sample using the current predicate and stop the owner before refreshCPU returns. Demand publication must stop synchronously when the binding is invalid instead of merely publishing a false demand and awaiting the queued loss callback. The terminal stop revokes the local transport, CPU demand and asset session, preserves external replacement artwork and invalidates the settings editor. Host still owns actual sampler lease reconciliation. No autonomous owner reacquisition, extra task loop, shipping feature activation or new dependency.
+
+Three regression fixtures cover denial before any frame adoption, external replacement during a blocked asset acquisition without demand activation, and synchronous CPU/event demand revocation after a read discovers image loss. Native CI, actual Mac acceptance, rights and ADR approval remain required before production activation.

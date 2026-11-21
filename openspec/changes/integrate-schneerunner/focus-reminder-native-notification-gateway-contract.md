@@ -1,0 +1,16 @@
+# E3i draft: isolated macOS Focus notification gateway
+
+## Scope
+Create a separate macOS 15+ `SchneeBarFocusNotifications` framework and Swift Testing target that depend on the established FocusPersistence outbox. The shipping app target is **not** given a FocusNotifications dependency and no scheduler or lifecycle is connected, so this change cannot emit reminders without an explicit future owner wiring. The existing GitHub delivery-recovery notification implementation stays untouched.
+
+## Port and authorization
+Inject a `FocusReminderNotificationCenterPort` that reads authorization, adds a request, and removes owned request identifiers. The system implementation uses `UNUserNotificationCenter`, `notificationSettings()`, async `add`, and scoped pending+delivered removals. Submit only under currently `authorized` or `provisional` authorization. Denied, notDetermined and unsupported statuses return a non-acceptance outcome and MUST NOT prompt, schedule or ACK an outbox item. Prompting is the future product/UI owner's explicit permission-flow decision; no automatic provisional request.
+
+## Request identity and privacy
+Use `dev.lamy.schneebar.focus.<lowercase UUID>` based on the durable outbox ID, NEVER a Runner or GitHub delivery-recovery notification ID. A request uses generic text `Reminder` / `A scheduled reminder is ready.` without user-entered title, source identity, account, secrets, sound, badge, actions or `userInfo`. Immediate delivery uses a nil trigger only after durable claim+enqueue and an explicit gateway submit. Removal uses the exact namespaced outbox ID and may remove pending and delivered representations. Bar MUST NOT assume it can cancel Runner's notifications or any other app's alerts.
+
+## Side effects and known limits
+`submit` returning accepted means only `UNUserNotificationCenter.add` completed without error; **not** user presentation or a delivery receipt. Submission failures throw and the gateway never changes the durable outbox itself. An eventually wired coordinator must ACK only after accepted submission. Using the same notification request ID is *not* a guarantee against user-visible duplicates after a crash: Apple may re-alert for an already delivered ID. Before shipping, design pending/delivered reconciliation, no-prompt permission flows, ownership revalidation across awaits, cancellation compensations/tombstones, retry/backoff and OS acknowledgement semantics.
+
+## Tests / release gates
+Tests via an injected actor stub cover denied/notDetermined/unsupported suppression; authorized and provisional submission; deterministic namespace; generic privacy content; stable identifiers; isolated cancellation; adapter failure propagating while the outbox remains unacknowledged. Native macOS Build/Test, Visual Regression, OpenSpec and integration checks are mandatory before integration merge. Real-device permission denial/notifications, OS request reconciliation and main promotion remain gated by PR #396 (ADR, rights, materials, safety). Apple platform API references: https://developer.apple.com/documentation/usernotifications/unnotificationrequest and https://developer.apple.com/documentation/usernotifications/unusernotificationcenter/getnotificationsettings%28completionhandler:%29 .

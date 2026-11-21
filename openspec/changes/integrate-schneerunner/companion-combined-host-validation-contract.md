@@ -1,0 +1,7 @@
+# C3h draft: combined host validation
+
+Candidate combines the exact #411, #412 and #413 changes on #410 squash base 84a767c3. The parent changes have disjoint paths. The editor exposes an optional main-actor committed refresh callback invoked only after a persisted-state read is adopted (save, reload, recovery or conflict/failure readback), never for a draft or discard. A composition owner uses a weak bridge capture and must not reenter the editor. No automatic out-of-process watcher or runtime approval is added.
+
+Two integrated tests borrow a standalone NSButton image, feed the existing renderer, bridge and policy from isolated UserDefaults, and exercise committed edits, discard, repair, stale catalogues, motion and event demand, and release revocation restoration. The owner explicitly stops bridge then ends the image session. Fixtures are procedural, not real character artwork. The image-only adapter does not protect in-place NSImage changes and loss of ownership must still be reported by a production owner.
+
+This is an alternative combined validation candidate for #411–#413 (not three independent approvals). Use exact-head macOS CI, Visual and OpenSpec evidence before selecting a merge strategy; if any individual parent is merged independently, re-evaluate the candidate base and content first. No production/preview target integration, actual menu bar allocation, shared CPU subscription, transport, real Mac interaction, release authorization or distribution. Do not use this to close original acceptance gates.

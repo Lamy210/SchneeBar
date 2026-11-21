@@ -96,3 +96,42 @@ All tasks are pending; the [implementation and parity contract](implementation-p
 - [ ] 11.2 Implement C1b bounded timing, default catalog, exact rates and single-use cursor tick token; verify B01–B05 fixtures, no production renderer connectivity.
 - [ ] 11.3 Implement C1c pure EMA/hysteresis and invalid sample reset; verify C01–C03; keep C04 runtime wiring under PR-B and do not claim exact time-response parity.
 - [ ] 11.4 Verify every C1 implementation target actually appears in macOS Tuist test execution (CI success alone does not prove the new suite ran); record test counts/logs and full fixture ledger. Review proposed bounds and ADR before merging.
+
+## 12. Shared CPU ownership rollout
+
+- [ ] 12.1 PR-B1: extract demand-driven shared host sampler, preserve widget formatting, compile and verify old/new fake clock, counter, cache, error, and cancellation fixtures.
+- [ ] 12.2 PR-B2: app-owned shared instance with configuration-revision and sleep/wake fencing; verify final unsubscribe, both-consumer and single-consumer modes, distinct sample IDs for Companion EMA, and no new autonomous polling loop.
+- [ ] 12.3 Validate aligned whole-machine comparison and same-device performance; capture real measurements before default activation.
+
+## 13. B2 lifecycle and Companion input
+
+- [ ] 13.1 Verify app-owned sampler, serialized demand/engine configuration changes, CPU-only and zero-consumer modes, sleep/wake and scoped WidgetEngine runtime invalidation.
+- [ ] 13.2 Verify CompanionCPUInput newest-request/session fence, cached sample deduplication, unavailable/reset and manual/automatic transitions.
+- [ ] 13.3 Connect actual opt-in Companion renderer/settings to managed demand and existing scheduler, preserving a single owner and no polling when disabled. Not included in B2a.
+- [ ] 13.4 Execute macOS tests and real-device lifecycle/power checks; record CI/test counts, remaining compatibility exceptions and approval.
+
+## 14. Asset and renderer slices
+
+- [ ] 14.1 C2a: verify bounded Data-only decoding, format check, aggregate budget and generated fixtures on macOS; review decoder memory limits.
+- [ ] 14.2 C2b/C2c: file/pack import, owned staging, traversal/symlink/TOCTOU, all-format fixtures, export and catalogue resource limits as specified in companion-assets-renderer-contract.md.
+- [ ] 14.3 C3a: verify isolated frame driver and static fixture, deterministic async cancellation/Reduce Motion integration before app connection.
+- [ ] 14.4 C3b: approved opt-in UI, application-owned status item, CPU demand/renderer lifecycle, accessible fallback and disable/recovery evidence.
+
+## 15. Bounded single-file intake and coordinator
+
+- [ ] 15.1 Verify descriptor-based bounded local file intake: valid, final symlink, directory, FIFO, empty, oversize and non-file URL; add deterministic mutation/read fault fixtures before enabling user import.
+- [ ] 15.2 Verify retained catalogue budget, fallback/alias behavior; add a cumulative boundary fixture without excessive CI allocations and pre-decode aggregate accounting for pack imports.
+- [ ] 15.3 Verify coordinator opt-in, manual state versus speed, fallback continuity, stale request rejection, sleep, Reduce Motion and asset removal. No host demand or UI wiring until separately reviewed.
+- [ ] 15.4 Integrate app-owned single status item, off-main single-flight import and atomic publication, shared sampler scheduling, settings/UI and localized accessible fallback; keep production gate until approvals and real-device verification.
+
+## 16. Developer preview
+
+- [ ] 16.1 Build independent preview target; verify original five-state procedural catalogue and two-frame animation; no dependency from shipping app.
+- [ ] 16.2 Real Mac checklist: explicit start/stop, single preview status item, existing Bar conflict, show/hide and fallback, CPU-only/automatic/manual/both-disabled, Reduce Motion, sleep/wake, window close and quit, stale callback and power measurements.
+- [ ] 16.3 Complete production approval and integration separately; no preview artefact distribution or imported assets.
+
+## 17. Single-file import composition
+
+- [ ] 17.1 Verify one active worker and one latest pending request, cancel without early slot release, latest-only callbacks, failure/retry and owner lifecycle.
+- [ ] 17.2 Verify file reader → decoder → immutable default catalogue, fallback alias, malformed and symlink failure without replacing prior artwork.
+- [ ] 17.3 Before preview picker or production hookup, verify macOS format corpus, permission/security-scoped access, peak old-plus-new memory, queue ownership through stop/restart, and real-device performance. No pack/persistence enablement.

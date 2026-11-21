@@ -1,0 +1,295 @@
+import AppKit
+import Foundation
+import Observation
+import SchneeBarCompanionAssets
+import SchneeBarCompanionCore
+import UniformTypeIdentifiers
+
+/// An isolated editor for the host-owned library. Never writes on draft
+/// changes and never polls the worker. The caller still owns release approval.
+@MainActor
+@Observable
+public final class CompanionHostAssetSettingsModel {
+    public enum ActionNotice: Equatable, Sendable { case none, rejected }
+    public var packIDText = "" {
+        didSet {
+            if packIDText != oldValue { previewCandidate = nil; libraryConfirmation = nil }
+        }
+    }
+    public private(set) var notice: ActionNotice = .none
+    public private(set) var status: CompanionOwnedAssetAcquisition.Status = .idle
+    public private(set) var isBusy = false
+    public private(set) var availability: CompanionHostPolicy.Availability = .releaseBlocked
+    public private(set) var clearConfirmation: UUID?
+    public private(set) var entries: [CompanionOwnedPackStore.Entry] = []
+    public private(set) var inventoryStatus: CompanionOwnedAssetAcquisition.InventoryStatus = .idle
+    private var assetSession: UUID?
+    private var importPanelSession: UUID?
+    private var importSingleImage = false
+    public struct LibraryConfirmation: Equatable, Sendable {
+        public let token: UUID
+        public let action: CompanionOwnedAssetAcquisition.LibraryAction
+    }
+    public private(set) var libraryConfirmation: LibraryConfirmation? {
+        didSet { if oldValue != libraryConfirmation { recoveryConfirmationText = "" } }
+    }
+    public var recoveryConfirmationText = ""
+    public private(set) var abandonedStageIDs: [UUID] = []
+    public private(set) var pendingSelectionRecovery = false
+    public private(set) var unknownEntryCount = 0
+    public private(set) var trashedIDs: [UUID] = []
+    public private(set) var displayedPackID: UUID?
+    public private(set) var libraryStatus: CompanionOwnedAssetAcquisition.LibraryStatus = .idle
+    public private(set) var importStatus: CompanionOwnedAssetAcquisition.ImportStatus = .idle
+    public private(set) var inventoryAllowsImport = false
+    private var previewCandidate: UUID?
+    private var previewStatus: CompanionOwnedAssetAcquisition.PreviewStatus = .idle
+    private var thumbnail: CompanionPackThumbnail?
+    @ObservationIgnored private weak var owner: CompanionHostComposition?
+
+    init(owner: CompanionHostComposition) {
+        self.owner = owner
+        sync()
+    }
+
+    public var canOperate: Bool { owner != nil && assetSession != nil && !isBusy }
+    public var candidateID: UUID? {
+        guard packIDText.utf8.count <= 64 else { return nil }
+        return UUID(uuidString: packIDText.trimmingCharacters(in: .whitespacesAndNewlines))
+    }
+    public var canSelect: Bool { canOperate && candidateID != nil }
+    public var canImport: Bool { canOperate && inventoryAllowsImport && importPanelSession == nil }
+    public var listedID: UUID? {
+        guard let id = candidateID, entries.contains(where: { $0.id == id && $0.name != nil }) else { return nil }
+        return id
+    }
+
+    public func chooseListedPack(_ id: UUID?) {
+        sync()
+        guard canOperate else { return }
+        guard let id else { packIDText = ""; return }
+        guard entries.contains(where: { $0.id == id && $0.name != nil }) else { return }
+        packIDText = id.uuidString
+    }
+
+    public var candidatePreviewStatus: CompanionOwnedAssetAcquisition.PreviewStatus {
+        guard let previewCandidate, candidateID == previewCandidate else { return .idle }
+        return previewStatus
+    }
+
+    public var candidateThumbnail: CompanionPackThumbnail? {
+        guard let previewCandidate, candidateID == previewCandidate,
+              previewStatus == .loaded(previewCandidate) else { return nil }
+        return thumbnail
+    }
+
+    public func previewSelectedPack() {
+        sync()
+        guard canSelect, let id = candidateID, let owner else { notice = .rejected; return }
+        previewCandidate = id
+        if owner.requestAssetPreview(id) { notice = .none }
+        else { previewCandidate = nil; notice = .rejected }
+    }
+
+    /// Native chooser is explicit. Keep one panel token and fence the result
+    /// against both the editor and the host session, including sleep/wake.
+    public func choosePackToImport(singleImage: Bool = false) {
+        guard let token = beginImportChoice(singleImage: singleImage) else { return }
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = singleImage
+        panel.canChooseDirectories = !singleImage
+        if singleImage { panel.allowedContentTypes = [.png, .gif, .webP] }
+        panel.allowsMultipleSelection = false
+        panel.treatsFilePackagesAsDirectories = true
+        let url = panel.runModal() == .OK ? panel.url : nil
+        completeImportChoice(token, url: url)
+    }
+
+    func beginImportChoice(singleImage: Bool = false) -> UUID? {
+        sync()
+        guard canImport else { notice = .rejected; return nil }
+        let token = UUID()
+        importPanelSession = token
+        importSingleImage = singleImage
+        return token
+    }
+
+    func completeImportChoice(_ token: UUID, url: URL?) {
+        sync()
+        guard importPanelSession == token else { return }
+        importPanelSession = nil
+        let singleImage = importSingleImage
+        importSingleImage = false
+        guard let url else { return }
+        guard canImport, let owner, let session = assetSession else { notice = .rejected; return }
+        notice = owner.importAssetPack(from: url, session: session, singleImage: singleImage) ? .none : .rejected
+    }
+
+    public var canTrashCandidate: Bool {
+        guard canOperate, let id = listedID, id != displayedPackID else { return false }
+        return owner?.canManageAssetLibrary(.trash(id)) == true
+    }
+
+    public func requestTrashCandidate() {
+        sync()
+        guard canTrashCandidate, let id = listedID else { notice = .rejected; return }
+        libraryConfirmation = .init(token: UUID(), action: .trash(id))
+    }
+
+    public func canRestoreTrash(_ id: UUID) -> Bool {
+        canOperate && trashedIDs.contains(id) && owner?.canManageAssetLibrary(.restore(id)) == true
+    }
+
+    public func requestRestoreTrash(_ id: UUID) {
+        sync()
+        guard canRestoreTrash(id) else { notice = .rejected; return }
+        libraryConfirmation = .init(token: UUID(), action: .restore(id))
+    }
+
+    public func canPurgeTrash(_ id: UUID) -> Bool {
+        canOperate && trashedIDs.contains(id) && owner?.canManageAssetLibrary(.purge(id)) == true
+    }
+
+    public func requestPurgeTrash(_ id: UUID) {
+        requestRecovery(.purge(id))
+    }
+
+    public func requestDiscardStage(_ id: UUID) {
+        requestRecovery(.discardStage(id))
+    }
+
+    public func requestDiscardPendingSelection() {
+        requestRecovery(.discardPendingSelection)
+    }
+
+    public func canRecover(_ action: CompanionOwnedAssetAcquisition.LibraryAction) -> Bool {
+        canOperate && action.requiresTypedConfirmation && owner?.canManageAssetLibrary(action) == true
+    }
+
+    private func requestRecovery(_ action: CompanionOwnedAssetAcquisition.LibraryAction) {
+        sync()
+        guard canRecover(action) else { notice = .rejected; return }
+        libraryConfirmation = .init(token: UUID(), action: action)
+    }
+
+    public var canConfirmLibraryAction: Bool {
+        guard let confirmation = libraryConfirmation, canOperate else { return false }
+        return !confirmation.action.requiresTypedConfirmation || recoveryConfirmationText == "DELETE"
+    }
+
+    public func cancelLibraryAction() { libraryConfirmation = nil }
+
+    public func confirmLibraryAction(_ token: UUID) {
+        sync()
+        guard let confirmation = libraryConfirmation, confirmation.token == token, canConfirmLibraryAction else { return }
+        libraryConfirmation = nil
+        guard canOperate, let owner, owner.canManageAssetLibrary(confirmation.action) else {
+            notice = .rejected
+            return
+        }
+        if case .trash(let id) = confirmation.action, listedID != id {
+            notice = .rejected
+            return
+        }
+        notice = owner.manageAssetLibrary(confirmation.action) ? .none : .rejected
+    }
+
+    public func refreshInventory() {
+        sync()
+        guard canOperate, let owner else { notice = .rejected; return }
+        notice = owner.refreshAssetInventory() ? .none : .rejected
+    }
+
+    /// Owner invokes on lifecycle changes, request start, adoption and actual drain.
+    /// A stale destructive confirmation must not survive any relevant change.
+    func sync() {
+        let nextEntries = owner?.assetInventory?.entries ?? []
+        let nextTrash = owner?.assetInventory?.trashedIDs ?? []
+        let nextStages = owner?.assetInventory?.abandonedStageIDs ?? []
+        let nextPending = owner?.assetInventory?.pendingSelectionRecovery ?? false
+        let nextUnknown = owner?.assetInventory?.unknownEntryCount ?? 0
+        if nextStages != abandonedStageIDs || nextPending != pendingSelectionRecovery || nextUnknown != unknownEntryCount {
+            libraryConfirmation = nil
+            abandonedStageIDs = nextStages
+            pendingSelectionRecovery = nextPending
+            unknownEntryCount = nextUnknown
+        }
+        let nextDisplayed = owner?.displayedPackID
+        let nextLibraryStatus = owner?.assetLibraryStatus ?? .idle
+        if nextTrash != trashedIDs || nextDisplayed != displayedPackID || nextLibraryStatus != libraryStatus {
+            libraryConfirmation = nil
+            trashedIDs = nextTrash
+            displayedPackID = nextDisplayed
+            libraryStatus = nextLibraryStatus
+        }
+        inventoryAllowsImport = owner?.assetInventory?.canInstall == true
+        importStatus = owner?.assetImportStatus ?? .idle
+        let nextInventoryStatus = owner?.assetInventoryStatus ?? .idle
+        if entries != nextEntries {
+            libraryConfirmation = nil
+            // A previously selected listed ID must not silently remain the
+            // candidate after its metadata snapshot was invalidated.
+            if let id = listedID, !nextEntries.contains(where: { $0.id == id && $0.name != nil }) {
+                packIDText = ""
+            }
+            entries = nextEntries
+        }
+        if inventoryStatus != nextInventoryStatus { inventoryStatus = nextInventoryStatus }
+        let nextSession = owner?.decision.assetSession
+        let nextPreview = owner?.assetPreviewStatus ?? .idle
+        if nextPreview != previewStatus {
+            previewStatus = nextPreview
+            thumbnail = owner?.assetThumbnail
+        }
+        if nextSession != assetSession || nextPreview == .idle {
+            previewCandidate = nil
+        }
+        let nextStatus = owner?.assetStatus ?? .idle
+        let nextBusy = owner?.isAssetWorkerBusy ?? false
+        let nextAvailability = owner?.decision.availability ?? .releaseBlocked
+        if nextSession != assetSession || nextStatus != status ||
+            nextBusy != isBusy || nextAvailability != availability {
+            clearConfirmation = nil
+            libraryConfirmation = nil
+            importPanelSession = nil
+            importSingleImage = false
+            assetSession = nextSession
+            status = nextStatus
+            isBusy = nextBusy
+            availability = nextAvailability
+        }
+    }
+
+    public func displayCandidate() {
+        sync()
+        guard canSelect, let id = candidateID, let owner else { notice = .rejected; return }
+        notice = owner.requestInstalledAsset(id) ? .none : .rejected
+    }
+
+    public func saveCandidate() {
+        sync()
+        guard canSelect, let id = candidateID, let owner else { notice = .rejected; return }
+        notice = owner.saveInstalledAssetSelection(id) ? .none : .rejected
+    }
+
+    public func restoreSaved() {
+        sync()
+        guard canOperate, let owner else { notice = .rejected; return }
+        notice = owner.restoreSavedAssetSelection() ? .none : .rejected
+    }
+
+    public func requestClear() {
+        sync()
+        guard canOperate else { notice = .rejected; return }
+        clearConfirmation = UUID()
+    }
+
+    public func cancelClear() { clearConfirmation = nil }
+
+    public func confirmClear(_ token: UUID) {
+        sync()
+        guard canOperate, clearConfirmation == token, let owner else { return }
+        clearConfirmation = nil
+        notice = owner.clearSavedAssetSelection() ? .none : .rejected
+    }
+}

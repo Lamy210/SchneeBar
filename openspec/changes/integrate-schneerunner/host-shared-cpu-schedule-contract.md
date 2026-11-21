@@ -1,0 +1,7 @@
+# C3l draft: shared host CPU refresh deadline
+
+Based on merged #417. The existing MenuBarController now consumes an atomic HostCPURefreshPlan snapshot from the single HostCPUSampler, rather than deriving its wake deadline from only the widget lease. The plan reports demand set and shared monotonic acquisition delay in one actor turn. Both consumers share the existing five-second success/failure cache window. Keep the existing ordinary-widget one-second floor, 30-second fallback and 50ms minimum sleep; a subsecond CPU remainder is not rounded up. The widget refresh remains gated by current configuration revision/lifecycle and its own due demand.
+
+This is scheduler preparation in the existing host, not Companion production activation. The current app still sets companion demand false. No Companion dependency, new polling loop, second sampler, asset root, listener or settings path is added. When a future approved composition is wired, its refresh must consume cached samples even after the widget acquired a due observation; if only companion demand exists, the host must invoke that consumer before sleeping. Demand and generation transitions must stay serialized. Do not enable a companion lease without connecting the consumer.
+
+Regression covers no demand, companion-only, dual, widget-only, cached reuse, subsecond deadline, and suspension using the scripted counter/clock. Actual app dependency, real device performance, rights and ADR approval remain gated.

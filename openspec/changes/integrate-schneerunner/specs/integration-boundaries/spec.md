@@ -114,3 +114,15 @@ The app SHALL classify local build success, failure and cancellation as terminal
 #### Scenario: Build succeeds after update saturation
 - **WHEN** all 12 update slots are used and a valid local build success arrives with a terminal reserve slot available
 - **THEN** the app SHALL end the old started reaction and MAY show the bounded success reaction without consuming an update slot.
+
+### Requirement: CPU observations are shared without duplicate sampling within the acquisition window
+
+The shared host metrics service SHALL expose sample identity, generation and observation time, and SHALL reuse the same observation for active consumers within the initial five-second acquisition window. A failure SHALL NOT become a fabricated valid zero sample. Downstream smoothing SHALL count each distinct successful observation at most once.
+
+#### Scenario: Companion reads shortly before widget refresh
+- **WHEN** the companion obtained a valid CPU observation and the widget requests the same measurement less than five seconds after capture
+- **THEN** the service SHALL return the same observation identity and captured time without reading the host counters again.
+
+#### Scenario: Obsolete bootstrap finishes after resubscription
+- **WHEN** the last consumer unsubscribes during bootstrap and a new consumer subsequently acquires a fresh lease
+- **THEN** the old acquisition SHALL NOT change the new baseline or cache, and SHALL NOT return a valid observation to the old lease. 
