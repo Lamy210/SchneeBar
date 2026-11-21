@@ -12,10 +12,17 @@ private actor FocusNotificationCenterStub: FocusReminderNotificationCenterPort {
     private var submitted: [FocusReminderNotificationRequest] = []
     private var removed: [[String]] = []
     private var checks = 0
+    private let pending: [String]
+    private let delivered: [String]
+    private var pendingReads = 0
+    private var deliveredReads = 0
 
-    init(authorization: FocusReminderNotificationAuthorization, shouldReject: Bool = false) {
+    init(authorization: FocusReminderNotificationAuthorization, shouldReject: Bool = false,
+         pending: [String] = [], delivered: [String] = []) {
         self.authorization = authorization
         self.shouldReject = shouldReject
+        self.pending = pending
+        self.delivered = delivered
     }
 
     func authorizationStatus() async -> FocusReminderNotificationAuthorization {
@@ -28,14 +35,24 @@ private actor FocusNotificationCenterStub: FocusReminderNotificationCenterPort {
         submitted.append(request)
     }
 
+    func pendingIdentifiers() async -> [String] {
+        pendingReads += 1
+        return pending
+    }
+
+    func deliveredIdentifiers() async -> [String] {
+        deliveredReads += 1
+        return delivered
+    }
+
     func remove(identifiers: [String]) async {
         removed.append(identifiers)
     }
 
     func snapshot() -> (checks: Int,
                         submitted: [FocusReminderNotificationRequest],
-                        removed: [[String]]) {
-        (checks, submitted, removed)
+                        removed: [[String]], pendingReads: Int, deliveredReads: Int) {
+        (checks, submitted, removed, pendingReads, deliveredReads)
     }
 }
 
@@ -124,5 +141,74 @@ private func withFocusNotificationIntent(
         let saved = try await store.load()
         #expect(saved.outbox == [intent])
         #expect(await port.snapshot().submitted.isEmpty)
+    }
+}
+
+@Test func focusNotificationInspectionJoinsSystemEvidenceWithoutSideEffects() async throws {
+    try await withFocusNotificationIntent { intent, store in
+        let id = FocusReminderNotificationIdentity.identifier(for: intent.id)
+        let orphan = FocusReminderNotificationIdentity.identifier(for: UUID())
+        let port = FocusNotificationCenterStub(
+            authorization: .authorized, pending: [id, id, "github-recovery:other"],
+            delivered: [orphan, id]
+        )
+        let gateway = FocusReminderNotificationGateway(center: port)
+        let snapshot = try await store.load()
+        let inspection = try await gateway.inspect(snapshot)
+        #expect(inspection.evidence.authorization == .authorized)
+        #expect(inspection.evidence.pendingIdentifiers == [id, id, "github-recovery:other"])
+        #expect(inspection.evidence.deliveredIdentifiers == [orphan, id])
+        #expect(inspection.plan.observedInSystem == [intent])
+        #expect(inspection.plan.missingSystemEvidence.isEmpty)
+        #expect(inspection.plan.untrackedOwnedIdentifiers == [orphan])
+        #expect(inspection.plan.ignoredIdentifierCount == 1)
+        let calls = await port.snapshot()
+        #expect(calls.checks == 1 && calls.pendingReads == 1 && calls.deliveredReads == 1)
+        #expect(calls.submitted.isEmpty && calls.removed.isEmpty)
+        let after = try await store.load()
+        #expect(after == snapshot)
+    }
+}
+
+@Test func focusNotificationInspectionRetainsDeniedStatusAndAmbiguousAbsence() async throws {
+    try await withFocusNotificationIntent { intent, store in
+        let port = FocusNotificationCenterStub(authorization: .denied)
+        let gateway = FocusReminderNotificationGateway(center: port)
+        let initial = try await store.load()
+        let inspection = try await gateway.inspect(initial)
+        #expect(inspection.evidence.authorization == .denied)
+        #expect(inspection.plan.observedInSystem.isEmpty)
+        #expect(inspection.plan.missingSystemEvidence == [intent])
+        #expect(inspection.plan.untrackedOwnedIdentifiers.isEmpty)
+        let status = await port.snapshot()
+        #expect(status.submitted.isEmpty && status.removed.isEmpty)
+        let saved = try await store.load()
+        #expect(saved.outbox == [intent])
+    }
+}
+
+@Test func focusNotificationInspectionBoundsOSResultsAndRejectsInvalidLimits() async throws {
+    try await withFocusNotificationIntent { intent, store in
+        let id = FocusReminderNotificationIdentity.identifier(for: intent.id)
+        let port = FocusNotificationCenterStub(
+            authorization: .provisional, pending: [id, id], delivered: [id]
+        )
+        let gateway = FocusReminderNotificationGateway(center: port)
+        await #expect(throws: FocusReminderNotificationReconciliationError.tooManySystemIdentifiers) {
+            try await gateway.observe(maximumEvidenceCount: 0)
+        }
+        await #expect(throws: FocusReminderNotificationReconciliationError.tooManySystemIdentifiers) {
+            try await gateway.observe(maximumEvidenceCount: 1)
+        }
+        await #expect(throws: FocusReminderNotificationReconciliationError.tooManySystemIdentifiers) {
+            try await gateway.observe(maximumEvidenceCount: 2)
+        }
+        let status = await port.snapshot()
+        #expect(status.pendingReads == 2 && status.deliveredReads == 1)
+        #expect(status.submitted.isEmpty && status.removed.isEmpty)
+        let initial = try await store.load()
+        let inspection = try await gateway.inspect(initial, maximumEvidenceCount: 3)
+        #expect(inspection.plan.observedInSystem == [intent])
+        #expect(inspection.plan.ignoredIdentifierCount == 0)
     }
 }
