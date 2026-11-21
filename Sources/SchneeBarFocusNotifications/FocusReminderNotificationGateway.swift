@@ -6,6 +6,19 @@ public enum FocusReminderNotificationAuthorization: Equatable, Sendable {
     case notDetermined, denied, authorized, provisional, unsupported
 }
 
+/// A pair of non-atomic OS snapshots; authorization is retained so absence
+/// under denied/unknown permission cannot be misread as non-delivery.
+public struct FocusReminderNotificationSystemEvidence: Equatable, Sendable {
+    public let authorization: FocusReminderNotificationAuthorization
+    public let pendingIdentifiers: [String]
+    public let deliveredIdentifiers: [String]
+}
+
+public struct FocusReminderNotificationInspection: Equatable, Sendable {
+    public let evidence: FocusReminderNotificationSystemEvidence
+    public let plan: FocusReminderNotificationReconciliationPlan
+}
+
 public struct FocusReminderNotificationRequest: Equatable, Sendable {
     public let identifier: String
     public let title: String
@@ -23,6 +36,8 @@ public struct FocusReminderNotificationRequest: Equatable, Sendable {
 public protocol FocusReminderNotificationCenterPort: Sendable {
     func authorizationStatus() async -> FocusReminderNotificationAuthorization
     func add(_ request: FocusReminderNotificationRequest) async throws
+    func pendingIdentifiers() async -> [String]
+    func deliveredIdentifiers() async -> [String]
     func remove(identifiers: [String]) async
 }
 
@@ -48,7 +63,7 @@ public actor FocusReminderNotificationGateway {
     }
 
     public nonisolated static func identifier(for outboxID: UUID) -> String {
-        "dev.lamy.schneebar.focus.\(outboxID.uuidString.lowercased())"
+        FocusReminderNotificationIdentity.identifier(for: outboxID)
     }
 
     public func submit(_ intent: FocusReminderOutboxRecord) async throws
@@ -66,6 +81,45 @@ public actor FocusReminderNotificationGateway {
             body: "A scheduled reminder is ready."
         ))
         return .accepted
+    }
+
+    /// Read-only OS evidence snapshot, with explicit authorization and a
+    /// strict count limit. No ACK, dispatch, cancellation or permission prompt.
+    /// OS pending/delivered reads are not atomic; caller must revalidate before action.
+    public func observe(maximumEvidenceCount: Int = 2_048) async throws
+        -> FocusReminderNotificationSystemEvidence {
+        guard (1...65_536).contains(maximumEvidenceCount) else {
+            throw FocusReminderNotificationReconciliationError.tooManySystemIdentifiers
+        }
+        let authorization = await center.authorizationStatus()
+        let pending = await center.pendingIdentifiers()
+        guard pending.count <= maximumEvidenceCount else {
+            throw FocusReminderNotificationReconciliationError.tooManySystemIdentifiers
+        }
+        let delivered = await center.deliveredIdentifiers()
+        guard delivered.count <= maximumEvidenceCount - pending.count else {
+            throw FocusReminderNotificationReconciliationError.tooManySystemIdentifiers
+        }
+        return FocusReminderNotificationSystemEvidence(
+            authorization: authorization, pendingIdentifiers: pending,
+            deliveredIdentifiers: delivered
+        )
+    }
+
+    /// Convenience inspection only: the passed durable snapshot can be stale
+    /// by the time the two OS queries complete. Never use the result alone
+    /// to resend/ACK/remove a notification.
+    public func inspect(
+        _ snapshot: FocusReminderCollectionStore.Snapshot,
+        maximumEvidenceCount: Int = 2_048
+    ) async throws -> FocusReminderNotificationInspection {
+        let evidence = try await observe(maximumEvidenceCount: maximumEvidenceCount)
+        let plan = try snapshot.reconcileNotificationIdentifiers(
+            pending: evidence.pendingIdentifiers,
+            delivered: evidence.deliveredIdentifiers,
+            maximumEvidenceCount: maximumEvidenceCount
+        )
+        return FocusReminderNotificationInspection(evidence: evidence, plan: plan)
     }
 
     /// Only the SchneeBar-owned Focus namespace is addressed. This does not
@@ -103,8 +157,18 @@ private actor SystemFocusReminderNotificationCenter: FocusReminderNotificationCe
         ))
     }
 
+    func pendingIdentifiers() async -> [String] {
+        await center.pendingNotificationRequests().map(\.identifier)
+    }
+
+    func deliveredIdentifiers() async -> [String] {
+        await center.deliveredNotifications().map { $0.request.identifier }
+    }
+
     func remove(identifiers: [String]) async {
-        let owned = identifiers.filter { $0.hasPrefix("dev.lamy.schneebar.focus.") }
+        let owned = identifiers.filter {
+            FocusReminderNotificationIdentity.parseOwned($0) != nil
+        }
         guard !owned.isEmpty else { return }
         center.removePendingNotificationRequests(withIdentifiers: owned)
         center.removeDeliveredNotifications(withIdentifiers: owned)
