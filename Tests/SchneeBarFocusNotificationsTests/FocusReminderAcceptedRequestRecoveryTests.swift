@@ -239,3 +239,104 @@ private func makeRecoveryOutbox(
         #expect(effects.0 == 0 && effects.1 == 0)
     }
 }
+
+
+private actor ChangingRecoveryEvidenceCenter: FocusReminderNotificationCenterPort {
+    private let laterAuthorization: FocusReminderNotificationAuthorization
+    private let firstPending: [String]
+    private let laterPending: [String]
+    private var authorizationReads = 0
+    private var pendingReads = 0
+    private var additions = 0
+    private var removals = 0
+
+    init(laterAuthorization: FocusReminderNotificationAuthorization,
+         firstPending: [String], laterPending: [String]) {
+        self.laterAuthorization = laterAuthorization
+        self.firstPending = firstPending
+        self.laterPending = laterPending
+    }
+
+    func authorizationStatus() async -> FocusReminderNotificationAuthorization {
+        authorizationReads += 1
+        return authorizationReads == 1 ? .authorized : laterAuthorization
+    }
+
+    func pendingIdentifiers() async -> [String] {
+        pendingReads += 1
+        return pendingReads == 1 ? firstPending : laterPending
+    }
+
+    func deliveredIdentifiers() async -> [String] { [] }
+    func add(_ request: FocusReminderNotificationRequest) async throws { additions += 1 }
+    func remove(identifiers: [String]) async { removals += 1 }
+    func counts() -> (Int, Int, Int, Int) {
+        (authorizationReads, pendingReads, additions, removals)
+    }
+}
+
+@Test func focusAcceptedRecoveryAbortsWhenPermissionRevokedBeforeAck() async throws {
+    try await withRecoveryStore { store in
+        let (_, intent) = try await makeRecoveryOutbox(store, dueSeconds: 60)
+        let identifier = FocusReminderNotificationIdentity.identifier(for: intent.id)
+        let center = ChangingRecoveryEvidenceCenter(
+            laterAuthorization: .denied,
+            firstPending: [identifier], laterPending: [identifier]
+        )
+        let recovery = FocusReminderAcceptedRequestRecovery(
+            store: store, gateway: FocusReminderNotificationGateway(center: center)
+        )
+        await #expect(
+            throws: FocusReminderAcceptedRequestRecoveryError.evidenceChangedDuringRecovery
+        ) {
+            try await recovery.recoverOnce()
+        }
+        #expect(try await store.load().outbox == [intent])
+        let counts = await center.counts()
+        #expect(counts.0 == 2 && counts.1 == 2)
+        #expect(counts.2 == 0 && counts.3 == 0)
+    }
+}
+
+@Test func focusAcceptedRecoveryAbortsWhenOSRequestDisappearsBeforeAck() async throws {
+    try await withRecoveryStore { store in
+        let (_, intent) = try await makeRecoveryOutbox(store, dueSeconds: 60)
+        let identifier = FocusReminderNotificationIdentity.identifier(for: intent.id)
+        let center = ChangingRecoveryEvidenceCenter(
+            laterAuthorization: .authorized,
+            firstPending: [identifier], laterPending: []
+        )
+        let recovery = FocusReminderAcceptedRequestRecovery(
+            store: store, gateway: FocusReminderNotificationGateway(center: center)
+        )
+        await #expect(
+            throws: FocusReminderAcceptedRequestRecoveryError.evidenceChangedDuringRecovery
+        ) {
+            try await recovery.recoverOnce()
+        }
+        #expect(try await store.load().outbox == [intent])
+        let counts = await center.counts()
+        #expect(counts.0 == 2 && counts.1 == 2)
+        #expect(counts.2 == 0 && counts.3 == 0)
+    }
+}
+
+@Test func focusAcceptedRecoveryRechecksMatchingEvidenceThenAcksExactlyOnce() async throws {
+    try await withRecoveryStore { store in
+        let (_, intent) = try await makeRecoveryOutbox(store, dueSeconds: 60)
+        let identifier = FocusReminderNotificationIdentity.identifier(for: intent.id)
+        let center = ChangingRecoveryEvidenceCenter(
+            laterAuthorization: .authorized,
+            firstPending: [identifier], laterPending: [identifier]
+        )
+        let recovery = FocusReminderAcceptedRequestRecovery(
+            store: store, gateway: FocusReminderNotificationGateway(center: center)
+        )
+        let report = try await recovery.recoverOnce()
+        #expect(report.acknowledgedCount == 1)
+        #expect(try await store.load().outbox.isEmpty)
+        let counts = await center.counts()
+        #expect(counts.0 == 2 && counts.1 == 2)
+        #expect(counts.2 == 0 && counts.3 == 0)
+    }
+}
