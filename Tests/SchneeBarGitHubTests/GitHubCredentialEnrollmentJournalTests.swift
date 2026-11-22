@@ -2,7 +2,7 @@ import Foundation
 import Testing
 @testable import SchneeBarGitHub
 
-private enum JournalFixtureError: Error { case injectedFailure }
+private enum JournalFixtureError: Error, Equatable { case injectedFailure }
 
 private final class CredentialJournalMemoryFixture: GitHubCredentialEnrollmentJournalPersistence, @unchecked Sendable {
     private let lock = NSLock()
