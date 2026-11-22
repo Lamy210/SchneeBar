@@ -44,7 +44,11 @@ public actor GitHubCredentialEnrollmentJournal {
         guard records[enrollment.enrollmentID] == nil else {
             throw GitHubCredentialEnrollmentJournalError.duplicateEnrollment
         }
-        guard enrollment.generation == 1,
+        // A public Codable lifecycle can be decoded without running its
+        // throwing initializer. Never persist a forged account, endpoint or
+        // client binding even when the phase and generation look plausible.
+        guard enrollment.isValidPersistedSnapshot(),
+              enrollment.generation == 1,
               enrollment.phase == .prepared || enrollment.phase == .legacyActive
         else {
             throw GitHubCredentialEnrollmentJournalError.invalidSnapshot
