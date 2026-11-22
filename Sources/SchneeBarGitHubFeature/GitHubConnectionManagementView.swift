@@ -70,6 +70,35 @@ public struct GitHubRepositoryActivityAccessModel: Equatable, Sendable {
         self.checks = checks
         self.deployments = deployments
     }
+
+    /// Used only if four individual badges do not fit a narrow row.
+    /// Available sources are deliberately omitted from the warning count.
+    public var compactIssueSummary: String? {
+        let values = [actions, reviewRequests, checks, deployments]
+        let unavailable = values.count { $0 == .unavailable }
+        let unverified = values.count { $0 == .unverified }
+        var fragments: [String] = []
+        if unavailable > 0 { fragments.append("\(unavailable) unavailable") }
+        if unverified > 0 { fragments.append("\(unverified) unverified") }
+        return fragments.isEmpty ? nil : fragments.joined(separator: " · ")
+    }
+
+    public var hasUnavailableSources: Bool {
+        [actions, reviewRequests, checks, deployments].contains(.unavailable)
+    }
+
+    /// Preserve per-source meaning for help and VoiceOver even when badges
+    /// are condensed; do not present unverified as a confirmed denial.
+    public var detailedAccessDescription: String {
+        [
+            ("Actions", actions),
+            ("Reviews", reviewRequests),
+            ("Checks", checks),
+            ("Deployments", deployments),
+        ].map { source, access in
+            "\(source): \(access.statusLabel ?? "Available")"
+        }.joined(separator: ", ")
+    }
 }
 
 public struct GitHubRepositoryOptionModel: Identifiable, Equatable, Sendable {
@@ -372,14 +401,30 @@ public struct GitHubConnectionManagementView: View {
                 .font(.body.monospaced())
                 .lineLimit(1)
                 .truncationMode(.middle)
+                .frame(minWidth: 0, alignment: .leading)
+                .layoutPriority(1)
 
-            Spacer(minLength: 12)
+            Spacer(minLength: 4)
 
-            HStack(spacing: 5) {
-                accessBadge("Actions", access: repository.activityAccess.actions)
-                accessBadge("Reviews", access: repository.activityAccess.reviewRequests)
-                accessBadge("Checks", access: repository.activityAccess.checks)
-                accessBadge("Deployments", access: repository.activityAccess.deployments)
+            if let compactSummary = repository.activityAccess.compactIssueSummary {
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 5) {
+                        accessBadge("Actions", access: repository.activityAccess.actions)
+                        accessBadge("Reviews", access: repository.activityAccess.reviewRequests)
+                        accessBadge("Checks", access: repository.activityAccess.checks)
+                        accessBadge("Deployments", access: repository.activityAccess.deployments)
+                    }
+                    Text(compactSummary)
+                        .font(.caption2)
+                        .foregroundStyle(
+                            repository.activityAccess.hasUnavailableSources ? .red : .orange
+                        )
+                        .lineLimit(1)
+                        .fixedSize(horizontal: true, vertical: false)
+                }
+                .help(repository.activityAccess.detailedAccessDescription)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(repository.activityAccess.detailedAccessDescription)
             }
 
             if repository.isPrivate {
