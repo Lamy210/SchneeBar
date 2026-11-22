@@ -116,3 +116,42 @@ private func enqueueBacklogReminder(
         }
     }
 }
+
+
+@Test func focusBacklogAtHardCapacityReportsZeroRemainingSlots() async throws {
+    try await withBacklogStore { store, _ in
+        let due = backlogOrigin.addingTimeInterval(60)
+        let entry = try await store.add(title: "Private", rule: .once(due))
+        _ = try await store.apply(
+            id: entry.id, command: .update(.setEnabled(true)), at: backlogOrigin
+        )
+        let saved = try await store.load()
+        var envelope = try #require(
+            JSONSerialization.jsonObject(with: JSONEncoder().encode(saved)) as? [String: Any]
+        )
+        let records = (0..<FocusReminderCollectionStore.maximumOutboxEntries).map { _ in
+            FocusReminderOutboxRecord(
+                reminderID: entry.id, ticketID: UUID(), kind: .regular,
+                deadline: due, claimedAt: due
+            )
+        }
+        envelope["outbox"] = try JSONSerialization.jsonObject(
+            with: JSONEncoder().encode(records)
+        )
+        let full = try JSONDecoder().decode(
+            FocusReminderCollectionStore.Snapshot.self,
+            from: JSONSerialization.data(withJSONObject: envelope)
+        )
+        let report = try full.outboxBacklogDiagnostics(
+            at: due.addingTimeInterval(300), agedAfter: 300
+        )
+        #expect(report.queuedCount == 128)
+        #expect(report.remainingCapacity == 0)
+        #expect(report.isAtCapacity)
+        #expect(report.agedCount == 128)
+        #expect(report.futureClaimCount == 0)
+        #expect(report.oldestClaimedAt == due)
+        // Synthetic input is never written back to the store.
+        #expect(try await store.load() == saved)
+    }
+}
