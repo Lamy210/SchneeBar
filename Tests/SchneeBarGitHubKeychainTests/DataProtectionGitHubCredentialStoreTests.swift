@@ -413,3 +413,88 @@ func dataProtectionActiveReadRejectsForgedDecodedEnrollmentIdentity() throws {
         try DataProtectionGitHubCredentialReadPolicy.validateActiveEnrollment(forged)
     }
 }
+
+
+@Test
+func dataProtectionInsertionRejectsForgedDecodedIdentityBeforeKeychainWrite() throws {
+    let enrollment = try identityBoundTestEnrollment(
+        for: GitHubCredentialEnrollmentKey(enrollmentID: UUID(), purpose: .read)
+    )
+    let credential = GitHubCredential(
+        accessToken: "synthetic-token",
+        endpointIdentity: "https://github.com"
+    )
+    let original = try #require(
+        JSONSerialization.jsonObject(with: JSONEncoder().encode(enrollment)) as? [String: Any]
+    )
+    for (field, value) in [
+        ("canonicalWebOrigin", "http://github.com"),
+        ("numericAccountID", "account-id-not-numeric"),
+        ("appClientID", "")
+    ] {
+        var data = original
+        data[field] = value
+        let forged = try JSONDecoder().decode(
+            GitHubCredentialEnrollmentLifecycle.self,
+            from: JSONSerialization.data(withJSONObject: data)
+        )
+        #expect(throws: DataProtectionGitHubCredentialStoreError.invalidEnrollmentIdentity) {
+            try DataProtectionGitHubCredentialInsertPolicy.validate(
+                credential: credential,
+                enrollment: forged
+            )
+        }
+    }
+}
+
+@Test
+func dataProtectionInsertionRejectsImpossibleStagingGenerations() throws {
+    let prepared = try identityBoundTestEnrollment(
+        for: GitHubCredentialEnrollmentKey(enrollmentID: UUID(), purpose: .read)
+    )
+    let valid = GitHubCredential(
+        accessToken: "synthetic-token", endpointIdentity: "https://github.com"
+    )
+    try DataProtectionGitHubCredentialInsertPolicy.validate(
+        credential: valid, enrollment: prepared
+    )
+
+    let source = try #require(
+        JSONSerialization.jsonObject(with: JSONEncoder().encode(prepared)) as? [String: Any]
+    )
+    var invalidPrepared = source
+    invalidPrepared["generation"] = 2
+    let forgedPrepared = try JSONDecoder().decode(
+        GitHubCredentialEnrollmentLifecycle.self,
+        from: JSONSerialization.data(withJSONObject: invalidPrepared)
+    )
+    #expect(throws: DataProtectionGitHubCredentialStoreError.invalidEnrollmentPhase) {
+        try DataProtectionGitHubCredentialInsertPolicy.validate(
+            credential: valid, enrollment: forgedPrepared
+        )
+    }
+
+    var invalidMigration = source
+    invalidMigration["phase"] = GitHubCredentialEnrollmentPhase.migrationPrepared.rawValue
+    let forgedMigration = try JSONDecoder().decode(
+        GitHubCredentialEnrollmentLifecycle.self,
+        from: JSONSerialization.data(withJSONObject: invalidMigration)
+    )
+    #expect(throws: DataProtectionGitHubCredentialStoreError.invalidEnrollmentPhase) {
+        try DataProtectionGitHubCredentialInsertPolicy.validate(
+            credential: valid, enrollment: forgedMigration
+        )
+    }
+
+    let legacy = try GitHubCredentialEnrollmentLifecycle.prepareVerifiedLegacy(
+        enrollmentID: UUID(),
+        purpose: .read,
+        canonicalWebOrigin: "https://github.com",
+        numericAccountID: "12345",
+        appClientID: "Iv1.synthetic-testing"
+    )
+    let migration = try legacy.transitioned(to: .migrationPrepared, expectedGeneration: 1)
+    try DataProtectionGitHubCredentialInsertPolicy.validate(
+        credential: valid, enrollment: migration
+    )
+}
