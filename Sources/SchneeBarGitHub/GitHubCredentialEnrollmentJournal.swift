@@ -6,6 +6,7 @@ public enum GitHubCredentialEnrollmentJournalError: Error, Equatable, Sendable {
     case invalidSnapshot
     case staleSnapshot
     case inactiveEnrollment
+    case enrollmentIdentityMismatch
 }
 
 /// Implementations must make each replacement durable and crash-safe before
@@ -81,6 +82,34 @@ public actor GitHubCredentialEnrollmentJournal {
         }
         guard current.phase == .dpActive, current.generation >= 2 else {
             throw GitHubCredentialEnrollmentJournalError.inactiveEnrollment
+        }
+        return current
+    }
+
+    /// A stronger, scope-bound point-in-time preflight for an enrollment
+    /// snapshot supplied by a future credential coordinator. Reuses the
+    /// durable active-generation check but additionally rejects a different
+    /// purpose, endpoint, numeric account, or GitHub App client identity.
+    /// The enrollment UUID and generation alone must never authorize a token.
+    ///
+    /// Even an identity match is NOT proof of the live GitHub account or a
+    /// cross-process lease. Actual token-using operations need a transaction
+    /// fence and independent provider identity verification.
+    public func requireFreshActiveRecord(
+        matching expected: GitHubCredentialEnrollmentLifecycle
+    ) throws -> GitHubCredentialEnrollmentLifecycle {
+        let current = try requireFreshActiveRecord(
+            for: expected.enrollmentID, expectedGeneration: expected.generation
+        )
+        guard expected.phase == .dpActive else {
+            throw GitHubCredentialEnrollmentJournalError.inactiveEnrollment
+        }
+        guard current.purpose == expected.purpose,
+              current.canonicalWebOrigin == expected.canonicalWebOrigin,
+              current.numericAccountID == expected.numericAccountID,
+              current.appClientID == expected.appClientID
+        else {
+            throw GitHubCredentialEnrollmentJournalError.enrollmentIdentityMismatch
         }
         return current
     }

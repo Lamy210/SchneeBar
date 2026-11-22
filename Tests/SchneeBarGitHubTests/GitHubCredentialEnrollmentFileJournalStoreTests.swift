@@ -263,3 +263,41 @@ func fileJournalFreshActiveGuardRejectsDurablyDisconnectedGeneration() async thr
         }
     }
 }
+
+
+@Test
+func fileJournalFreshActiveIdentityGuardRejectsWrongAccountAfterDurableReload() async throws {
+    try await withPrivateJournalDirectory { directory in
+        let writer = GitHubCredentialEnrollmentJournal(
+            persistence: GitHubCredentialEnrollmentFileJournalStore(directoryURL: directory)
+        )
+        let reader = GitHubCredentialEnrollmentJournal(
+            persistence: GitHubCredentialEnrollmentFileJournalStore(directoryURL: directory)
+        )
+        let enrollment = try enrollmentForDisk()
+        _ = try await writer.register(enrollment)
+        let active = try await writer.transition(
+            enrollmentID: enrollment.enrollmentID, expectedGeneration: 1, to: .dpActive
+        )
+        #expect(try await reader.requireFreshActiveRecord(matching: active) == active)
+
+        var forgedDocument = try #require(
+            JSONSerialization.jsonObject(with: JSONEncoder().encode(active)) as? [String: Any]
+        )
+        forgedDocument["numericAccountID"] = "999"
+        let forged = try JSONDecoder().decode(
+            GitHubCredentialEnrollmentLifecycle.self,
+            from: JSONSerialization.data(withJSONObject: forgedDocument)
+        )
+        await #expect(throws: GitHubCredentialEnrollmentJournalError.enrollmentIdentityMismatch) {
+            try await reader.requireFreshActiveRecord(matching: forged)
+        }
+
+        _ = try await writer.transition(
+            enrollmentID: enrollment.enrollmentID, expectedGeneration: 2, to: .disconnected
+        )
+        await #expect(throws: GitHubCredentialEnrollmentJournalError.staleSnapshot) {
+            try await reader.requireFreshActiveRecord(matching: active)
+        }
+    }
+}

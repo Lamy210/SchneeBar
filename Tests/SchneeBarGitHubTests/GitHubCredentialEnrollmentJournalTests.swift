@@ -419,3 +419,69 @@ func freshActiveJournalGuardRejectsIOFailureAndCorruptRecordWithoutReturningCach
         )
     }
 }
+
+
+@Test
+func journalFreshActiveIdentityGuardRequiresExactBoundAccountAppAndPurpose() async throws {
+    let persistence = CredentialJournalMemoryFixture()
+    let journal = GitHubCredentialEnrollmentJournal(persistence: persistence)
+    let prepared = try journalFixtureState()
+    _ = try await journal.register(prepared)
+    let active = try await journal.transition(
+        enrollmentID: prepared.enrollmentID, expectedGeneration: 1, to: .dpActive
+    )
+    #expect(try await journal.requireFreshActiveRecord(matching: active) == active)
+
+    let original = try #require(
+        JSONSerialization.jsonObject(with: JSONEncoder().encode(active)) as? [String: Any]
+    )
+    for (field, other) in [
+        ("purpose", "write"),
+        ("canonicalWebOrigin", "https://other.example"),
+        ("numericAccountID", "999"),
+        ("appClientID", "Iv1.another-github-app")
+    ] {
+        var document = original
+        document[field] = other
+        let forged = try JSONDecoder().decode(
+            GitHubCredentialEnrollmentLifecycle.self,
+            from: JSONSerialization.data(withJSONObject: document)
+        )
+        await #expect(throws: GitHubCredentialEnrollmentJournalError.enrollmentIdentityMismatch) {
+            try await journal.requireFreshActiveRecord(matching: forged)
+        }
+    }
+    // The exact binding is necessary even for a correct ID and generation.
+    #expect(try await journal.record(for: active.enrollmentID) == active)
+}
+
+@Test
+func journalFreshActiveIdentityGuardRejectsInactiveOrStaleExpectedSnapshot() async throws {
+    let persistence = CredentialJournalMemoryFixture()
+    let journal = GitHubCredentialEnrollmentJournal(persistence: persistence)
+    let prepared = try journalFixtureState()
+    _ = try await journal.register(prepared)
+    await #expect(throws: GitHubCredentialEnrollmentJournalError.inactiveEnrollment) {
+        try await journal.requireFreshActiveRecord(matching: prepared)
+    }
+    let active = try await journal.transition(
+        enrollmentID: prepared.enrollmentID, expectedGeneration: 1, to: .dpActive
+    )
+    var document = try #require(
+        JSONSerialization.jsonObject(with: JSONEncoder().encode(active)) as? [String: Any]
+    )
+    document["phase"] = GitHubCredentialEnrollmentPhase.prepared.rawValue
+    let forgedPhase = try JSONDecoder().decode(
+        GitHubCredentialEnrollmentLifecycle.self,
+        from: JSONSerialization.data(withJSONObject: document)
+    )
+    await #expect(throws: GitHubCredentialEnrollmentJournalError.inactiveEnrollment) {
+        try await journal.requireFreshActiveRecord(matching: forgedPhase)
+    }
+    _ = try await journal.transition(
+        enrollmentID: prepared.enrollmentID, expectedGeneration: 2, to: .disconnected
+    )
+    await #expect(throws: GitHubCredentialEnrollmentJournalError.staleSnapshot) {
+        try await journal.requireFreshActiveRecord(matching: active)
+    }
+}
