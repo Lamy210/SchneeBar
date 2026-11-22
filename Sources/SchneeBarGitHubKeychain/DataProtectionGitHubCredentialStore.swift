@@ -6,6 +6,7 @@ public enum DataProtectionGitHubCredentialStoreError: Error, Equatable, Sendable
     case invalidEnrollmentPhase
     case invalidCredentialBinding
     case inactiveEnrollment
+    case invalidEnrollmentIdentity
 }
 
 /// The binding check is pure so CI exercises it even without a signed,
@@ -36,8 +37,22 @@ enum DataProtectionGitHubCredentialReadPolicy {
     static func validateActiveEnrollment(
         _ enrollment: GitHubCredentialEnrollmentLifecycle
     ) throws {
-        guard enrollment.phase == .dpActive, enrollment.generation > 0 else {
+        // A newly created enrollment starts at generation 1, and cannot
+        // become dpActive without a durable transition to generation >= 2.
+        guard enrollment.phase == .dpActive, enrollment.generation >= 2 else {
             throw DataProtectionGitHubCredentialStoreError.inactiveEnrollment
+        }
+        // An arbitrary Codable snapshot could claim dpActive while carrying
+        // a malformed endpoint or account binding. Validate its identity
+        // before any Keychain read; it is still not a journal CAS/attestation.
+        guard (try? GitHubCredentialEnrollmentLifecycle(
+            enrollmentID: enrollment.enrollmentID,
+            purpose: enrollment.purpose,
+            canonicalWebOrigin: enrollment.canonicalWebOrigin,
+            numericAccountID: enrollment.numericAccountID,
+            appClientID: enrollment.appClientID
+        )) != nil else {
+            throw DataProtectionGitHubCredentialStoreError.invalidEnrollmentIdentity
         }
     }
 
