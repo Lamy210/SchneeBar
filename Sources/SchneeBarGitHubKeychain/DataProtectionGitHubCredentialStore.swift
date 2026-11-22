@@ -9,6 +9,25 @@ public enum DataProtectionGitHubCredentialStoreError: Error, Equatable, Sendable
     case invalidEnrollmentIdentity
 }
 
+/// Revalidate externally decoded lifecycle identities before reading or
+/// writing any V2 Keychain item. A structurally valid value still needs a
+/// fresh, authoritative journal generation and verified provider identity.
+enum DataProtectionGitHubCredentialEnrollmentIdentityPolicy {
+    static func validate(
+        _ enrollment: GitHubCredentialEnrollmentLifecycle
+    ) throws {
+        guard (try? GitHubCredentialEnrollmentLifecycle(
+            enrollmentID: enrollment.enrollmentID,
+            purpose: enrollment.purpose,
+            canonicalWebOrigin: enrollment.canonicalWebOrigin,
+            numericAccountID: enrollment.numericAccountID,
+            appClientID: enrollment.appClientID
+        )) != nil else {
+            throw DataProtectionGitHubCredentialStoreError.invalidEnrollmentIdentity
+        }
+    }
+}
+
 /// The binding check is pure so CI exercises it even without a signed,
 /// interactive macOS Keychain. It is a necessary precondition, not proof that
 /// the GitHub account, App installation or journal generation is current.
@@ -17,11 +36,14 @@ enum DataProtectionGitHubCredentialInsertPolicy {
         credential: GitHubCredential,
         enrollment: GitHubCredentialEnrollmentLifecycle
     ) throws {
-        guard enrollment.phase == .prepared || enrollment.phase == .migrationPrepared else {
+        let validStage =
+            (enrollment.phase == .prepared && enrollment.generation == 1)
+            || (enrollment.phase == .migrationPrepared && enrollment.generation >= 2)
+        guard validStage else {
             throw DataProtectionGitHubCredentialStoreError.invalidEnrollmentPhase
         }
-        guard enrollment.generation > 0,
-              credential.endpointIdentity == enrollment.canonicalWebOrigin,
+        try DataProtectionGitHubCredentialEnrollmentIdentityPolicy.validate(enrollment)
+        guard credential.endpointIdentity == enrollment.canonicalWebOrigin,
               GitHubDeviceFlowResponsePolicy.isValidOpaqueToken(credential.accessToken),
               credential.refreshToken.map(GitHubDeviceFlowResponsePolicy.isValidOpaqueToken) ?? true
         else {
@@ -42,18 +64,9 @@ enum DataProtectionGitHubCredentialReadPolicy {
         guard enrollment.phase == .dpActive, enrollment.generation >= 2 else {
             throw DataProtectionGitHubCredentialStoreError.inactiveEnrollment
         }
-        // An arbitrary Codable snapshot could claim dpActive while carrying
-        // a malformed endpoint or account binding. Validate its identity
-        // before any Keychain read; it is still not a journal CAS/attestation.
-        guard (try? GitHubCredentialEnrollmentLifecycle(
-            enrollmentID: enrollment.enrollmentID,
-            purpose: enrollment.purpose,
-            canonicalWebOrigin: enrollment.canonicalWebOrigin,
-            numericAccountID: enrollment.numericAccountID,
-            appClientID: enrollment.appClientID
-        )) != nil else {
-            throw DataProtectionGitHubCredentialStoreError.invalidEnrollmentIdentity
-        }
+        // A decoded snapshot can forge dpActive with an invalid endpoint
+        // or account binding. Share the same structural policy as inserts.
+        try DataProtectionGitHubCredentialEnrollmentIdentityPolicy.validate(enrollment)
     }
 
     static func validate(
