@@ -370,7 +370,7 @@ func dataProtectionLoadActiveRefusesStagedEnrollmentBeforeKeychainQuery() async 
         for: GitHubCredentialEnrollmentKey(enrollmentID: UUID(), purpose: .read)
     )
     let store = DataProtectionGitHubCredentialStore(
-        service: "dev.lamy.schneebar.tests.nonexistent.\\(UUID().uuidString)"
+        service: "dev.lamy.schneebar.tests.nonexistent"
     )
     await #expect(throws: DataProtectionGitHubCredentialStoreError.inactiveEnrollment) {
         try await store.loadActive(for: prepared)
