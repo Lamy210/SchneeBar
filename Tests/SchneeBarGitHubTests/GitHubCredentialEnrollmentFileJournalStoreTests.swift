@@ -227,3 +227,39 @@ func fileJournalRejectsForgedActiveGenerationOneOnDisk() async throws {
         #expect(try Data(contentsOf: path) == data)
     }
 }
+
+
+@Test
+func fileJournalFreshActiveGuardRejectsDurablyDisconnectedGeneration() async throws {
+    try await withPrivateJournalDirectory { directory in
+        let first = GitHubCredentialEnrollmentJournal(
+            persistence: GitHubCredentialEnrollmentFileJournalStore(directoryURL: directory)
+        )
+        let second = GitHubCredentialEnrollmentJournal(
+            persistence: GitHubCredentialEnrollmentFileJournalStore(directoryURL: directory)
+        )
+        let enrollment = try enrollmentForDisk()
+        _ = try await first.register(enrollment)
+        let active = try await first.transition(
+            enrollmentID: enrollment.enrollmentID, expectedGeneration: 1, to: .dpActive
+        )
+        #expect(try await second.requireFreshActiveRecord(
+            for: enrollment.enrollmentID, expectedGeneration: 2
+        ) == active)
+
+        let disconnected = try await first.transition(
+            enrollmentID: enrollment.enrollmentID, expectedGeneration: 2, to: .disconnected
+        )
+        #expect(disconnected.generation == 3)
+        await #expect(throws: GitHubCredentialEnrollmentJournalError.staleSnapshot) {
+            try await second.requireFreshActiveRecord(
+                for: enrollment.enrollmentID, expectedGeneration: 2
+            )
+        }
+        await #expect(throws: GitHubCredentialEnrollmentJournalError.inactiveEnrollment) {
+            try await second.requireFreshActiveRecord(
+                for: enrollment.enrollmentID, expectedGeneration: 3
+            )
+        }
+    }
+}

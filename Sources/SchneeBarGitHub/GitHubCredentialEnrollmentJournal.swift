@@ -5,6 +5,7 @@ public enum GitHubCredentialEnrollmentJournalError: Error, Equatable, Sendable {
     case missingEnrollment
     case invalidSnapshot
     case staleSnapshot
+    case inactiveEnrollment
 }
 
 /// Implementations must make each replacement durable and crash-safe before
@@ -57,6 +58,31 @@ public actor GitHubCredentialEnrollmentJournal {
         loaded = false
         try ensureLoaded()
         return records[enrollmentID]
+    }
+
+    /// Fail-closed preflight for an already known V2 credential generation.
+    /// Unlike record(for:), this re-reads the durable snapshot on every call,
+    /// rejects stale generations, and requires the dpActive phase.
+    ///
+    /// IMPORTANT: this is a point-in-time check, not a cross-process lease.
+    /// Another process can disconnect immediately afterwards. The future
+    /// credential coordinator must recheck/hold the generation fence across
+    /// the actual Keychain/API operation. It must never treat this as proof of
+    /// account identity or GitHub authorization.
+    public func requireFreshActiveRecord(
+        for enrollmentID: UUID,
+        expectedGeneration: UInt64
+    ) throws -> GitHubCredentialEnrollmentLifecycle {
+        guard let current = try refreshRecord(for: enrollmentID) else {
+            throw GitHubCredentialEnrollmentJournalError.missingEnrollment
+        }
+        guard current.generation == expectedGeneration else {
+            throw GitHubCredentialEnrollmentJournalError.staleSnapshot
+        }
+        guard current.phase == .dpActive, current.generation >= 2 else {
+            throw GitHubCredentialEnrollmentJournalError.inactiveEnrollment
+        }
+        return current
     }
 
     public func register(
