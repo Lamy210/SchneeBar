@@ -311,3 +311,111 @@ func journalRegisterRejectsForgedLegacyIdentityWithoutPersistingTombstone() asyn
     #expect(try persistence.load().isEmpty)
     #expect(try await journal.register(verified) == verified)
 }
+
+
+@Test
+func freshActiveJournalGuardAcceptsOnlyTheExpectedActiveGeneration() async throws {
+    let persistence = CredentialJournalMemoryFixture()
+    let journal = GitHubCredentialEnrollmentJournal(persistence: persistence)
+    let enrollment = try journalFixtureState()
+    _ = try await journal.register(enrollment)
+
+    await #expect(throws: GitHubCredentialEnrollmentJournalError.inactiveEnrollment) {
+        try await journal.requireFreshActiveRecord(
+            for: enrollment.enrollmentID, expectedGeneration: 1
+        )
+    }
+
+    let active = try await journal.transition(
+        enrollmentID: enrollment.enrollmentID,
+        expectedGeneration: 1, to: .dpActive
+    )
+    #expect(try await journal.requireFreshActiveRecord(
+        for: enrollment.enrollmentID, expectedGeneration: 2
+    ) == active)
+
+    await #expect(throws: GitHubCredentialEnrollmentJournalError.staleSnapshot) {
+        try await journal.requireFreshActiveRecord(
+            for: enrollment.enrollmentID, expectedGeneration: 1
+        )
+    }
+    await #expect(throws: GitHubCredentialEnrollmentJournalError.missingEnrollment) {
+        try await journal.requireFreshActiveRecord(
+            for: UUID(), expectedGeneration: 2
+        )
+    }
+
+    let refreshing = try await journal.transition(
+        enrollmentID: enrollment.enrollmentID,
+        expectedGeneration: 2, to: .refreshInFlight
+    )
+    #expect(refreshing.generation == 3)
+    await #expect(throws: GitHubCredentialEnrollmentJournalError.inactiveEnrollment) {
+        try await journal.requireFreshActiveRecord(
+            for: enrollment.enrollmentID, expectedGeneration: 3
+        )
+    }
+}
+
+@Test
+func freshActiveJournalGuardRejectsExternalDisconnectDespiteCachedActiveRecord() async throws {
+    let persistence = CredentialJournalMemoryFixture()
+    let first = GitHubCredentialEnrollmentJournal(persistence: persistence)
+    let second = GitHubCredentialEnrollmentJournal(persistence: persistence)
+    let enrollment = try journalFixtureState()
+    _ = try await first.register(enrollment)
+    let active = try await first.transition(
+        enrollmentID: enrollment.enrollmentID, expectedGeneration: 1, to: .dpActive
+    )
+    #expect(try await second.requireFreshActiveRecord(
+        for: enrollment.enrollmentID, expectedGeneration: 2
+    ) == active)
+    let disconnected = try await first.transition(
+        enrollmentID: enrollment.enrollmentID, expectedGeneration: 2, to: .disconnected
+    )
+    // This actor still has a previously read dpActive snapshot in memory.
+    #expect(try await second.record(for: enrollment.enrollmentID) == active)
+    await #expect(throws: GitHubCredentialEnrollmentJournalError.staleSnapshot) {
+        try await second.requireFreshActiveRecord(
+            for: enrollment.enrollmentID, expectedGeneration: 2
+        )
+    }
+    await #expect(throws: GitHubCredentialEnrollmentJournalError.inactiveEnrollment) {
+        try await second.requireFreshActiveRecord(
+            for: enrollment.enrollmentID, expectedGeneration: disconnected.generation
+        )
+    }
+    #expect(try await second.record(for: enrollment.enrollmentID) == disconnected)
+}
+
+@Test
+func freshActiveJournalGuardRejectsIOFailureAndCorruptRecordWithoutReturningCachedActive() async throws {
+    let persistence = CredentialJournalMemoryFixture()
+    let journal = GitHubCredentialEnrollmentJournal(persistence: persistence)
+    let enrollment = try journalFixtureState()
+    _ = try await journal.register(enrollment)
+    let active = try await journal.transition(
+        enrollmentID: enrollment.enrollmentID, expectedGeneration: 1, to: .dpActive
+    )
+    persistence.failNextLoad()
+    await #expect(throws: JournalFixtureError.injectedFailure) {
+        try await journal.requireFreshActiveRecord(
+            for: enrollment.enrollmentID, expectedGeneration: 2
+        )
+    }
+    persistence.forceLoadFixture([active, active])
+    await #expect(throws: GitHubCredentialEnrollmentJournalError.invalidSnapshot) {
+        try await journal.requireFreshActiveRecord(
+            for: enrollment.enrollmentID, expectedGeneration: 2
+        )
+    }
+    let disconnected = try active.transitioned(
+        to: .disconnected, expectedGeneration: 2
+    )
+    persistence.forceLoadFixture([disconnected])
+    await #expect(throws: GitHubCredentialEnrollmentJournalError.staleSnapshot) {
+        try await journal.requireFreshActiveRecord(
+            for: enrollment.enrollmentID, expectedGeneration: 2
+        )
+    }
+}
