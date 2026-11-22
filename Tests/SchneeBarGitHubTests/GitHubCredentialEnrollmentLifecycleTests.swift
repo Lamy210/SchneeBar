@@ -120,3 +120,34 @@ func enrollmentOriginMustNotIncludeAPreselectedPath() throws {
         }
     }
 }
+
+
+@Test
+func lifecyclePersistedSnapshotRejectsForgedActiveGenerationOne() throws {
+    let prepared = try newEnrollment()
+    #expect(prepared.isValidPersistedSnapshot())
+    let original = try #require(
+        JSONSerialization.jsonObject(with: JSONEncoder().encode(prepared)) as? [String: Any]
+    )
+    let invalidPhases: [GitHubCredentialEnrollmentPhase] = [
+        .migrationPrepared, .dpActive, .refreshInFlight,
+        .reauthRequired, .disconnected
+    ]
+    for phase in invalidPhases {
+        var document = original
+        document["phase"] = phase.rawValue
+        let decoded = try JSONDecoder().decode(
+            GitHubCredentialEnrollmentLifecycle.self,
+            from: JSONSerialization.data(withJSONObject: document)
+        )
+        #expect(!decoded.isValidPersistedSnapshot())
+    }
+
+    let verified = try GitHubCredentialEnrollmentLifecycle.prepareVerifiedLegacy(
+        enrollmentID: UUID(), purpose: .read, canonicalWebOrigin: "https://github.com",
+        numericAccountID: "12345", appClientID: "Iv1.testing-client"
+    )
+    #expect(verified.isValidPersistedSnapshot())
+    let active = try prepared.transitioned(to: .dpActive, expectedGeneration: 1)
+    #expect(active.isValidPersistedSnapshot())
+}

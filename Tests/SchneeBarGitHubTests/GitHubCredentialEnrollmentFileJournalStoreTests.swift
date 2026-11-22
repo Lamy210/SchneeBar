@@ -203,3 +203,27 @@ func fileJournalRefreshSeesExternalDisconnectFromActualDurableStore() async thro
         #expect(try await second.record(for: enrollment.enrollmentID) == disconnected)
     }
 }
+
+@Test
+func fileJournalRejectsForgedActiveGenerationOneOnDisk() async throws {
+    try await withPrivateJournalDirectory { directory in
+        let prepared = try enrollmentForDisk()
+        var record = try #require(
+            JSONSerialization.jsonObject(with: JSONEncoder().encode(prepared)) as? [String: Any]
+        )
+        record["phase"] = GitHubCredentialEnrollmentPhase.dpActive.rawValue
+        let data = try JSONSerialization.data(
+            withJSONObject: ["version": 1, "records": [record]]
+        )
+        let path = directory.appendingPathComponent("enrollments-v1.json")
+        try data.write(to: path)
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o600], ofItemAtPath: path.path
+        )
+        let store = GitHubCredentialEnrollmentFileJournalStore(directoryURL: directory)
+        #expect(throws: GitHubCredentialEnrollmentJournalError.invalidSnapshot) {
+            try store.load()
+        }
+        #expect(try Data(contentsOf: path) == data)
+    }
+}
