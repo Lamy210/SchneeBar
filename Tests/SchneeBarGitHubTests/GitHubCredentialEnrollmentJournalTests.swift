@@ -9,6 +9,13 @@ private final class CredentialJournalMemoryFixture: GitHubCredentialEnrollmentJo
     private var records: [GitHubCredentialEnrollmentLifecycle] = []
     private var failure: Bool = false
     private var commitThenFail: Bool = false
+    private var failReadOnce: Bool = false
+
+    func failNextLoad() {
+        lock.lock()
+        defer { lock.unlock() }
+        failReadOnce = true
+    }
 
     func failNextReplacement(afterCommitting: Bool) {
         lock.lock()
@@ -20,6 +27,10 @@ private final class CredentialJournalMemoryFixture: GitHubCredentialEnrollmentJo
     func load() throws -> [GitHubCredentialEnrollmentLifecycle] {
         lock.lock()
         defer { lock.unlock() }
+        if failReadOnce {
+            failReadOnce = false
+            throw JournalFixtureError.injectedFailure
+        }
         return records
     }
 
@@ -163,4 +174,81 @@ func twoJournalsRejectLostUpdateAfterIndependentCacheLoad() async throws {
         )
     }
     #expect(try await second.record(for: enrollment.enrollmentID) == active)
+}
+
+
+@Test
+func journalRefreshObservesExternalDisconnectDespiteCachedActiveState() async throws {
+    let persistence = CredentialJournalMemoryFixture()
+    let first = GitHubCredentialEnrollmentJournal(persistence: persistence)
+    let second = GitHubCredentialEnrollmentJournal(persistence: persistence)
+    let enrollment = try journalFixtureState()
+
+    _ = try await first.register(enrollment)
+    let active = try await first.transition(
+        enrollmentID: enrollment.enrollmentID,
+        expectedGeneration: 1,
+        to: .dpActive
+    )
+    #expect(active.generation == 2)
+    // The second actor uses its own snapshot and persists a disconnect.
+    _ = try await second.record(for: enrollment.enrollmentID)
+    let disconnected = try await second.transition(
+        enrollmentID: enrollment.enrollmentID,
+        expectedGeneration: 2,
+        to: .disconnected
+    )
+
+    // An ordinary cached lookup cannot attest to another process's state.
+    #expect(try await first.record(for: enrollment.enrollmentID) == active)
+    #expect(try await first.refreshRecord(for: enrollment.enrollmentID) == disconnected)
+    #expect(try await first.record(for: enrollment.enrollmentID) == disconnected)
+}
+
+@Test
+func journalRefreshRejectsCorruptExternalSnapshotWithoutKeepingOldCache() async throws {
+    let persistence = CredentialJournalMemoryFixture()
+    let journal = GitHubCredentialEnrollmentJournal(persistence: persistence)
+    let enrollment = try journalFixtureState()
+    _ = try await journal.register(enrollment)
+    let active = try await journal.transition(
+        enrollmentID: enrollment.enrollmentID,
+        expectedGeneration: 1, to: .dpActive
+    )
+
+    // Simulate corrupted disk/connector contents with a duplicated ID.
+    persistence.forceLoadFixture([active, active])
+    #expect(throws: GitHubCredentialEnrollmentJournalError.invalidSnapshot) {
+        try await journal.refreshRecord(for: enrollment.enrollmentID)
+    }
+
+    // The old dpActive must not survive the failed refresh.
+    let disconnected = try active.transitioned(
+        to: .disconnected, expectedGeneration: 2
+    )
+    persistence.forceLoadFixture([disconnected])
+    #expect(try await journal.record(for: enrollment.enrollmentID) == disconnected)
+}
+
+@Test
+func journalRefreshReadFailureDoesNotReturnCachedActiveEnrollment() async throws {
+    let persistence = CredentialJournalMemoryFixture()
+    let journal = GitHubCredentialEnrollmentJournal(persistence: persistence)
+    let enrollment = try journalFixtureState()
+    _ = try await journal.register(enrollment)
+    let active = try await journal.transition(
+        enrollmentID: enrollment.enrollmentID,
+        expectedGeneration: 1, to: .dpActive
+    )
+    persistence.failNextLoad()
+    #expect(throws: JournalFixtureError.injectedFailure) {
+        try await journal.refreshRecord(for: enrollment.enrollmentID)
+    }
+    // Follow-up reads must reload rather than reuse the earlier cached dpActive.
+    let disconnected = try active.transitioned(
+        to: .disconnected, expectedGeneration: 2
+    )
+    persistence.forceLoadFixture([disconnected])
+    #expect(try await journal.record(for: enrollment.enrollmentID) == disconnected)
+    #expect(try await journal.refreshRecord(for: UUID()) == nil)
 }
