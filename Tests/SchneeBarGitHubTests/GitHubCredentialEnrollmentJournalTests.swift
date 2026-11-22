@@ -218,7 +218,7 @@ func journalRefreshRejectsCorruptExternalSnapshotWithoutKeepingOldCache() async 
 
     // Simulate corrupted disk/connector contents with a duplicated ID.
     persistence.forceLoadFixture([active, active])
-    #expect(throws: GitHubCredentialEnrollmentJournalError.invalidSnapshot) {
+    await #expect(throws: GitHubCredentialEnrollmentJournalError.invalidSnapshot) {
         try await journal.refreshRecord(for: enrollment.enrollmentID)
     }
 
@@ -241,7 +241,7 @@ func journalRefreshReadFailureDoesNotReturnCachedActiveEnrollment() async throws
         expectedGeneration: 1, to: .dpActive
     )
     persistence.failNextLoad()
-    #expect(throws: JournalFixtureError.injectedFailure) {
+    await #expect(throws: JournalFixtureError.injectedFailure) {
         try await journal.refreshRecord(for: enrollment.enrollmentID)
     }
     // Follow-up reads must reload rather than reuse the earlier cached dpActive.
