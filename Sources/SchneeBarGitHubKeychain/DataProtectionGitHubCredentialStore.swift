@@ -5,6 +5,8 @@ import Security
 public enum DataProtectionGitHubCredentialStoreError: Error, Equatable, Sendable {
     case invalidEnrollmentPhase
     case invalidCredentialBinding
+    case inactiveEnrollment
+    case invalidEnrollmentIdentity
 }
 
 /// The binding check is pure so CI exercises it even without a signed,
@@ -20,6 +22,46 @@ enum DataProtectionGitHubCredentialInsertPolicy {
         }
         guard enrollment.generation > 0,
               credential.endpointIdentity == enrollment.canonicalWebOrigin,
+              GitHubDeviceFlowResponsePolicy.isValidOpaqueToken(credential.accessToken),
+              credential.refreshToken.map(GitHubDeviceFlowResponsePolicy.isValidOpaqueToken) ?? true
+        else {
+            throw DataProtectionGitHubCredentialStoreError.invalidCredentialBinding
+        }
+    }
+}
+
+/// Fail-closed read policy for a credential that an independently verified,
+/// durable enrollment journal has already marked active. This cannot prove
+/// that the journal generation or provider account is still current.
+enum DataProtectionGitHubCredentialReadPolicy {
+    static func validateActiveEnrollment(
+        _ enrollment: GitHubCredentialEnrollmentLifecycle
+    ) throws {
+        // A newly created enrollment starts at generation 1, and cannot
+        // become dpActive without a durable transition to generation >= 2.
+        guard enrollment.phase == .dpActive, enrollment.generation >= 2 else {
+            throw DataProtectionGitHubCredentialStoreError.inactiveEnrollment
+        }
+        // An arbitrary Codable snapshot could claim dpActive while carrying
+        // a malformed endpoint or account binding. Validate its identity
+        // before any Keychain read; it is still not a journal CAS/attestation.
+        guard (try? GitHubCredentialEnrollmentLifecycle(
+            enrollmentID: enrollment.enrollmentID,
+            purpose: enrollment.purpose,
+            canonicalWebOrigin: enrollment.canonicalWebOrigin,
+            numericAccountID: enrollment.numericAccountID,
+            appClientID: enrollment.appClientID
+        )) != nil else {
+            throw DataProtectionGitHubCredentialStoreError.invalidEnrollmentIdentity
+        }
+    }
+
+    static func validate(
+        credential: GitHubCredential,
+        enrollment: GitHubCredentialEnrollmentLifecycle
+    ) throws {
+        try validateActiveEnrollment(enrollment)
+        guard credential.endpointIdentity == enrollment.canonicalWebOrigin,
               GitHubDeviceFlowResponsePolicy.isValidOpaqueToken(credential.accessToken),
               credential.refreshToken.map(GitHubDeviceFlowResponsePolicy.isValidOpaqueToken) ?? true
         else {
@@ -67,6 +109,22 @@ public actor DataProtectionGitHubCredentialStore {
         default:
             throw GitHubKeychainError.unexpectedStatus(status)
         }
+    }
+
+    /// Return only credentials whose caller-supplied, previously verified
+    /// enrollment has reached dpActive, with matching endpoint and valid
+    /// token shape. This never promotes a staged token or changes Keychain.
+    /// A production owner MUST still reread/fence the authoritative journal
+    /// generation and verify the provider's account identity before use.
+    public func loadActive(
+        for enrollment: GitHubCredentialEnrollmentLifecycle
+    ) async throws -> GitHubCredential? {
+        try DataProtectionGitHubCredentialReadPolicy.validateActiveEnrollment(enrollment)
+        guard let credential = try await load(for: enrollment.key) else { return nil }
+        try DataProtectionGitHubCredentialReadPolicy.validate(
+            credential: credential, enrollment: enrollment
+        )
+        return credential
     }
 
     /// Insert a new enrollment once. An existing item is not overwritten:
