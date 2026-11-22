@@ -17,6 +17,6 @@ A durable snapshot can become stale immediately after read; pending and delivere
 This developer-only module does not wire into the shipping UI, change live notification ownership with SchneeRunner, or relax the uncompleted #396 ADR-0004/rights/real-Mac/distribution/performance gates.
 
 ## Acceptance / tests
-- macOS Swift Testing 4 cases: one snapshot consistency (one observed and one missing with unrelated OS IDs), denied permission, invalid time/age parameters with no OS queries, evidence overflow with unchanged durable bytes.
+- macOS Swift Testing 5 cases: one snapshot consistency (one observed and one missing with unrelated OS IDs), denied permission, invalid time/age parameters with no OS queries, evidence overflow with unchanged durable bytes, and an external concurrent disable while inspecting OS notifications that preserves an internally consistent (though stale) report.
 - Confirm macOS Build/Test, Visual Regression and OpenSpec strict on exact PR head, no unresolved reviews.
 - Merge to `integration/schneerunner` only; no `main` promotion.
