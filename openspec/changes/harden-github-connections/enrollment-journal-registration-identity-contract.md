@@ -15,3 +15,11 @@
 
 ## Safety boundaries
 Structural validation is **not** evidence of real provider account identity, App authorization, Keychain safety or journal lease/generation fencing. Existing P0 #368 and #396 gates remain open.
+
+
+## Persisted phase/generation consistency
+The domain's `isValidPersistedSnapshot()` must reject a forged generation-1 snapshot that claims a state only reachable by a transition (`migrationPrepared`, `dpActive`, `refreshInFlight`, `reauthRequired`, `disconnected`). Generation 1 is reserved for `prepared` or `legacyActive`. Legitimate later-generation legacy rollback remains allowed.
+
+- Unit-test a `Codable` snapshot with each forbidden phase and generation 1 while preserving valid prepared, verified-legacy, and transitioned dpActive records.
+- File-adapter test: an existing secure on-disk envelope with forged dpActive generation 1 must fail during `load()` with `invalidSnapshot`, without modifying the bytes.
+- Do not claim phase history is proven merely from generation >= 2; actual provenance continues to depend on cross-process append-only journal transitions.
