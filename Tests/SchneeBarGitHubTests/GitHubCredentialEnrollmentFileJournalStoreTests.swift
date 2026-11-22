@@ -173,3 +173,33 @@ func fileJournalRejectsIdentityChangeWithinEnrollment() async throws {
         #expect(try store.load() == [created])
     }
 }
+
+
+@Test
+func fileJournalRefreshSeesExternalDisconnectFromActualDurableStore() async throws {
+    try await withPrivateJournalDirectory { directory in
+        let first = GitHubCredentialEnrollmentJournal(
+            persistence: GitHubCredentialEnrollmentFileJournalStore(directoryURL: directory)
+        )
+        let second = GitHubCredentialEnrollmentJournal(
+            persistence: GitHubCredentialEnrollmentFileJournalStore(directoryURL: directory)
+        )
+        let enrollment = try enrollmentForDisk()
+        _ = try await first.register(enrollment)
+        let active = try await first.transition(
+            enrollmentID: enrollment.enrollmentID, expectedGeneration: 1, to: .dpActive
+        )
+
+        // Both independently created actors cache the same live generation.
+        #expect(try await second.record(for: enrollment.enrollmentID) == active)
+        let disconnected = try await first.transition(
+            enrollmentID: enrollment.enrollmentID, expectedGeneration: 2, to: .disconnected
+        )
+
+        // The cached read is stale, but the newly added API reopens the
+        // locked on-disk snapshot rather than reusing that stale generation.
+        #expect(try await second.record(for: enrollment.enrollmentID) == active)
+        #expect(try await second.refreshRecord(for: enrollment.enrollmentID) == disconnected)
+        #expect(try await second.record(for: enrollment.enrollmentID) == disconnected)
+    }
+}

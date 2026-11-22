@@ -37,6 +37,28 @@ public actor GitHubCredentialEnrollmentJournal {
         return records[enrollmentID]
     }
 
+    /// Reload the durable journal even if this actor cached an earlier
+    /// generation. Use before any security-sensitive decision about whether
+    /// an enrollment is still active: another process may have disconnected
+    /// or rotated it since the last in-process lookup.
+    ///
+    /// The persistence adapter must take its usual shared cross-process lock
+    /// while reading. This is an observation, NOT an atomic lease: another
+    /// process can transition immediately after the lock is released. A
+    /// production authorization coordinator must additionally fence the
+    /// generation for the entire credential-using operation.
+    ///
+    /// Discard the cached snapshot *before* I/O so failed/corrupt reloads can
+    /// never leave an earlier dpActive generation available via record(for:).
+    public func refreshRecord(
+        for enrollmentID: UUID
+    ) throws -> GitHubCredentialEnrollmentLifecycle? {
+        records = [:]
+        loaded = false
+        try ensureLoaded()
+        return records[enrollmentID]
+    }
+
     public func register(
         _ enrollment: GitHubCredentialEnrollmentLifecycle
     ) throws -> GitHubCredentialEnrollmentLifecycle {
