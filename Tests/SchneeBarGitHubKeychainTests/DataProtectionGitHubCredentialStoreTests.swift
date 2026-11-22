@@ -238,3 +238,178 @@ func v2InsertionSupportsExactlyMatchedCustomGHESOrigin() throws {
         )
     }
 }
+
+
+@Test
+func dataProtectionActiveReadRequiresDpActivePhase() throws {
+    let prepared = try identityBoundTestEnrollment(
+        for: GitHubCredentialEnrollmentKey(enrollmentID: UUID(), purpose: .read)
+    )
+    let active = try prepared.transitioned(to: .dpActive, expectedGeneration: 1)
+    let valid = GitHubCredential(
+        accessToken: "synthetic-read-token",
+        endpointIdentity: "https://github.com"
+    )
+    try DataProtectionGitHubCredentialReadPolicy.validate(
+        credential: valid, enrollment: active
+    )
+
+    let denied = [
+        prepared,
+        try prepared.transitioned(to: .reauthRequired, expectedGeneration: 1),
+        try prepared.transitioned(to: .disconnected, expectedGeneration: 1),
+        try active.transitioned(to: .refreshInFlight, expectedGeneration: 2),
+    ]
+    for enrollment in denied {
+        #expect(throws: DataProtectionGitHubCredentialStoreError.inactiveEnrollment) {
+            try DataProtectionGitHubCredentialReadPolicy.validate(
+                credential: valid, enrollment: enrollment
+            )
+        }
+    }
+
+    let legacy = try GitHubCredentialEnrollmentLifecycle.prepareVerifiedLegacy(
+        enrollmentID: UUID(),
+        purpose: .read,
+        canonicalWebOrigin: "https://github.com",
+        numericAccountID: "12345",
+        appClientID: "Iv1.synthetic-testing"
+    )
+    let migrating = try legacy.transitioned(to: .migrationPrepared, expectedGeneration: 1)
+    #expect(throws: DataProtectionGitHubCredentialStoreError.inactiveEnrollment) {
+        try DataProtectionGitHubCredentialReadPolicy.validate(
+            credential: valid, enrollment: migrating
+        )
+    }
+}
+
+@Test
+func dataProtectionActiveReadRejectsWrongOrUnboundEndpoint() throws {
+    let prepared = try identityBoundTestEnrollment(
+        for: GitHubCredentialEnrollmentKey(enrollmentID: UUID(), purpose: .write)
+    )
+    let active = try prepared.transitioned(to: .dpActive, expectedGeneration: 1)
+    for endpoint: String? in [
+        nil, "https://other.example", "https://github.com:8443",
+        "https://github.com/path", "http://github.com"
+    ] {
+        #expect(throws: DataProtectionGitHubCredentialStoreError.invalidCredentialBinding) {
+            try DataProtectionGitHubCredentialReadPolicy.validate(
+                credential: GitHubCredential(
+                    accessToken: "synthetic-token", endpointIdentity: endpoint
+                ),
+                enrollment: active
+            )
+        }
+    }
+}
+
+@Test
+func dataProtectionActiveReadRejectsMalformedOpaqueTokens() throws {
+    let prepared = try identityBoundTestEnrollment(
+        for: GitHubCredentialEnrollmentKey(enrollmentID: UUID(), purpose: .read)
+    )
+    let active = try prepared.transitioned(to: .dpActive, expectedGeneration: 1)
+    let oversized = String(
+        repeating: "x",
+        count: GitHubDeviceFlowResponsePolicy.maximumOpaqueTokenCharacters + 1
+    )
+    for badAccess in ["", oversized] {
+        #expect(throws: DataProtectionGitHubCredentialStoreError.invalidCredentialBinding) {
+            try DataProtectionGitHubCredentialReadPolicy.validate(
+                credential: GitHubCredential(
+                    accessToken: badAccess, endpointIdentity: "https://github.com"
+                ),
+                enrollment: active
+            )
+        }
+    }
+    for badRefresh in ["", oversized] {
+        #expect(throws: DataProtectionGitHubCredentialStoreError.invalidCredentialBinding) {
+            try DataProtectionGitHubCredentialReadPolicy.validate(
+                credential: GitHubCredential(
+                    accessToken: "synthetic-access",
+                    refreshToken: badRefresh,
+                    endpointIdentity: "https://github.com"
+                ),
+                enrollment: active
+            )
+        }
+    }
+}
+
+@Test
+func dataProtectionActiveReadRetainsExactGHESOriginAndLegacyLifetimeCompatibility() throws {
+    let origin = "https://github.internal.example:8443"
+    let prepared = try identityBoundTestEnrollment(
+        for: GitHubCredentialEnrollmentKey(enrollmentID: UUID(), purpose: .read),
+        origin: origin
+    )
+    let active = try prepared.transitioned(to: .dpActive, expectedGeneration: 1)
+    let valid = GitHubCredential(
+        accessToken: "synthetic-ghes-access",
+        endpointIdentity: origin
+    )
+    try DataProtectionGitHubCredentialReadPolicy.validate(
+        credential: valid, enrollment: active
+    )
+    #expect(throws: DataProtectionGitHubCredentialStoreError.invalidCredentialBinding) {
+        try DataProtectionGitHubCredentialReadPolicy.validate(
+            credential: GitHubCredential(
+                accessToken: "synthetic-ghes-access",
+                endpointIdentity: "https://github.internal.example"
+            ),
+            enrollment: active
+        )
+    }
+}
+
+@Test
+func dataProtectionLoadActiveRefusesStagedEnrollmentBeforeKeychainQuery() async throws {
+    let prepared = try identityBoundTestEnrollment(
+        for: GitHubCredentialEnrollmentKey(enrollmentID: UUID(), purpose: .read)
+    )
+    let store = DataProtectionGitHubCredentialStore(
+        service: "dev.lamy.schneebar.tests.nonexistent"
+    )
+    await #expect(throws: DataProtectionGitHubCredentialStoreError.inactiveEnrollment) {
+        try await store.loadActive(for: prepared)
+    }
+}
+
+
+@Test
+func dataProtectionActiveReadRejectsForgedDecodedEnrollmentIdentity() throws {
+    let prepared = try identityBoundTestEnrollment(
+        for: GitHubCredentialEnrollmentKey(enrollmentID: UUID(), purpose: .read)
+    )
+    let active = try prepared.transitioned(to: .dpActive, expectedGeneration: 1)
+    let original = try #require(
+        JSONSerialization.jsonObject(with: JSONEncoder().encode(active)) as? [String: Any]
+    )
+    for (field, invalid) in [
+        ("canonicalWebOrigin", "http://github.com"),
+        ("numericAccountID", "not-a-numeric-account"),
+        ("appClientID", "")
+    ] {
+        var document = original
+        document[field] = invalid
+        let forged = try JSONDecoder().decode(
+            GitHubCredentialEnrollmentLifecycle.self,
+            from: JSONSerialization.data(withJSONObject: document)
+        )
+        #expect(throws: DataProtectionGitHubCredentialStoreError.invalidEnrollmentIdentity) {
+            try DataProtectionGitHubCredentialReadPolicy.validateActiveEnrollment(forged)
+        }
+    }
+
+    var impossibleGeneration = original
+    impossibleGeneration["generation"] = 1
+    let forged = try JSONDecoder().decode(
+        GitHubCredentialEnrollmentLifecycle.self,
+        from: JSONSerialization.data(withJSONObject: impossibleGeneration)
+    )
+    #expect(throws: DataProtectionGitHubCredentialStoreError.inactiveEnrollment) {
+        try DataProtectionGitHubCredentialReadPolicy.validateActiveEnrollment(forged)
+    }
+}
