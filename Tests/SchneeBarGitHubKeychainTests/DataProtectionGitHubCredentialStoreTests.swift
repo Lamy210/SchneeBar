@@ -376,3 +376,40 @@ func dataProtectionLoadActiveRefusesStagedEnrollmentBeforeKeychainQuery() async 
         try await store.loadActive(for: prepared)
     }
 }
+
+
+@Test
+func dataProtectionActiveReadRejectsForgedDecodedEnrollmentIdentity() throws {
+    let prepared = try identityBoundTestEnrollment(
+        for: GitHubCredentialEnrollmentKey(enrollmentID: UUID(), purpose: .read)
+    )
+    let active = try prepared.transitioned(to: .dpActive, expectedGeneration: 1)
+    let original = try #require(
+        JSONSerialization.jsonObject(with: JSONEncoder().encode(active)) as? [String: Any]
+    )
+    for (field, invalid): (String, String) in [
+        ("canonicalWebOrigin", "http://github.com"),
+        ("numericAccountID", "not-a-numeric-account"),
+        ("appClientID", "")
+    ] {
+        var document = original
+        document[field] = invalid
+        let forged = try JSONDecoder().decode(
+            GitHubCredentialEnrollmentLifecycle.self,
+            from: JSONSerialization.data(withJSONObject: document)
+        )
+        #expect(throws: DataProtectionGitHubCredentialStoreError.invalidEnrollmentIdentity) {
+            try DataProtectionGitHubCredentialReadPolicy.validateActiveEnrollment(forged)
+        }
+    }
+
+    var impossibleGeneration = original
+    impossibleGeneration["generation"] = 1
+    let forged = try JSONDecoder().decode(
+        GitHubCredentialEnrollmentLifecycle.self,
+        from: JSONSerialization.data(withJSONObject: impossibleGeneration)
+    )
+    #expect(throws: DataProtectionGitHubCredentialStoreError.inactiveEnrollment) {
+        try DataProtectionGitHubCredentialReadPolicy.validateActiveEnrollment(forged)
+    }
+}
