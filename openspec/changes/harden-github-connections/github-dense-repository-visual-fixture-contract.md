@@ -14,3 +14,9 @@ PR #464 added compact capability-status display logic, but the baseline Visual R
 - Swift macOS Build/Test and OpenSpec strict pass. Review new image artifacts for label clipping, selection toggle visibility, private marker readability and compact capability summaries.
 - Manual real-Mac VoiceOver, keyboard and increased-text-size verification remains open in issue #360; a bitmap alone cannot validate those modalities.
 - Merge to `main` only after CI/visual review, then synchronize to `integration/schneerunner` under #396's unchanged release gates.
+
+
+## Defect reproduced by the new fixture
+Actual PR #467 Visual Regression artifact (680 pt, both light and dark) shows the optional "Private" text wrapping into a vertical column on the right and the first row's selection control appearing compressed. This is a **verified visual defect**; a successful snapshot job proves only that the screenshot was generated, not that the layout is correct.
+
+The PR must therefore also correct the repository row: keep the selection toggle at its intrinsic width, allow the repository name to truncate, expose privacy from the always-visible lock icon with help and VoiceOver, and hide the *redundant* "Private" word if it cannot fit on one line. Review the newly generated candidate images again, in both appearances, before merging.
