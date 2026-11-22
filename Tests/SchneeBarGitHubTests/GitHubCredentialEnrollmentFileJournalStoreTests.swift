@@ -176,30 +176,25 @@ func fileJournalRejectsIdentityChangeWithinEnrollment() async throws {
 
 
 @Test
-func fileJournalRefreshSeesExternalDisconnectFromActualDurableStore() async throws {
+func fileJournalRejectsForgedActiveGenerationOneOnDisk() async throws {
     try await withPrivateJournalDirectory { directory in
-        let first = GitHubCredentialEnrollmentJournal(
-            persistence: GitHubCredentialEnrollmentFileJournalStore(directoryURL: directory)
+        let prepared = try enrollmentForDisk()
+        var record = try #require(
+            JSONSerialization.jsonObject(with: JSONEncoder().encode(prepared)) as? [String: Any]
         )
-        let second = GitHubCredentialEnrollmentJournal(
-            persistence: GitHubCredentialEnrollmentFileJournalStore(directoryURL: directory)
+        record["phase"] = GitHubCredentialEnrollmentPhase.dpActive.rawValue
+        let data = try JSONSerialization.data(
+            withJSONObject: ["version": 1, "records": [record]]
         )
-        let enrollment = try enrollmentForDisk()
-        _ = try await first.register(enrollment)
-        let active = try await first.transition(
-            enrollmentID: enrollment.enrollmentID, expectedGeneration: 1, to: .dpActive
+        let path = directory.appendingPathComponent("enrollments-v1.json")
+        try data.write(to: path)
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o600], ofItemAtPath: path.path
         )
-
-        // Both independently created actors cache the same live generation.
-        #expect(try await second.record(for: enrollment.enrollmentID) == active)
-        let disconnected = try await first.transition(
-            enrollmentID: enrollment.enrollmentID, expectedGeneration: 2, to: .disconnected
-        )
-
-        // The cached read is stale, but the newly added API reopens the
-        // locked on-disk snapshot rather than reusing that stale generation.
-        #expect(try await second.record(for: enrollment.enrollmentID) == active)
-        #expect(try await second.refreshRecord(for: enrollment.enrollmentID) == disconnected)
-        #expect(try await second.record(for: enrollment.enrollmentID) == disconnected)
+        let store = GitHubCredentialEnrollmentFileJournalStore(directoryURL: directory)
+        #expect(throws: GitHubCredentialEnrollmentJournalError.invalidSnapshot) {
+            try store.load()
+        }
+        #expect(try Data(contentsOf: path) == data)
     }
 }
