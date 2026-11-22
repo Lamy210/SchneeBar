@@ -161,3 +161,81 @@ private func makeRecoveryOutbox(
         #expect(snapshot.outbox == [second])
     }
 }
+
+
+@Test func focusAcceptedRecoveryPreviewReportsWithoutAcknowledging() async throws {
+    try await withRecoveryStore { store in
+        let (_, observed) = try await makeRecoveryOutbox(store, dueSeconds: 60)
+        let (_, missing) = try await makeRecoveryOutbox(store, dueSeconds: 120)
+        let unrelatedOwned = FocusReminderNotificationIdentity.identifier(for: UUID())
+        let center = RecoveryEvidenceCenter(
+            status: .authorized,
+            pending: [FocusReminderNotificationIdentity.identifier(for: observed.id)],
+            delivered: [unrelatedOwned, "github-delivery-recovery:opaque"]
+        )
+        let recovery = FocusReminderAcceptedRequestRecovery(
+            store: store, gateway: FocusReminderNotificationGateway(center: center)
+        )
+        let before = try await store.load()
+        let first = try await recovery.previewOnce()
+        let second = try await recovery.previewOnce()
+        #expect(first == second)
+        #expect(first.permissionAllowsEvidence)
+        #expect(first.queuedOutboxCount == 2)
+        #expect(first.observedInSystemCount == 1)
+        #expect(first.candidateAcknowledgementCount == 1)
+        #expect(first.needsManualRecoveryCount == 1)
+        #expect(first.untrackedOwnedIdentifierCount == 1)
+        #expect(first.ignoredIdentifierCount == 1)
+        #expect(try await store.load() == before)
+        #expect(before.outbox == [observed, missing])
+        let effects = await center.sideEffects()
+        #expect(effects.0 == 0 && effects.1 == 0)
+    }
+}
+
+@Test func focusAcceptedRecoveryPreviewNeverTreatsDeniedEvidenceAsActionable() async throws {
+    try await withRecoveryStore { store in
+        let (_, outbox) = try await makeRecoveryOutbox(store, dueSeconds: 60)
+        let identifier = FocusReminderNotificationIdentity.identifier(for: outbox.id)
+        for authorization: FocusReminderNotificationAuthorization in
+            [.denied, .notDetermined, .unsupported] {
+            let center = RecoveryEvidenceCenter(
+                status: authorization, pending: [identifier], delivered: []
+            )
+            let recovery = FocusReminderAcceptedRequestRecovery(
+                store: store, gateway: FocusReminderNotificationGateway(center: center)
+            )
+            let preview = try await recovery.previewOnce()
+            #expect(preview.authorization == authorization)
+            #expect(!preview.permissionAllowsEvidence)
+            #expect(preview.queuedOutboxCount == 1)
+            #expect(preview.observedInSystemCount == 1)
+            #expect(preview.candidateAcknowledgementCount == 0)
+            #expect(preview.needsManualRecoveryCount == 1)
+            #expect(try await store.load().outbox == [outbox])
+            let effects = await center.sideEffects()
+            #expect(effects.0 == 0 && effects.1 == 0)
+        }
+    }
+}
+
+@Test func focusAcceptedRecoveryPreviewFailsClosedOnEvidenceOverflow() async throws {
+    try await withRecoveryStore { store in
+        let (_, outbox) = try await makeRecoveryOutbox(store, dueSeconds: 60)
+        let center = RecoveryEvidenceCenter(
+            status: .authorized,
+            pending: [FocusReminderNotificationIdentity.identifier(for: outbox.id)],
+            delivered: ["another.app.notification"]
+        )
+        let recovery = FocusReminderAcceptedRequestRecovery(
+            store: store, gateway: FocusReminderNotificationGateway(center: center)
+        )
+        await #expect(throws: FocusReminderNotificationReconciliationError.tooManySystemIdentifiers) {
+            try await recovery.previewOnce(maximumEvidenceCount: 1)
+        }
+        #expect(try await store.load().outbox == [outbox])
+        let effects = await center.sideEffects()
+        #expect(effects.0 == 0 && effects.1 == 0)
+    }
+}
