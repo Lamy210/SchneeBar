@@ -1,6 +1,12 @@
 import Foundation
 import SchneeBarFocusPersistence
 
+/// The OS or authorization changed between initial inspection and ACK
+/// confirmation. Retry an explicit preview rather than guessing delivery.
+public enum FocusReminderAcceptedRequestRecoveryError: Error, Equatable, Sendable {
+    case evidenceChangedDuringRecovery
+}
+
 /// Developer-facing, single-pass recovery result. No user notification
 /// delivery or presentation is implied by an OS request acknowledgement.
 public struct FocusReminderAcceptedRequestRecoveryReport: Equatable, Sendable {
@@ -78,15 +84,28 @@ public actor FocusReminderAcceptedRequestRecovery {
         maximumEvidenceCount: Int = 2_048
     ) async throws -> FocusReminderAcceptedRequestRecoveryReport {
         let snapshot = try await store.load()
-        let inspection = try await gateway.inspect(
+        var inspection = try await gateway.inspect(
             snapshot, maximumEvidenceCount: maximumEvidenceCount
         )
         let authorization = inspection.evidence.authorization
-        let plan = inspection.plan
         let allowed = authorization == .authorized || authorization == .provisional
-        if allowed && !plan.observedInSystem.isEmpty {
-            _ = try await store.acknowledgeObserved(records: plan.observedInSystem)
+        if allowed && !inspection.plan.observedInSystem.isEmpty {
+            // The initial OS snapshot may become stale while this actor is
+            // suspended. Recheck both permission and the exact ACK candidate
+            // IDs immediately before attempting the store's durable CAS.
+            // This narrows, but cannot eliminate, the OS/filesystem TOCTOU.
+            let confirmed = try await gateway.inspect(
+                snapshot, maximumEvidenceCount: maximumEvidenceCount
+            )
+            guard confirmed.evidence.authorization == authorization,
+                  Set(confirmed.plan.observedInSystem.map(\.id)) ==
+                      Set(inspection.plan.observedInSystem.map(\.id)) else {
+                throw FocusReminderAcceptedRequestRecoveryError.evidenceChangedDuringRecovery
+            }
+            inspection = confirmed
+            _ = try await store.acknowledgeObserved(records: confirmed.plan.observedInSystem)
         }
+        let plan = inspection.plan
 
         return FocusReminderAcceptedRequestRecoveryReport(
             authorization: authorization,
