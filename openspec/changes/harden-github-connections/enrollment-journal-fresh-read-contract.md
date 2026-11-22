@@ -15,6 +15,8 @@
 - Duplicate/corrupt persisted records cause an error, old active cache is discarded, and a subsequent read observes corrected durable state.
 - Injected persistence read failure does not return the earlier active generation; a later lookup reloads current disconnected state and unknown IDs return nil.
 
+- Real private-directory file-adapter integration: two journal instances observe a stale cached dpActive, one persists a disconnect using locked atomic replacement, and the other refreshes to observe the disconnected generation. This is a filesystem integration test, not real signed-Keychain evidence.
+
 ## Rollout
 - No automatic migration, Keychain deletion, token refresh, secret logging, or production runtime wiring.
 - macOS CI Build/Test, Visual Regression and OpenSpec strict on the exact PR head; unresolved review comments must be zero before `main` merge. Sync `main` to `integration/schneerunner` in a later reviewed PR.
