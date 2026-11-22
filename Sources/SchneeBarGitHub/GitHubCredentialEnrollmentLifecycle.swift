@@ -77,7 +77,8 @@ public struct GitHubCredentialEnrollmentLifecycle: Codable, Equatable, Sendable 
     /// Guard against malformed data decoded directly from an untrusted file.
     func isValidPersistedSnapshot() -> Bool {
         guard generation > 0,
-              !(phase == .prepared && generation != 1)
+              !(phase == .prepared && generation != 1),
+              !(generation == 1 && phase != .prepared && phase != .legacyActive)
         else { return false }
         return (try? Self(
             enrollmentID: enrollmentID,

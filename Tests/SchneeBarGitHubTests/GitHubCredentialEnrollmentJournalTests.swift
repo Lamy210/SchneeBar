@@ -252,3 +252,62 @@ func journalRefreshReadFailureDoesNotReturnCachedActiveEnrollment() async throws
     #expect(try await journal.record(for: enrollment.enrollmentID) == disconnected)
     #expect(try await journal.refreshRecord(for: UUID()) == nil)
 }
+
+@Test
+func journalRegisterRejectsForgedDecodedPreparedIdentitiesBeforePersistence() async throws {
+    let persistence = CredentialJournalMemoryFixture()
+    let journal = GitHubCredentialEnrollmentJournal(persistence: persistence)
+    let valid = try journalFixtureState()
+    let original = try #require(
+        JSONSerialization.jsonObject(with: JSONEncoder().encode(valid)) as? [String: Any]
+    )
+
+    for (field, invalid) in [
+        ("canonicalWebOrigin", "http://github.com"),
+        ("numericAccountID", "not-a-number"),
+        ("appClientID", "")
+    ] {
+        var document = original
+        document[field] = invalid
+        let forged = try JSONDecoder().decode(
+            GitHubCredentialEnrollmentLifecycle.self,
+            from: JSONSerialization.data(withJSONObject: document)
+        )
+        await #expect(throws: GitHubCredentialEnrollmentJournalError.invalidSnapshot) {
+            try await journal.register(forged)
+        }
+        #expect(try await journal.record(for: valid.enrollmentID) == nil)
+        #expect(try persistence.load().isEmpty)
+    }
+
+    // Rejected data cannot poison registration of the original valid identity.
+    #expect(try await journal.register(valid) == valid)
+    #expect(try persistence.load() == [valid])
+}
+
+@Test
+func journalRegisterRejectsForgedLegacyIdentityWithoutPersistingTombstone() async throws {
+    let persistence = CredentialJournalMemoryFixture()
+    let journal = GitHubCredentialEnrollmentJournal(persistence: persistence)
+    let verified = try GitHubCredentialEnrollmentLifecycle.prepareVerifiedLegacy(
+        enrollmentID: UUID(),
+        purpose: .read,
+        canonicalWebOrigin: "https://github.com",
+        numericAccountID: "123",
+        appClientID: "Iv1.fixture"
+    )
+    var document = try #require(
+        JSONSerialization.jsonObject(with: JSONEncoder().encode(verified)) as? [String: Any]
+    )
+    document["numericAccountID"] = "-100"
+    let forged = try JSONDecoder().decode(
+        GitHubCredentialEnrollmentLifecycle.self,
+        from: JSONSerialization.data(withJSONObject: document)
+    )
+
+    await #expect(throws: GitHubCredentialEnrollmentJournalError.invalidSnapshot) {
+        try await journal.register(forged)
+    }
+    #expect(try persistence.load().isEmpty)
+    #expect(try await journal.register(verified) == verified)
+}
