@@ -161,6 +161,40 @@ public enum GitHubConnectionManagementFixture {
         ]
     )
 
+    /// Deterministic long-name and mixed-capability fixture for the minimum
+    /// connection-management window width, with no live GitHub account data.
+    public static let denseLongNameModel = GitHubConnectionManagementModel(
+        id: UUID(uuidString: "21000000-0000-0000-0000-000000000003")!,
+        displayName: "Long-name Enterprise",
+        host: "github.internal.example:8443",
+        accountLogin: "synthetic",
+        repositories: [
+            repository(
+                301,
+                "very-long-example-organization/application-platform-backend-service-monorepo-release-pipeline",
+                isPrivate: true,
+                actions: .unavailable, reviews: .unverified,
+                checks: .unavailable, deployments: .unverified
+            ),
+            repository(
+                302,
+                "very-long-example-organization/repository-with-numerous-components-and-unusually-long-name",
+                isPrivate: false,
+                actions: .available, reviews: .available,
+                checks: .available, deployments: .available
+            ),
+            repository(
+                303,
+                "other-company/third-party-integration-component-with-several-more-name-segments",
+                isPrivate: true,
+                actions: .unverified, reviews: .available,
+                checks: .unavailable, deployments: .available
+            ),
+        ]
+    )
+
+    public static let denseLongNameSelectedRepositoryIDs: Set<Int64> = [301, 302, 303]
+
     public static let selectedRepositoryIDs: Set<Int64> = [101, 102, 105, 107, 108]
     public static let mixedCapabilitySelectedRepositoryIDs: Set<Int64> = [201, 202, 203]
 

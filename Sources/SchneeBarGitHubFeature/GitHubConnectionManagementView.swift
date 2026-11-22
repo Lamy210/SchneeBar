@@ -384,6 +384,7 @@ public struct GitHubConnectionManagementView: View {
                     )
                 )
                 .labelsHidden()
+                .fixedSize(horizontal: true, vertical: false)
                 .accessibilityLabel("Monitor \(repository.fullName)")
                 .accessibilityHint("Include this repository in developer activity monitoring")
                 .accessibilityIdentifier("repository-monitor-\(repository.id)")
@@ -396,13 +397,14 @@ public struct GitHubConnectionManagementView: View {
             Image(systemName: repository.isPrivate ? "lock.fill" : "shippingbox")
                 .foregroundStyle(.secondary)
                 .frame(width: 18)
+                .help(repository.isPrivate ? "Private repository" : "Public repository")
+                .accessibilityLabel(repository.isPrivate ? "Private repository" : "Public repository")
 
             Text(repository.fullName)
                 .font(.body.monospaced())
                 .lineLimit(1)
                 .truncationMode(.middle)
-                .frame(minWidth: 0, alignment: .leading)
-                .layoutPriority(1)
+                .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
 
             Spacer(minLength: 4)
 
@@ -428,9 +430,17 @@ public struct GitHubConnectionManagementView: View {
             }
 
             if repository.isPrivate {
-                Text("Private")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
+                // The lock icon above is always visible and accessible.
+                // Do not allow the optional word "Private" to wrap vertically
+                // and squeeze out the selection toggle in narrow windows.
+                ViewThatFits(in: .horizontal) {
+                    Text("Private")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .fixedSize(horizontal: true, vertical: false)
+                    EmptyView()
+                }
             }
         }
         .padding(.horizontal, 10)

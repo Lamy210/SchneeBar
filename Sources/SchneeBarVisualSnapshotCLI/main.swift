@@ -393,7 +393,8 @@ private func githubRecoveryRoot(
 private func githubManagementRoot(
     model: GitHubConnectionManagementModel,
     selectedRepositoryIDs: Set<Int64>,
-    appearance: SnapshotAppearance
+    appearance: SnapshotAppearance,
+    width: CGFloat = 760
 ) -> some View {
     ZStack {
         appearance.background
@@ -409,7 +410,7 @@ private func githubManagementRoot(
         )
         .padding(24)
     }
-    .frame(width: 760)
+    .frame(width: width)
     .environment(\.colorScheme, appearance.colorScheme)
 }
 
@@ -611,6 +612,20 @@ private func run() throws {
             filename: "github-capability-mixed-surfaces-\(appearance.rawValue).png",
             outputDirectory: outputDirectory,
             width: 760,
+            initialHeight: 820
+        )
+
+        try render(
+            rootView: githubManagementRoot(
+                model: GitHubConnectionManagementFixture.denseLongNameModel,
+                selectedRepositoryIDs: GitHubConnectionManagementFixture.denseLongNameSelectedRepositoryIDs,
+                appearance: appearance,
+                width: 680
+            ),
+            appearance: appearance,
+            filename: "github-management-dense-long-name-\(appearance.rawValue).png",
+            outputDirectory: outputDirectory,
+            width: 680,
             initialHeight: 820
         )
     }
