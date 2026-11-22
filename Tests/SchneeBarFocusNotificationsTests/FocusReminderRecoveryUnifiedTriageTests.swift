@@ -186,3 +186,68 @@ private func enqueueTriageReminder(
         #expect(activity.1 == 0 && activity.2 == 0)
     }
 }
+
+
+private actor MutatingTriageNotificationCenter: FocusReminderNotificationCenterPort {
+    private let store: FocusReminderCollectionStore
+    private let toDisable: UUID
+    private let observedIdentifier: String
+    private var mutationSucceeded = false
+    private var additions = 0
+    private var removals = 0
+
+    init(store: FocusReminderCollectionStore, toDisable: UUID, observedIdentifier: String) {
+        self.store = store
+        self.toDisable = toDisable
+        self.observedIdentifier = observedIdentifier
+    }
+
+    func authorizationStatus() async -> FocusReminderNotificationAuthorization { .authorized }
+    func pendingIdentifiers() async -> [String] {
+        // Deliberately models an external change after triage loaded its file.
+        do {
+            _ = try await store.apply(
+                id: toDisable,
+                command: .update(.setEnabled(false)),
+                at: triageOrigin.addingTimeInterval(300)
+            )
+            mutationSucceeded = true
+        } catch {
+            mutationSucceeded = false
+        }
+        return [observedIdentifier]
+    }
+    func deliveredIdentifiers() async -> [String] { [] }
+    func add(_ request: FocusReminderNotificationRequest) async throws { additions += 1 }
+    func remove(identifiers: [String]) async { removals += 1 }
+    func activity() -> (Bool, Int, Int) { (mutationSucceeded, additions, removals) }
+}
+
+@Test func focusUnifiedTriageRemainsInternallyConsistentWhenStoreChangesDuringOSRead() async throws {
+    try await withTriageStore { store, _ in
+        let stale = try await enqueueTriageReminder(store, dueSeconds: 60)
+        let surviving = try await enqueueTriageReminder(store, dueSeconds: 120)
+        let center = MutatingTriageNotificationCenter(
+            store: store,
+            toDisable: stale.reminderID,
+            observedIdentifier: FocusReminderNotificationIdentity.identifier(for: surviving.id)
+        )
+        let triage = FocusReminderRecoveryUnifiedTriage(
+            store: store, gateway: FocusReminderNotificationGateway(center: center)
+        )
+        let report = try await triage.inspectOnce(
+            at: triageOrigin.addingTimeInterval(400), agedAfter: 300
+        )
+        #expect(report.preview.queuedOutboxCount == 2)
+        #expect(report.backlog.queuedCount == 2)
+        #expect(report.preview.candidateAcknowledgementCount == 1)
+        #expect(report.preview.needsManualRecoveryCount == 1)
+        #expect(report.backlog.remainingCapacity == 126)
+
+        // The external mutation is intentionally visible only in a NEW load:
+        // an earlier preview must never be treated as an ACK authorization.
+        #expect(try await store.load().outbox == [surviving])
+        let activity = await center.activity()
+        #expect(activity.0 && activity.1 == 0 && activity.2 == 0)
+    }
+}
