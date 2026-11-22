@@ -387,7 +387,7 @@ func dataProtectionActiveReadRejectsForgedDecodedEnrollmentIdentity() throws {
     let original = try #require(
         JSONSerialization.jsonObject(with: JSONEncoder().encode(active)) as? [String: Any]
     )
-    for (field, invalid): (String, String) in [
+    for (field, invalid) in [
         ("canonicalWebOrigin", "http://github.com"),
         ("numericAccountID", "not-a-numeric-account"),
         ("appClientID", "")
