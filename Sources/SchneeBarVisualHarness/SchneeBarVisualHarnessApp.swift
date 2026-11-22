@@ -36,6 +36,7 @@ private enum GitHubRecoveryHarnessScenario: String, CaseIterable, Hashable {
 private enum GitHubManagementHarnessScenario: String, CaseIterable, Hashable {
     case repositoryMatrix
     case mixedCapabilities
+    case denseLongNames
 
     var model: GitHubConnectionManagementModel {
         switch self {
@@ -43,6 +44,8 @@ private enum GitHubManagementHarnessScenario: String, CaseIterable, Hashable {
             GitHubConnectionManagementFixture.model
         case .mixedCapabilities:
             GitHubConnectionManagementFixture.mixedCapabilityModel
+        case .denseLongNames:
+            GitHubConnectionManagementFixture.denseLongNameModel
         }
     }
 
@@ -52,6 +55,8 @@ private enum GitHubManagementHarnessScenario: String, CaseIterable, Hashable {
             GitHubConnectionManagementFixture.selectedRepositoryIDs
         case .mixedCapabilities:
             GitHubConnectionManagementFixture.mixedCapabilitySelectedRepositoryIDs
+        case .denseLongNames:
+            GitHubConnectionManagementFixture.denseLongNameSelectedRepositoryIDs
         }
     }
 }
