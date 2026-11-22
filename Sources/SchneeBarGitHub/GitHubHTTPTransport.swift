@@ -4,6 +4,7 @@ public enum GitHubHTTPTransportError: Error, Equatable, Sendable {
     case nonHTTPResponse
     case redirectRejected
     case unsupportedBackgroundSession
+    case unsafeSessionConfiguration
 }
 
 public protocol GitHubHTTPTransport: Sendable {
@@ -36,11 +37,31 @@ public struct URLSessionGitHubHTTPTransport: GitHubHTTPTransport {
         return configuration
     }
 
+    /// A caller can inject a URLSession for testing or alternative transports.
+    /// Refuse persistent credential/cookie/cache state even in foreground
+    /// sessions: a bearer-token response must not enter shared URLSession
+    /// storage. A nil cache and nil credential/cookie stores are required.
+    static func isSafeForCredentialRequests(
+        _ configuration: URLSessionConfiguration
+    ) -> Bool {
+        !configuration.httpShouldSetCookies
+            && configuration.httpCookieStorage == nil
+            && configuration.urlCredentialStorage == nil
+            && configuration.urlCache == nil
+    }
+
     public func data(for request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+        let configuration = session.configuration
         // Apple does not deliver the redirect callback for background sessions.
         // Reject an injected background configuration before sending secrets.
-        guard session.configuration.identifier == nil else {
+        guard configuration.identifier == nil else {
             throw GitHubHTTPTransportError.unsupportedBackgroundSession
+        }
+        // Even foreground URLSessions may persist cookies, cached responses or
+        // HTTP credentials. Default app sessions are explicitly stateless;
+        // injected sessions must satisfy the same requirement before any I/O.
+        guard Self.isSafeForCredentialRequests(configuration) else {
+            throw GitHubHTTPTransportError.unsafeSessionConfiguration
         }
 
         let (data, response) = try await session.data(
