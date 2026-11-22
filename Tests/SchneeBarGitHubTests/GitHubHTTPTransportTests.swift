@@ -12,6 +12,7 @@ func defaultGitHubTransportConfigurationAvoidsPersistentHTTPState() {
     #expect(configuration.urlCredentialStorage == nil)
     #expect(configuration.urlCache == nil)
     #expect(configuration.identifier == nil)
+    #expect(URLSessionGitHubHTTPTransport.isSafeForCredentialRequests(configuration))
 }
 
 
@@ -114,5 +115,50 @@ func githubTransportNeverTreatsRedirectResponseAsSuccess() async throws {
         Issue.record("A redirect response must not be treated as API success")
     } catch {
         #expect(error as? GitHubHTTPTransportError == .redirectRejected)
+    }
+}
+
+
+@Test
+func githubCredentialTransportPolicyRejectsEachPersistentStateSink() {
+    let safe = URLSessionGitHubHTTPTransport.defaultConfiguration()
+    #expect(URLSessionGitHubHTTPTransport.isSafeForCredentialRequests(safe))
+
+    let cookiesEnabled = URLSessionGitHubHTTPTransport.defaultConfiguration()
+    cookiesEnabled.httpShouldSetCookies = true
+    #expect(!URLSessionGitHubHTTPTransport.isSafeForCredentialRequests(cookiesEnabled))
+
+    let cookieStorage = URLSessionGitHubHTTPTransport.defaultConfiguration()
+    cookieStorage.httpCookieStorage = HTTPCookieStorage.shared
+    #expect(!URLSessionGitHubHTTPTransport.isSafeForCredentialRequests(cookieStorage))
+
+    let credentials = URLSessionGitHubHTTPTransport.defaultConfiguration()
+    credentials.urlCredentialStorage = URLCredentialStorage.shared
+    #expect(!URLSessionGitHubHTTPTransport.isSafeForCredentialRequests(credentials))
+
+    let cache = URLSessionGitHubHTTPTransport.defaultConfiguration()
+    cache.urlCache = URLCache(memoryCapacity: 1_024, diskCapacity: 0, diskPath: nil)
+    #expect(!URLSessionGitHubHTTPTransport.isSafeForCredentialRequests(cache))
+}
+
+@Test
+func githubTransportRejectsInjectedPersistentSessionBeforeRequest() async throws {
+    let configuration = URLSessionConfiguration.default
+    // Prevent any real network access even if the unsafe-configuration
+    // check regresses: this protocol returns only a synthetic 302.
+    configuration.protocolClasses = [GitHubRedirectStatusURLProtocol.self]
+    let session = URLSession(configuration: configuration)
+    defer { session.invalidateAndCancel() }
+
+    let transport = URLSessionGitHubHTTPTransport(session: session)
+    let url = try #require(URL(string: "https://github.transport.test/secret"))
+    var request = URLRequest(url: url)
+    request.setValue("Bearer synthetic-test-only", forHTTPHeaderField: "Authorization")
+
+    do {
+        _ = try await transport.data(for: request)
+        Issue.record("Injected persistent URLSession must be rejected")
+    } catch {
+        #expect(error as? GitHubHTTPTransportError == .unsafeSessionConfiguration)
     }
 }
