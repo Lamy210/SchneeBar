@@ -93,13 +93,13 @@ private func makePanelSnooze(
     }
 }
 
-@Test @MainActor func focusSnoozeStatusPanelBuildsFromOneValidatedSnapshot() async throws {
+@Test func focusSnoozeStatusPanelBuildsFromOneValidatedSnapshot() async throws {
     try await withPanelStore { store, file in
         let (id, _) = try await makePanelSnooze(store, title: "Read only", due: panelDue)
         let snapshot = try await store.load()
         #expect(FocusSnoozeStatusPresentation(snapshot: snapshot).rows.first?.id.reminderID == id)
         let before = try Data(contentsOf: file)
-        _ = FocusSnoozeStatusPanel(snapshot: snapshot)
+        await MainActor.run { _ = FocusSnoozeStatusPanel(snapshot: snapshot) }
         #expect(try Data(contentsOf: file) == before)
     }
 }
