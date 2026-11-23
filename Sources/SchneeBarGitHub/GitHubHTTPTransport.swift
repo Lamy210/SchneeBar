@@ -3,6 +3,7 @@ import Foundation
 public enum GitHubHTTPTransportError: Error, Equatable, Sendable {
     case nonHTTPResponse
     case redirectRejected
+    case unsafeRequestURL
     case unsupportedBackgroundSession
     case unsafeSessionConfiguration
 }
@@ -51,6 +52,20 @@ public struct URLSessionGitHubHTTPTransport: GitHubHTTPTransport {
     }
 
     public func data(for request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+        // Redirect rejection is not sufficient: fail before the FIRST HTTP
+        // request if an incorrectly constructed caller URL could send an
+        // OAuth code or bearer token over plaintext, or contains URL userinfo.
+        // Endpoint/account origin authorization still belongs to each caller.
+        guard let url = request.url,
+              let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+              components.scheme?.lowercased() == "https",
+              let host = components.host, !host.isEmpty,
+              components.user == nil, components.password == nil,
+              components.fragment == nil,
+              components.port.map({ (1...65535).contains($0) }) ?? true
+        else {
+            throw GitHubHTTPTransportError.unsafeRequestURL
+        }
         let configuration = session.configuration
         // Apple does not deliver the redirect callback for background sessions.
         // Reject an injected background configuration before sending secrets.
