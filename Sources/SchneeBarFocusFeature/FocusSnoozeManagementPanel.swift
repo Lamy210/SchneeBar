@@ -63,6 +63,7 @@ public struct FocusSnoozeManagementPanel: View {
             Text("Only Snoozes not yet submitted for notification can be removed here.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
+            FocusSnoozeStatusSummaryView(summary: FocusSnoozeStatusSummary(rows: rows))
 
             if let feedback {
                 Text(feedback)
