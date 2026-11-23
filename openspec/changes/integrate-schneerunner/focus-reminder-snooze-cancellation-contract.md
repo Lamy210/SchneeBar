@@ -1,4 +1,4 @@
-# E3f: cancel a pending or unacknowledged snooze by exact ticket identity
+# E3q: cancel a pending or unacknowledged snooze by exact ticket identity
 
 ## Motivation
 An enabled native reminder can create a one-time Snooze ticket and subsequently claim it into a durable notification outbox. The current domain offers no explicit dismissal of a pending Snooze. Simply disabling or deleting a reminder also discards unrelated scheduling state. The OS notification adapter is not yet wired into the shipping app; this change is **local intent cancellation**, not notification withdrawal.
