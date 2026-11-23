@@ -162,3 +162,55 @@ func githubTransportRejectsInjectedPersistentSessionBeforeRequest() async throws
         #expect(error as? GitHubHTTPTransportError == .unsafeSessionConfiguration)
     }
 }
+
+
+@Test
+func githubTransportRejectsUnsafeInitialCredentialURLsBeforeNetwork() async throws {
+    let configuration = URLSessionGitHubHTTPTransport.defaultConfiguration()
+    // If preflight fails open, this synthetic protocol returns a 302.
+    // No production network destination is used by this test.
+    configuration.protocolClasses = [GitHubRedirectStatusURLProtocol.self]
+    let session = URLSession(configuration: configuration)
+    defer { session.invalidateAndCancel() }
+
+    let transport = URLSessionGitHubHTTPTransport(session: session)
+    let unsafeURLs = [
+        "http://github.transport.test/user",
+        "https://user:password@github.transport.test/user",
+        "https://github.transport.test/user#token-fragment",
+        "https://github.transport.test:0/user",
+    ]
+
+    for rawURL in unsafeURLs {
+        let url = try #require(URL(string: rawURL))
+        var request = URLRequest(url: url)
+        request.setValue(
+            "Bearer synthetic-test-only",
+            forHTTPHeaderField: "Authorization"
+        )
+        await #expect(throws: GitHubHTTPTransportError.unsafeRequestURL) {
+            try await transport.data(for: request)
+        }
+    }
+}
+
+@Test
+func githubTransportPermitsValidInitialHTTPSURLToReachResponseHandling() async throws {
+    let configuration = URLSessionGitHubHTTPTransport.defaultConfiguration()
+    configuration.protocolClasses = [GitHubRedirectStatusURLProtocol.self]
+    let session = URLSession(configuration: configuration)
+    defer { session.invalidateAndCancel() }
+
+    let transport = URLSessionGitHubHTTPTransport(session: session)
+    var request = URLRequest(
+        url: try #require(URL(string: "https://github.transport.test:8443/user"))
+    )
+    request.setValue(
+        "Bearer synthetic-test-only",
+        forHTTPHeaderField: "Authorization"
+    )
+    // A well-formed initial URL passes preflight, but a 302 remains blocked.
+    await #expect(throws: GitHubHTTPTransportError.redirectRejected) {
+        try await transport.data(for: request)
+    }
+}
