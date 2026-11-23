@@ -70,11 +70,12 @@ public struct FocusSnoozeStatusPanel: View {
                     .foregroundStyle(.secondary)
                     .accessibilityLabel("No active snoozes")
             } else {
-                ForEach(presentation.rows) { row in
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(row.title)
-                            .font(.body)
-                            .lineLimit(2)
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 12) {
+                        ForEach(presentation.rows) { row in
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(row.title)
+                                    .font(.body)
                         Text(row.statusLabel)
                             .font(.caption)
                             .foregroundStyle(.secondary)
@@ -87,8 +88,11 @@ public struct FocusSnoozeStatusPanel: View {
                     .accessibilityLabel(
                         "\(row.title), \(row.statusLabel), due \(row.deadline.formatted(date: .abbreviated, time: .shortened))"
                     )
-                    .accessibilityHint("Read-only. Cancellation is not available in this view.")
+                            .accessibilityHint("Read-only. Cancellation is not available in this view.")
+                        }
+                    }
                 }
+                .frame(maxHeight: 420)
             }
         }
         .padding()
