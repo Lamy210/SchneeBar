@@ -182,7 +182,7 @@ private func makeDiagnosticsOutbox(
             try await reader.load(maximumEvidenceCount: 2)
         }
         #expect(try Data(contentsOf: file) == before)
-        #expect(await port.counts() == [1, 1, 0, 0, 0])
+        #expect(await port.counts() == [1, 1, 1, 0, 0])
     }
 }
 
