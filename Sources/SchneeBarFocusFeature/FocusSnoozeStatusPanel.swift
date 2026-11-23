@@ -76,18 +76,18 @@ public struct FocusSnoozeStatusPanel: View {
                             VStack(alignment: .leading, spacing: 4) {
                                 Text(row.title)
                                     .font(.body)
-                        Text(row.statusLabel)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        Text(row.deadline, format: .dateTime.year().month().day().hour().minute())
-                            .font(.caption)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.vertical, 4)
-                    .accessibilityElement(children: .combine)
-                    .accessibilityLabel(
-                        "\(row.title), \(row.statusLabel), due \(row.deadline.formatted(date: .abbreviated, time: .shortened))"
-                    )
+                                Text(row.statusLabel)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                Text(row.deadline, format: .dateTime.year().month().day().hour().minute())
+                                    .font(.caption)
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.vertical, 4)
+                            .accessibilityElement(children: .combine)
+                            .accessibilityLabel(
+                                "\(row.title), \(row.statusLabel), due \(row.deadline.formatted(date: .abbreviated, time: .shortened))"
+                            )
                             .accessibilityHint("Read-only. Cancellation is not available in this view.")
                         }
                     }
