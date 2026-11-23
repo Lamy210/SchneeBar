@@ -50,8 +50,16 @@ public struct FocusSnoozeManagementPanel: View {
 
     public var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Manage scheduled Snoozes")
-                .font(.headline)
+            HStack(alignment: .firstTextBaseline, spacing: 12) {
+                Text("Manage scheduled Snoozes")
+                    .font(.headline)
+                Spacer(minLength: 0)
+                Button("Refresh Snoozes") {
+                    Task { await refresh() }
+                }
+                .disabled(busy)
+                .accessibilityHint("Reloads current local Snooze state without cancelling anything.")
+            }
             Text("Only Snoozes not yet submitted for notification can be removed here.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -68,6 +76,10 @@ public struct FocusSnoozeManagementPanel: View {
                 Text("No cancellable or unconfirmed Snoozes")
                     .foregroundStyle(.secondary)
             } else if hasLoaded {
+                if busy {
+                    ProgressView("Refreshing Snoozes")
+                        .controlSize(.small)
+                }
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 12) {
                         ForEach(rows) { row in
@@ -128,6 +140,9 @@ public struct FocusSnoozeManagementPanel: View {
 
     private func refresh() async {
         guard !busy else { return }
+        // Refresh invalidates the confirmation currently on screen; the
+        // actionable candidate may have changed outside this view.
+        pendingConfirmation = nil
         busy = true
         defer { busy = false }
         do {
