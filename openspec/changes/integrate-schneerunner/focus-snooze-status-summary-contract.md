@@ -13,5 +13,5 @@ E3s–E3w introduced a standalone read-only Snooze view and an explicitly confir
 ## Verification and gates
 - Empty rows yield both counts zero and no ambiguous warning; pending-only rows never imply unconfirmed OS acceptance.
 - Mixed rows count correctly, and changing titles/identifiers/order does not affect the summary.
-- Constructing the UI summary view is side-effect-free; the underlying exact-ticket cancellation regression suite must remain green.
-- Latest-head native macOS Build/Test must pass five new Swift Testing cases; Visual Regression, strict OpenSpec, the planned 5-file diff, mergeability and zero unresolved review threads are mandatory for integration. CodeQL skipped is not success. Real macOS VoiceOver and contrast validation still require manual acceptance.
+- Constructing the UI summary view is side-effect-free. An actual persisted pending→claimed Outbox→ACK sequence must produce counts 1/0, 0/1, then 0/0 without mutating the file on read; the underlying exact-ticket cancellation regression suite must remain green.
+- Latest-head native macOS Build/Test must pass six new Swift Testing cases; Visual Regression, strict OpenSpec, the planned 5-file diff, mergeability and zero unresolved review threads are mandatory for integration. CodeQL skipped is not success. Real macOS VoiceOver and contrast validation still require manual acceptance.
