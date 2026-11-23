@@ -2,6 +2,11 @@ import Foundation
 import SchneeBarFocusPersistence
 import SwiftUI
 
+extension FocusSnoozeStatusRow {
+    /// Presentation hint only; the store revalidates the ticket on commit.
+    var offersPendingOnlyCancellation: Bool { phase == .pending }
+}
+
 /// Explicit local owner boundary for a future developer preview. The store
 /// re-reads the durable snapshot at the moment of each cancellation; a row
 /// presented earlier is never used as authorization.
@@ -37,6 +42,7 @@ public struct FocusSnoozeManagementPanel: View {
     @State private var busy = false
     @State private var hasLoaded = false
     @State private var feedback: String?
+    @State private var pendingConfirmation: FocusSnoozeStatusRow?
 
     public init(coordinator: FocusSnoozeManagementCoordinator) {
         self.coordinator = coordinator
@@ -73,9 +79,10 @@ public struct FocusSnoozeManagementPanel: View {
                                     .foregroundStyle(.secondary)
                                 Text(row.deadline, format: .dateTime.year().month().day().hour().minute())
                                     .font(.caption)
-                                if row.phase == .pending {
+                                if row.offersPendingOnlyCancellation {
                                     Button("Remove pending Snooze") {
-                                        Task { await cancel(row) }
+                                        guard !busy else { return }
+                                        pendingConfirmation = row
                                     }
                                     .disabled(busy)
                                     .accessibilityLabel("Remove pending Snooze for \(row.title)")
@@ -97,6 +104,26 @@ public struct FocusSnoozeManagementPanel: View {
         .padding()
         .frame(maxWidth: .infinity, alignment: .leading)
         .task { await refresh() }
+        .confirmationDialog(
+            "Remove pending Snooze?",
+            isPresented: Binding(
+                get: { pendingConfirmation != nil },
+                set: { if !$0 { pendingConfirmation = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            if let candidate = pendingConfirmation {
+                Button("Remove local Snooze", role: .destructive) {
+                    pendingConfirmation = nil
+                    Task { await cancel(candidate) }
+                }
+            }
+            Button("Keep Snooze", role: .cancel) {
+                pendingConfirmation = nil
+            }
+        } message: {
+            Text("Only a pending local schedule is removed. An OS-accepted notification cannot be recalled here.")
+        }
     }
 
     private func refresh() async {
@@ -109,6 +136,7 @@ public struct FocusSnoozeManagementPanel: View {
             feedback = nil
         } catch {
             // Never leave an old actionable row visible after load failure.
+            pendingConfirmation = nil
             rows = []
             hasLoaded = false
             feedback = "Unable to load Snoozes. No changes were made."
@@ -116,7 +144,7 @@ public struct FocusSnoozeManagementPanel: View {
     }
 
     private func cancel(_ row: FocusSnoozeStatusRow) async {
-        guard !busy, row.phase == .pending else { return }
+        guard !busy, row.offersPendingOnlyCancellation else { return }
         busy = true
         defer { busy = false }
         do {
