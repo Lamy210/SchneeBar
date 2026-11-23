@@ -8,6 +8,7 @@ public actor FocusReminderStore {
     public enum Command: Sendable {
         case setEnabled(Bool), replan(Calendar), claim(ticketID: UUID, calendar: Calendar)
         case snooze(sourceTicketID: UUID, seconds: TimeInterval), claimSnooze(ticketID: UUID)
+        case cancelSnooze(ticketID: UUID)
     }
     public enum StoreError: Error, Equatable, Sendable {
         case existingRecord, staleReminder, invalidBackingFile, payloadTooLarge
@@ -71,6 +72,7 @@ public actor FocusReminderStore {
         case .claim(let ticketID, let calendar): claimed = try next.claim(ticketID: ticketID, at: now, calendar: calendar)
         case .snooze(let sourceTicketID, let seconds): try next.snooze(sourceTicketID: sourceTicketID, seconds: seconds, at: now)
         case .claimSnooze(let ticketID): claimedSnooze = try next.claimSnooze(ticketID: ticketID, at: now)
+        case .cancelSnooze(let ticketID): try next.cancelSnooze(ticketID: ticketID)
         }
         if next != old { try save(next) }
         return Result(state: next, claimed: claimed, claimedSnooze: claimedSnooze)

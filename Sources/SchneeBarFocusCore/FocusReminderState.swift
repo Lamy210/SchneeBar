@@ -100,6 +100,16 @@ public struct FocusReminderState: Equatable, Sendable, Codable {
         snoozeOpportunity = nil
     }
 
+    /// Cancel only the matching *pending* snooze. A stale UI action cannot
+    /// revoke a replacement ticket. The ordinary recurrence cursor stays
+    /// consumed, and a cancellation never creates a new snooze opportunity.
+    public mutating func cancelSnooze(ticketID: UUID) throws {
+        guard let pendingSnooze, pendingSnooze.id == ticketID else {
+            throw StateError.staleTicket
+        }
+        self.pendingSnooze = nil
+    }
+
     public mutating func claimSnooze(ticketID: UUID, at now: Date) throws -> SnoozeTicket {
         guard Self.validDate(now) else { throw StateError.invalidClock }
         guard enabled, let ticket = pendingSnooze, ticket.id == ticketID else { throw StateError.staleTicket }

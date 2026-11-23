@@ -218,6 +218,21 @@ public actor FocusReminderCollectionStore {
                 next.outbox.removeAll {
                     $0.reminderID == id && $0.ticketID == sourceTicketID && $0.kind == .regular
                 }
+            case .cancelSnooze(let ticketID):
+                let pending = next.entries[index].state.pendingSnooze?.id == ticketID
+                let queued = next.outbox.contains {
+                    $0.reminderID == id && $0.kind == .snooze && $0.ticketID == ticketID
+                }
+                // After claim, the durable outbox owns the same ticket. Once
+                // acknowledged by the OS adapter, a local cancel cannot
+                // retract an OS request and must fail instead of pretending.
+                guard pending || queued else { throw FocusReminderState.StateError.staleTicket }
+                if pending {
+                    try next.entries[index].state.cancelSnooze(ticketID: ticketID)
+                }
+                next.outbox.removeAll {
+                    $0.reminderID == id && $0.kind == .snooze && $0.ticketID == ticketID
+                }
             case .claimSnooze(let ticketID):
                 claimedSnooze = try next.entries[index].state.claimSnooze(ticketID: ticketID, at: now)
                 if let claimedSnooze {
