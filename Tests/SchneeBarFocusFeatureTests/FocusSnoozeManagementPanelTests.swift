@@ -144,3 +144,82 @@ private func makeManageSnooze(
         #expect(try Data(contentsOf: file) == bytes)
     }
 }
+
+@Test func focusSnoozeManualRefreshObservesClaimWithoutMutatingOutbox() async throws {
+    try await withManageFile { store, file in
+        let (id, snooze) = try await makeManageSnooze(
+            store, title: "External transition", due: manageDue
+        )
+        let coordinator = FocusSnoozeManagementCoordinator(store: store)
+        let before = try await coordinator.load()
+        #expect(before.rows.first?.phase == .pending)
+        let claim = try await store.apply(
+            id: id, command: .update(.claimSnooze(ticketID: snooze.id)), at: snooze.deadline
+        )
+        let event = try #require(claim.enqueued)
+        let bytes = try Data(contentsOf: file)
+        let refreshed = try await coordinator.load()
+        #expect(refreshed.rows.count == 1)
+        #expect(refreshed.rows.first?.phase == .unacknowledgedOutbox)
+        #expect(refreshed.rows.first?.id.ticketID == event.ticketID)
+        #expect(try Data(contentsOf: file) == bytes)
+    }
+}
+
+@Test func focusSnoozeManualRefreshDropsAcknowledgedAndDisabledRows() async throws {
+    try await withManageFile { store, file in
+        let (firstID, firstTicket) = try await makeManageSnooze(
+            store, title: "Will ACK", due: manageDue
+        )
+        let (secondID, _) = try await makeManageSnooze(
+            store, title: "Will disable", due: manageDue.addingTimeInterval(600)
+        )
+        let coordinator = FocusSnoozeManagementCoordinator(store: store)
+        let original = try await coordinator.load()
+        #expect(original.rows.count == 2)
+        let claimed = try await store.apply(
+            id: firstID, command: .update(.claimSnooze(ticketID: firstTicket.id)),
+            at: firstTicket.deadline
+        )
+        let outbox = try #require(claimed.enqueued)
+        _ = try await store.acknowledge(outboxID: outbox.id)
+        _ = try await store.apply(
+            id: secondID, command: .update(.setEnabled(false)), at: manageDue
+        )
+        let bytes = try Data(contentsOf: file)
+        let refreshed = try await coordinator.load()
+        #expect(refreshed.rows.isEmpty)
+        #expect(try Data(contentsOf: file) == bytes)
+    }
+}
+
+@Test func focusSnoozeManualRefreshPreservesTicketAfterExternalRename() async throws {
+    try await withManageFile { store, file in
+        let (id, snooze) = try await makeManageSnooze(
+            store, title: "Before rename", due: manageDue
+        )
+        let coordinator = FocusSnoozeManagementCoordinator(store: store)
+        let before = try await coordinator.load()
+        #expect(before.rows.first?.title == "Before rename")
+        _ = try await store.apply(
+            id: id, command: .rename("After rename"), at: manageDue
+        )
+        let bytes = try Data(contentsOf: file)
+        let updated = try await coordinator.load()
+        #expect(updated.rows.first?.title == "After rename")
+        #expect(updated.rows.first?.id.ticketID == snooze.id)
+        #expect(try Data(contentsOf: file) == bytes)
+        let removed = try await coordinator.cancelPending(reminderID: id, ticketID: snooze.id)
+        #expect(removed.rows.isEmpty)
+    }
+}
+
+@Test func focusSnoozeManualRefreshBadBackingFileDoesNotSynthesizeCandidates() async throws {
+    let url = try #require(URL(string: "https://invalid.example/snoozes.json"))
+    let coordinator = FocusSnoozeManagementCoordinator(
+        store: FocusReminderCollectionStore(fileURL: url)
+    )
+    await #expect(throws: FocusReminderCollectionStore.StoreError.invalidBackingFile) {
+        try await coordinator.load()
+    }
+}
