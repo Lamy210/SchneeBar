@@ -64,6 +64,7 @@ public struct FocusSnoozeStatusPanel: View {
             Text("Read-only preview. This view does not cancel notifications.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
+            FocusSnoozeStatusSummaryView(summary: presentation.summary)
 
             if presentation.rows.isEmpty {
                 Text("No active snoozes")
