@@ -249,6 +249,30 @@ public actor FocusReminderCollectionStore {
         return Result(snapshot: next, claimed: claimed, claimedSnooze: claimedSnooze, enqueued: enqueued)
     }
 
+    /// Safe UI-facing boundary: cancel an *unclaimed* Snooze only.
+    /// The broader apply(.cancelSnooze) can also discard an unacknowledged
+    /// Outbox intent, where UserNotifications may already have accepted it.
+    /// A read and mutation happen within this actor without suspension;
+    /// a stale UI projection never authorizes cancellation on its own.
+    /// This does not provide a cross-process file lock or OS cancellation.
+    public func cancelPendingSnooze(reminderID: UUID, ticketID: UUID) throws -> Snapshot {
+        var snapshot = try load()
+        guard let index = snapshot.entries.firstIndex(where: { $0.id == reminderID }) else {
+            throw StoreError.staleReminder
+        }
+        guard snapshot.entries[index].state.pendingSnooze?.id == ticketID else {
+            throw FocusReminderState.StateError.staleTicket
+        }
+        // If any queued intent refers to this ticket, the local snapshot
+        // cannot establish that OS submission has not already begun.
+        guard !snapshot.outbox.contains(where: {
+            $0.reminderID == reminderID && $0.kind == .snooze && $0.ticketID == ticketID
+        }) else { throw StoreError.invalidOutbox }
+        try snapshot.entries[index].state.cancelSnooze(ticketID: ticketID)
+        try save(snapshot)
+        return snapshot
+    }
+
     /// Acknowledgement means adapter acceptance, NOT user presentation.
     /// A failure to persist leaves the intent queued for an idempotent retry.
     public func acknowledge(outboxID: UUID) throws -> Snapshot {
