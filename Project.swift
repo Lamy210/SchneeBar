@@ -55,6 +55,28 @@ let project = Project(
             ]
         ),
         .target(
+            name: "SchneeBarFocusFeature",
+            destinations: .macOS,
+            product: .staticFramework,
+            bundleId: "dev.lamy.schneebar.focus-feature",
+            deploymentTargets: deploymentTarget,
+            sources: ["Sources/SchneeBarFocusFeature/**"],
+            dependencies: [.target(name: "SchneeBarFocusPersistence")]
+        ),
+        .target(
+            name: "SchneeBarFocusFeatureTests",
+            destinations: .macOS,
+            product: .unitTests,
+            bundleId: "dev.lamy.schneebar.focus-feature-tests",
+            deploymentTargets: deploymentTarget,
+            sources: ["Tests/SchneeBarFocusFeatureTests/**"],
+            dependencies: [
+                .target(name: "SchneeBarFocusCore"),
+                .target(name: "SchneeBarFocusPersistence"),
+                .target(name: "SchneeBarFocusFeature"),
+            ]
+        ),
+        .target(
             name: "SchneeBarFocusPersistenceTests",
             destinations: .macOS,
             product: .unitTests,
