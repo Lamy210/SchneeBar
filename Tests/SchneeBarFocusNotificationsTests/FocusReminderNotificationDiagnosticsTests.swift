@@ -214,3 +214,132 @@ private func makeDiagnosticsOutbox(
         #expect(await port.counts() == [1, 1, 1, 0, 0])
     }
 }
+
+private actor FocusDiagnosticsInterleavingPort: FocusReminderNotificationCenterPort {
+    private let store: FocusReminderCollectionStore
+    private let outboxID: UUID
+    private let mode: Mutation
+    private var attempted = false
+    private var mutationSucceeded = false
+    private var submittedCount = 0
+    private var removedCount = 0
+
+    enum Mutation: Sendable {
+        case acknowledge
+        case rename(UUID)
+        case none
+    }
+
+    init(store: FocusReminderCollectionStore, outboxID: UUID, mode: Mutation) {
+        self.store = store
+        self.outboxID = outboxID
+        self.mode = mode
+    }
+
+    func authorizationStatus() async -> FocusReminderNotificationAuthorization { .authorized }
+
+    func add(_ request: FocusReminderNotificationRequest) async throws {
+        submittedCount += 1
+    }
+
+    func pendingIdentifiers() async -> [String] {
+        if !attempted {
+            attempted = true
+            switch mode {
+            case .acknowledge:
+                mutationSucceeded = (try? await store.acknowledge(outboxID: outboxID)) != nil
+            case .rename(let reminderID):
+                mutationSucceeded = (try? await store.apply(
+                    id: reminderID,
+                    command: .rename("Updated externally"),
+                    at: Date(timeIntervalSince1970: 1_700_000_120)
+                )) != nil
+            case .none:
+                break
+            }
+        }
+        return [FocusReminderNotificationIdentity.identifier(for: outboxID)]
+    }
+
+    func deliveredIdentifiers() async -> [String] { [] }
+
+    func remove(identifiers: [String]) async {
+        removedCount += 1
+    }
+
+    func state() -> (attempted: Bool, mutationSucceeded: Bool, submitted: Int, removed: Int) {
+        (attempted, mutationSucceeded, submittedCount, removedCount)
+    }
+}
+
+@Test func focusDiagnosticsRejectsOutboxACKDuringOSObservation() async throws {
+    try await withDiagnosticsStore { store, file in
+        let record = try await makeDiagnosticsOutbox(store: store)
+        let port = FocusDiagnosticsInterleavingPort(
+            store: store, outboxID: record.id, mode: .acknowledge
+        )
+        let reader = FocusReminderNotificationDiagnosticsReader(
+            store: store, gateway: FocusReminderNotificationGateway(center: port)
+        )
+        await #expect(throws: FocusReminderNotificationDiagnosticsError.durableSnapshotChanged) {
+            try await reader.load()
+        }
+        let state = await port.state()
+        #expect(state.attempted && state.mutationSucceeded)
+        #expect(state.submitted == 0 && state.removed == 0)
+        let afterMutation = try await store.load()
+        #expect(afterMutation.outbox.isEmpty)
+        let stable = try await reader.load()
+        #expect(stable.observedOutboxCount == 0)
+        #expect(stable.untrackedOwnedIdentifierCount == 1)
+        #expect(stable.requiresManualReview)
+        #expect(FileManager.default.fileExists(atPath: file.path))
+    }
+}
+
+@Test func focusDiagnosticsRejectsMetadataChangeDuringOSObservation() async throws {
+    try await withDiagnosticsStore { store, _ in
+        let record = try await makeDiagnosticsOutbox(store: store)
+        let port = FocusDiagnosticsInterleavingPort(
+            store: store, outboxID: record.id, mode: .rename(record.reminderID)
+        )
+        let reader = FocusReminderNotificationDiagnosticsReader(
+            store: store, gateway: FocusReminderNotificationGateway(center: port)
+        )
+        await #expect(throws: FocusReminderNotificationDiagnosticsError.durableSnapshotChanged) {
+            try await reader.load()
+        }
+        let state = await port.state()
+        #expect(state.mutationSucceeded)
+        let refreshed = try await reader.load()
+        #expect(refreshed.observedOutboxCount == 1)
+        #expect(refreshed.missingSystemEvidenceCount == 0)
+        #expect(!refreshed.requiresManualReview)
+        let snapshot = try await store.load()
+        let titles = snapshot.entries.map(\.title)
+        #expect(titles == ["Updated externally"])
+        #expect(state.submitted == 0 && state.removed == 0)
+    }
+}
+
+@Test func focusDiagnosticsStableOutboxStillObservesWithoutMutation() async throws {
+    try await withDiagnosticsStore { store, file in
+        let record = try await makeDiagnosticsOutbox(store: store)
+        let port = FocusDiagnosticsInterleavingPort(
+            store: store, outboxID: record.id, mode: .none
+        )
+        let reader = FocusReminderNotificationDiagnosticsReader(
+            store: store, gateway: FocusReminderNotificationGateway(center: port)
+        )
+        let bytes = try Data(contentsOf: file)
+        let result = try await reader.load()
+        #expect(result.observedOutboxCount == 1)
+        #expect(result.untrackedOwnedIdentifierCount == 0)
+        #expect(!result.requiresManualReview)
+        #expect(try Data(contentsOf: file) == bytes)
+        let state = await port.state()
+        #expect(state.attempted)
+        #expect(!state.mutationSucceeded)
+        #expect(state.submitted == 0 && state.removed == 0)
+    }
+}
