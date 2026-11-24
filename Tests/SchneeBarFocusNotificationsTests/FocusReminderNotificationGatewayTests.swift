@@ -163,7 +163,7 @@ private func withFocusNotificationIntent(
         #expect(inspection.plan.untrackedOwnedIdentifiers == [orphan])
         #expect(inspection.plan.ignoredIdentifierCount == 1)
         let calls = await port.snapshot()
-        #expect(calls.checks == 1 && calls.pendingReads == 1 && calls.deliveredReads == 1)
+        #expect(calls.checks == 2 && calls.pendingReads == 1 && calls.deliveredReads == 1)
         #expect(calls.submitted.isEmpty && calls.removed.isEmpty)
         let after = try await store.load()
         #expect(after == snapshot)
@@ -210,5 +210,118 @@ private func withFocusNotificationIntent(
         let inspection = try await gateway.inspect(initial, maximumEvidenceCount: 3)
         #expect(inspection.plan.observedInSystem == [intent])
         #expect(inspection.plan.ignoredIdentifierCount == 0)
+    }
+}
+
+private actor FocusNotificationAuthorizationTransitionStub: FocusReminderNotificationCenterPort {
+    let sequence: [FocusReminderNotificationAuthorization]
+    let pending: [String]
+    private var statusReads = 0
+    private var pendingReads = 0
+    private var deliveredReads = 0
+    private var submissions = 0
+    private var removals = 0
+
+    init(
+        _ sequence: [FocusReminderNotificationAuthorization],
+        pending: [String] = []
+    ) {
+        self.sequence = sequence
+        self.pending = pending
+    }
+
+    func authorizationStatus() async -> FocusReminderNotificationAuthorization {
+        let index = min(statusReads, sequence.count - 1)
+        statusReads += 1
+        return sequence[index]
+    }
+
+    func add(_ request: FocusReminderNotificationRequest) async throws {
+        submissions += 1
+    }
+
+    func pendingIdentifiers() async -> [String] {
+        pendingReads += 1
+        return pending
+    }
+
+    func deliveredIdentifiers() async -> [String] {
+        deliveredReads += 1
+        return []
+    }
+
+    func remove(identifiers: [String]) async { removals += 1 }
+
+    func counts() -> [Int] {
+        [statusReads, pendingReads, deliveredReads, submissions, removals]
+    }
+}
+
+@Test func focusNotificationEvidenceRejectsAuthorizationRevokedDuringRead() async throws {
+    try await withFocusNotificationIntent { intent, store in
+        let id = FocusReminderNotificationIdentity.identifier(for: intent.id)
+        let port = FocusNotificationAuthorizationTransitionStub(
+            [.authorized, .denied], pending: [id]
+        )
+        let gateway = FocusReminderNotificationGateway(center: port)
+        let before = try await store.load()
+        await #expect(throws: FocusReminderNotificationEvidenceError.authorizationChanged) {
+            try await gateway.inspect(before)
+        }
+        let after = try await store.load()
+        #expect(after == before)
+        #expect(await port.counts() == [2, 1, 1, 0, 0])
+    }
+}
+
+@Test func focusNotificationEvidenceRejectsPermissionGrantedDuringRead() async throws {
+    try await withFocusNotificationIntent { intent, store in
+        let id = FocusReminderNotificationIdentity.identifier(for: intent.id)
+        let port = FocusNotificationAuthorizationTransitionStub(
+            [.denied, .authorized], pending: [id]
+        )
+        let gateway = FocusReminderNotificationGateway(center: port)
+        let before = try await store.load()
+        await #expect(throws: FocusReminderNotificationEvidenceError.authorizationChanged) {
+            try await gateway.inspect(before)
+        }
+        let after = try await store.load()
+        #expect(after == before)
+        #expect(await port.counts() == [2, 1, 1, 0, 0])
+    }
+}
+
+@Test func focusNotificationEvidenceStablePermissionRetainsReadOnlyResults() async throws {
+    try await withFocusNotificationIntent { intent, store in
+        let id = FocusReminderNotificationIdentity.identifier(for: intent.id)
+        let port = FocusNotificationAuthorizationTransitionStub(
+            [.authorized, .authorized], pending: [id]
+        )
+        let gateway = FocusReminderNotificationGateway(center: port)
+        let before = try await store.load()
+        let inspection = try await gateway.inspect(before)
+        #expect(inspection.evidence.authorization == .authorized)
+        #expect(inspection.plan.observedInSystem == [intent])
+        #expect(inspection.plan.missingSystemEvidence.isEmpty)
+        let after = try await store.load()
+        #expect(after == before)
+        #expect(await port.counts() == [2, 1, 1, 0, 0])
+    }
+}
+
+@Test func focusNotificationEvidenceBoundsBeforeSecondPermissionSample() async throws {
+    try await withFocusNotificationIntent { intent, store in
+        let id = FocusReminderNotificationIdentity.identifier(for: intent.id)
+        let port = FocusNotificationAuthorizationTransitionStub(
+            [.authorized, .denied], pending: [id, id]
+        )
+        let gateway = FocusReminderNotificationGateway(center: port)
+        let before = try await store.load()
+        await #expect(throws: FocusReminderNotificationReconciliationError.tooManySystemIdentifiers) {
+            try await gateway.inspect(before, maximumEvidenceCount: 1)
+        }
+        #expect(await port.counts() == [1, 1, 0, 0, 0])
+        let after = try await store.load()
+        #expect(after == before)
     }
 }
