@@ -30,6 +30,7 @@ private actor FocusPreviewNotificationPort: FocusReminderNotificationCenterPort 
     func mutations() -> (Int, Int) { (adds, removes) }
 }
 
+@MainActor
 private func withFocusPreview(
     _ body: (FocusReminderCollectionStore, URL) async throws -> Void
 ) async throws {
@@ -144,4 +145,164 @@ private func createFocusPreviewOutbox(
     }
     let mut = await port.mutations()
     #expect(mut.0 == 0 && mut.1 == 0)
+}
+
+@Test @MainActor func focusDiagnosticsViewStateInitialReadClearsBusyAndCreatesNoFile() async throws {
+    try await withFocusPreview { store, file in
+        let port = FocusPreviewNotificationPort()
+        let reader = FocusReminderNotificationDiagnosticsReader(
+            store: store, gateway: FocusReminderNotificationGateway(center: port)
+        )
+        let state = FocusNotificationDiagnosticsViewState(reader: reader)
+        #expect(state.diagnostics == nil)
+        #expect(!state.isLoading)
+        #expect(state.errorMessage == nil)
+        await state.refresh()
+        #expect(!state.isLoading)
+        #expect(state.diagnostics?.durableOutboxCount == 0)
+        #expect(state.errorMessage == nil)
+        #expect(!FileManager.default.fileExists(atPath: file.path))
+        let calls = await port.mutations()
+        #expect(calls.0 == 0 && calls.1 == 0)
+    }
+}
+
+@Test @MainActor func focusDiagnosticsViewStateHidesOldCountsOnInvalidBackingAndRecovers() async throws {
+    try await withFocusPreview { store, file in
+        let intent = try await createFocusPreviewOutbox(store: store)
+        let port = FocusPreviewNotificationPort(
+            pending: [FocusReminderNotificationIdentity.identifier(for: intent.id)]
+        )
+        let reader = FocusReminderNotificationDiagnosticsReader(
+            store: store, gateway: FocusReminderNotificationGateway(center: port)
+        )
+        let state = FocusNotificationDiagnosticsViewState(reader: reader)
+        let validBytes = try Data(contentsOf: file)
+        await state.refresh()
+        #expect(state.diagnostics?.observedOutboxCount == 1)
+        #expect(state.errorMessage == nil)
+
+        try Data("{invalid-json".utf8).write(to: file)
+        await state.refresh()
+        #expect(state.diagnostics == nil)
+        #expect(!state.isLoading)
+        #expect(state.errorMessage != nil)
+        #expect(!(state.errorMessage ?? "").contains("PRIVATE LOCAL TITLE"))
+        #expect(try Data(contentsOf: file) != validBytes)
+
+        try validBytes.write(to: file)
+        await state.refresh()
+        #expect(state.diagnostics?.observedOutboxCount == 1)
+        #expect(state.errorMessage == nil)
+        #expect(!state.isLoading)
+        let calls = await port.mutations()
+        #expect(calls.0 == 0 && calls.1 == 0)
+    }
+}
+
+@Test @MainActor func focusDiagnosticsViewStateRefreshReflectsExternalACKWithoutDeletion() async throws {
+    try await withFocusPreview { store, file in
+        let record = try await createFocusPreviewOutbox(store: store)
+        let port = FocusPreviewNotificationPort(
+            delivered: [FocusReminderNotificationIdentity.identifier(for: record.id)]
+        )
+        let reader = FocusReminderNotificationDiagnosticsReader(
+            store: store, gateway: FocusReminderNotificationGateway(center: port)
+        )
+        let state = FocusNotificationDiagnosticsViewState(reader: reader)
+        await state.refresh()
+        #expect(state.diagnostics?.durableOutboxCount == 1)
+        #expect(state.diagnostics?.observedOutboxCount == 1)
+        #expect(state.diagnostics?.untrackedOwnedIdentifierCount == 0)
+
+        _ = try await store.acknowledge(outboxID: record.id)
+        let bytes = try Data(contentsOf: file)
+        await state.refresh()
+        #expect(state.diagnostics?.durableOutboxCount == 0)
+        #expect(state.diagnostics?.untrackedOwnedIdentifierCount == 1)
+        #expect(state.diagnostics?.requiresManualReview == true)
+        #expect(state.errorMessage == nil)
+        #expect(try Data(contentsOf: file) == bytes)
+        let calls = await port.mutations()
+        #expect(calls.0 == 0 && calls.1 == 0)
+    }
+}
+
+private actor FocusPreviewPausedEvidencePort: FocusReminderNotificationCenterPort {
+    private var started = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+    private var resumeAuthorization: CheckedContinuation<Void, Never>?
+    private var authorizationCalls = 0
+    private var mutations = 0
+
+    func authorizationStatus() async -> FocusReminderNotificationAuthorization {
+        authorizationCalls += 1
+        if authorizationCalls == 1 {
+            // Suspend only the first sample. The gateway may take a second
+            // authorization sample to detect permission drift; that read
+            // must not deadlock this concurrency regression fixture.
+            started = true
+            for waiter in waiters { waiter.resume() }
+            waiters.removeAll()
+            await withCheckedContinuation { continuation in
+                resumeAuthorization = continuation
+            }
+        }
+        return .authorized
+    }
+
+    func pendingIdentifiers() async -> [String] { [] }
+    func deliveredIdentifiers() async -> [String] { [] }
+    func add(_ request: FocusReminderNotificationRequest) async throws { mutations += 1 }
+    func remove(identifiers: [String]) async { mutations += 1 }
+
+    func waitUntilAuthorizationStarted() async {
+        if started { return }
+        await withCheckedContinuation { continuation in
+            waiters.append(continuation)
+        }
+    }
+
+    func releaseAuthorization() {
+        resumeAuthorization?.resume()
+        resumeAuthorization = nil
+    }
+
+    func counts() -> (authorization: Int, mutations: Int) {
+        (authorizationCalls, mutations)
+    }
+}
+
+@Test @MainActor func focusDiagnosticsViewStateRejectsOverlappingRefreshDuringOSWait() async throws {
+    try await withFocusPreview { store, file in
+        let port = FocusPreviewPausedEvidencePort()
+        let reader = FocusReminderNotificationDiagnosticsReader(
+            store: store, gateway: FocusReminderNotificationGateway(center: port)
+        )
+        let state = FocusNotificationDiagnosticsViewState(reader: reader)
+        let first = Task { await state.refresh() }
+        await port.waitUntilAuthorizationStarted()
+        #expect(state.isLoading)
+        #expect(state.diagnostics == nil)
+
+        // This must return immediately instead of starting a second OS read.
+        await state.refresh()
+        let waiting = await port.counts()
+        #expect(waiting.authorization == 1)
+        #expect(waiting.mutations == 0)
+        #expect(state.isLoading)
+
+        await port.releaseAuthorization()
+        await first.value
+        #expect(!state.isLoading)
+        #expect(state.errorMessage == nil)
+        #expect(state.diagnostics?.durableOutboxCount == 0)
+        #expect(!FileManager.default.fileExists(atPath: file.path))
+        let after = await port.counts()
+        // Both the original single-sample gateway and the fail-closed
+        // two-sample authorization gateway must finish without a duplicate
+        // refresh or a second suspended read.
+        #expect((1...2).contains(after.authorization))
+        #expect(after.mutations == 0)
+    }
 }
