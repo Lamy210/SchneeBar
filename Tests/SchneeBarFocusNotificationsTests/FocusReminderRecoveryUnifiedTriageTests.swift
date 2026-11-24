@@ -109,7 +109,7 @@ private func enqueueTriageReminder(
         #expect(observed.claimedAt < missing.claimedAt)
         #expect(try Data(contentsOf: file) == before)
         let activity = await center.activity()
-        #expect(activity.0 == 3 && activity.1 == 0 && activity.2 == 0)
+        #expect(activity.0 == 4 && activity.1 == 0 && activity.2 == 0)
     }
 }
 
