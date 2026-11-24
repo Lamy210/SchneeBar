@@ -52,6 +52,12 @@ public struct FocusReminderNotificationDiagnostics: Equatable, Sendable {
     }
 }
 
+/// The Outbox changed while non-atomic OS evidence was being inspected.
+/// No diagnostic summary should be presented as current in this case.
+public enum FocusReminderNotificationDiagnosticsError: Error, Equatable, Sendable {
+    case durableSnapshotChanged
+}
+
 /// Read-only owner for developer diagnostics. The local Outbox snapshot and
 /// two macOS evidence lists are NOT a transaction. Results can go stale even
 /// before this method returns; they MUST NOT authorize any state mutation.
@@ -70,6 +76,14 @@ public actor FocusReminderNotificationDiagnosticsReader {
         let inspection = try await gateway.inspect(
             snapshot, maximumEvidenceCount: maximumEvidenceCount
         )
+        // OS reads suspend the actor; another owner may have modified the
+        // durable inventory in the meantime. Re-read before publishing.
+        // This is a conservative drift check, NOT a cross-process lock or
+        // an atomic OS/disk transaction.
+        let current = try await store.load()
+        guard current == snapshot else {
+            throw FocusReminderNotificationDiagnosticsError.durableSnapshotChanged
+        }
         return FocusReminderNotificationDiagnostics(inspection: inspection)
     }
 }
