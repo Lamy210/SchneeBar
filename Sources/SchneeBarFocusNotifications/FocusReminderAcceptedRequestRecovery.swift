@@ -84,7 +84,7 @@ public actor FocusReminderAcceptedRequestRecovery {
         maximumEvidenceCount: Int = 2_048
     ) async throws -> FocusReminderAcceptedRequestRecoveryReport {
         let snapshot = try await store.load()
-        var inspection = try await gateway.inspect(
+        var inspection = try await inspectForRecovery(
             snapshot, maximumEvidenceCount: maximumEvidenceCount
         )
         let authorization = inspection.evidence.authorization
@@ -94,7 +94,7 @@ public actor FocusReminderAcceptedRequestRecovery {
             // suspended. Recheck both permission and the exact ACK candidate
             // IDs immediately before attempting the store's durable CAS.
             // This narrows, but cannot eliminate, the OS/filesystem TOCTOU.
-            let confirmed = try await gateway.inspect(
+            let confirmed = try await inspectForRecovery(
                 snapshot, maximumEvidenceCount: maximumEvidenceCount
             )
             guard confirmed.evidence.authorization == authorization,
@@ -115,5 +115,21 @@ public actor FocusReminderAcceptedRequestRecovery {
             untrackedOwnedIdentifierCount: plan.untrackedOwnedIdentifiers.count,
             ignoredIdentifierCount: plan.ignoredIdentifierCount
         )
+    }
+
+    /// Translate authorization drift into the stable recovery-level failure.
+    /// The gateway still exposes its precise error for read-only inspection.
+    /// In either case there is no durable acknowledgement on this path.
+    private func inspectForRecovery(
+        _ snapshot: FocusReminderCollectionStore.Snapshot,
+        maximumEvidenceCount: Int
+    ) async throws -> FocusReminderNotificationInspection {
+        do {
+            return try await gateway.inspect(
+                snapshot, maximumEvidenceCount: maximumEvidenceCount
+            )
+        } catch FocusReminderNotificationEvidenceError.authorizationChanged {
+            throw FocusReminderAcceptedRequestRecoveryError.evidenceChangedDuringRecovery
+        }
     }
 }
