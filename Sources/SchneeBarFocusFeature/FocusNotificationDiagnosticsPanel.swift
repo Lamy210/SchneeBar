@@ -6,14 +6,10 @@ import SwiftUI
 /// No titles, raw identifiers, receipt claims, permissions, or OS actions.
 @MainActor
 public struct FocusNotificationDiagnosticsPanel: View {
-    private let reader: FocusReminderNotificationDiagnosticsReader
-
-    @State private var diagnostics: FocusReminderNotificationDiagnostics?
-    @State private var loading = false
-    @State private var errorMessage: String?
+    @StateObject private var state: FocusNotificationDiagnosticsViewState
 
     public init(reader: FocusReminderNotificationDiagnosticsReader) {
-        self.reader = reader
+        _state = StateObject(wrappedValue: FocusNotificationDiagnosticsViewState(reader: reader))
     }
 
     public var body: some View {
@@ -23,9 +19,9 @@ public struct FocusNotificationDiagnosticsPanel: View {
                     .font(.headline)
                 Spacer(minLength: 0)
                 Button("Refresh evidence") {
-                    Task { await refresh() }
+                    Task { await state.refresh() }
                 }
-                .disabled(loading)
+                .disabled(state.isLoading)
                 .accessibilityHint("Reads current local Outbox and macOS evidence. Does not change notifications.")
             }
 
@@ -33,18 +29,18 @@ public struct FocusNotificationDiagnosticsPanel: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
-            if loading {
+            if state.isLoading {
                 ProgressView("Inspecting notification evidence")
                     .controlSize(.small)
             }
 
-            if let errorMessage {
+            if let errorMessage = state.errorMessage {
                 Text(errorMessage)
                     .font(.caption)
                     .accessibilityLabel(errorMessage)
             }
 
-            if let diagnostics {
+            if let diagnostics = state.diagnostics {
                 VStack(alignment: .leading, spacing: 6) {
                     Text("Durable Outbox records: \(diagnostics.durableOutboxCount)")
                     Text("Observed in OS lists: \(diagnostics.observedOutboxCount)")
@@ -64,7 +60,7 @@ public struct FocusNotificationDiagnosticsPanel: View {
                 }
                 .font(.caption)
                 .accessibilityElement(children: .contain)
-            } else if !loading && errorMessage == nil {
+            } else if !state.isLoading && state.errorMessage == nil {
                 Text("No evidence inspection has completed.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -72,7 +68,7 @@ public struct FocusNotificationDiagnosticsPanel: View {
         }
         .padding()
         .frame(maxWidth: .infinity, alignment: .leading)
-        .task { await refresh() }
+        .task { await state.refresh() }
     }
 
     private func authorizationLabel(_ status: FocusReminderNotificationAuthorization) -> String {
@@ -85,19 +81,4 @@ public struct FocusNotificationDiagnosticsPanel: View {
         }
     }
 
-    private func refresh() async {
-        guard !loading else { return }
-        // Invalidate stale counts immediately, including across a failing
-        // inspection or a new intervening Outbox mutation.
-        diagnostics = nil
-        errorMessage = nil
-        loading = true
-        defer { loading = false }
-        do {
-            diagnostics = try await reader.load()
-        } catch {
-            diagnostics = nil
-            errorMessage = "Evidence could not be verified. Refresh to retry; no notification was changed."
-        }
-    }
 }
