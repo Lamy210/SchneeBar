@@ -93,7 +93,7 @@ private func makeDiagnosticsOutbox(
         #expect(summary.missingSystemEvidenceCount == 0)
         #expect(!summary.requiresManualReview)
         #expect(!FileManager.default.fileExists(atPath: file.path))
-        #expect(await port.counts() == [1, 1, 1, 0, 0])
+        #expect(await port.counts() == [2, 1, 1, 0, 0])
     }
 }
 
@@ -120,7 +120,7 @@ private func makeDiagnosticsOutbox(
         #expect(summary.durableOutboxCount == 1)
         #expect(summary.requiresManualReview)
         #expect(try Data(contentsOf: file) == before)
-        #expect(await port.counts() == [1, 1, 1, 0, 0])
+        #expect(await port.counts() == [2, 1, 1, 0, 0])
         #expect(!String(reflecting: summary).contains("CONFIDENTIAL TITLE"))
     }
 }
@@ -140,7 +140,7 @@ private func makeDiagnosticsOutbox(
         #expect(summary.missingSystemEvidenceCount == 1)
         #expect(summary.requiresManualReview)
         #expect(try Data(contentsOf: file) == before)
-        #expect(await port.counts() == [1, 1, 1, 0, 0])
+        #expect(await port.counts() == [2, 1, 1, 0, 0])
     }
 }
 
@@ -162,7 +162,7 @@ private func makeDiagnosticsOutbox(
         #expect(summary.untrackedOwnedIdentifierCount == 1)
         #expect(summary.requiresManualReview)
         #expect(try Data(contentsOf: file) == before)
-        #expect(await port.counts() == [1, 1, 1, 0, 0])
+        #expect(await port.counts() == [2, 1, 1, 0, 0])
     }
 }
 
@@ -211,7 +211,7 @@ private func makeDiagnosticsOutbox(
         #expect(summary.observedOutboxCount == 0)
         #expect(summary.missingSystemEvidenceCount == 1)
         #expect(summary.requiresManualReview)
-        #expect(await port.counts() == [1, 1, 1, 0, 0])
+        #expect(await port.counts() == [2, 1, 1, 0, 0])
     }
 }
 
