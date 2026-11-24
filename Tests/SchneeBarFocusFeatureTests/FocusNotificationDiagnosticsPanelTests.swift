@@ -237,11 +237,16 @@ private actor FocusPreviewPausedEvidencePort: FocusReminderNotificationCenterPor
 
     func authorizationStatus() async -> FocusReminderNotificationAuthorization {
         authorizationCalls += 1
-        started = true
-        for waiter in waiters { waiter.resume() }
-        waiters.removeAll()
-        await withCheckedContinuation { continuation in
-            resumeAuthorization = continuation
+        if authorizationCalls == 1 {
+            // Suspend only the first sample. The gateway may take a second
+            // authorization sample to detect permission drift; that read
+            // must not deadlock this concurrency regression fixture.
+            started = true
+            for waiter in waiters { waiter.resume() }
+            waiters.removeAll()
+            await withCheckedContinuation { continuation in
+                resumeAuthorization = continuation
+            }
         }
         return .authorized
     }
@@ -294,7 +299,10 @@ private actor FocusPreviewPausedEvidencePort: FocusReminderNotificationCenterPor
         #expect(state.diagnostics?.durableOutboxCount == 0)
         #expect(!FileManager.default.fileExists(atPath: file.path))
         let after = await port.counts()
-        #expect(after.authorization == 1)
+        // Both the original single-sample gateway and the fail-closed
+        // two-sample authorization gateway must finish without a duplicate
+        // refresh or a second suspended read.
+        #expect((1...2).contains(after.authorization))
         #expect(after.mutations == 0)
     }
 }
