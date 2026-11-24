@@ -61,7 +61,10 @@ let project = Project(
             bundleId: "dev.lamy.schneebar.focus-feature",
             deploymentTargets: deploymentTarget,
             sources: ["Sources/SchneeBarFocusFeature/**"],
-            dependencies: [.target(name: "SchneeBarFocusPersistence")]
+            dependencies: [
+                .target(name: "SchneeBarFocusPersistence"),
+                .target(name: "SchneeBarFocusNotifications"),
+            ]
         ),
         .target(
             name: "SchneeBarFocusFeatureTests",
@@ -73,6 +76,7 @@ let project = Project(
             dependencies: [
                 .target(name: "SchneeBarFocusCore"),
                 .target(name: "SchneeBarFocusPersistence"),
+                .target(name: "SchneeBarFocusNotifications"),
                 .target(name: "SchneeBarFocusFeature"),
             ]
         ),
