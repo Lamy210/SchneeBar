@@ -14,6 +14,12 @@ public struct FocusReminderNotificationSystemEvidence: Equatable, Sendable {
     public let deliveredIdentifiers: [String]
 }
 
+/// A sampled permission transition makes OS evidence unsuitable for a
+/// single diagnostic interpretation. This is not an OS/disk transaction.
+public enum FocusReminderNotificationEvidenceError: Error, Equatable, Sendable {
+    case authorizationChanged
+}
+
 public struct FocusReminderNotificationInspection: Equatable, Sendable {
     public let evidence: FocusReminderNotificationSystemEvidence
     public let plan: FocusReminderNotificationReconciliationPlan
@@ -99,6 +105,13 @@ public actor FocusReminderNotificationGateway {
         let delivered = await center.deliveredIdentifiers()
         guard delivered.count <= maximumEvidenceCount - pending.count else {
             throw FocusReminderNotificationReconciliationError.tooManySystemIdentifiers
+        }
+        // The two OS arrays are not atomic, and notification permission can
+        // change while they are being read. Never publish a snapshot with
+        // an authorization state contradicted by a second explicit sample.
+        // Equality does not prove that the state remained stable (ABA).
+        guard await center.authorizationStatus() == authorization else {
+            throw FocusReminderNotificationEvidenceError.authorizationChanged
         }
         return FocusReminderNotificationSystemEvidence(
             authorization: authorization, pendingIdentifiers: pending,
