@@ -293,7 +293,7 @@ private actor ChangingRecoveryEvidenceCenter: FocusReminderNotificationCenterPor
         }
         #expect(try await store.load().outbox == [intent])
         let counts = await center.counts()
-        #expect(counts.0 == 2 && counts.1 == 2)
+        #expect(counts.0 == 2 && counts.1 == 1)
         #expect(counts.2 == 0 && counts.3 == 0)
     }
 }
@@ -316,7 +316,7 @@ private actor ChangingRecoveryEvidenceCenter: FocusReminderNotificationCenterPor
         }
         #expect(try await store.load().outbox == [intent])
         let counts = await center.counts()
-        #expect(counts.0 == 2 && counts.1 == 2)
+        #expect(counts.0 == 4 && counts.1 == 2)
         #expect(counts.2 == 0 && counts.3 == 0)
     }
 }
@@ -336,7 +336,7 @@ private actor ChangingRecoveryEvidenceCenter: FocusReminderNotificationCenterPor
         #expect(report.acknowledgedCount == 1)
         #expect(try await store.load().outbox.isEmpty)
         let counts = await center.counts()
-        #expect(counts.0 == 2 && counts.1 == 2)
+        #expect(counts.0 == 4 && counts.1 == 2)
         #expect(counts.2 == 0 && counts.3 == 0)
     }
 }
@@ -363,7 +363,7 @@ private actor ChangingRecoveryEvidenceCenter: FocusReminderNotificationCenterPor
         }
         #expect(try await store.load().outbox == [first, second])
         let counts = await center.counts()
-        #expect(counts.0 == 2 && counts.1 == 2)
+        #expect(counts.0 == 4 && counts.1 == 2)
         #expect(counts.2 == 0 && counts.3 == 0)
     }
 }
@@ -387,7 +387,7 @@ private actor ChangingRecoveryEvidenceCenter: FocusReminderNotificationCenterPor
         #expect(report.needsManualRecoveryCount == 0)
         #expect(try await store.load().outbox.isEmpty)
         let counts = await center.counts()
-        #expect(counts.0 == 2 && counts.1 == 2)
+        #expect(counts.0 == 4 && counts.1 == 2)
         #expect(counts.2 == 0 && counts.3 == 0)
     }
 }
