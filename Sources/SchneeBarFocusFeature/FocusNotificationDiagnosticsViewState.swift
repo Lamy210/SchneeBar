@@ -27,6 +27,11 @@ public final class FocusNotificationDiagnosticsViewState: ObservableObject {
         defer { isLoading = false }
         do {
             diagnostics = try await reader.load()
+        } catch is CancellationError {
+            // Dismissal/cancellation is not a validation failure: clear
+            // stale evidence silently and allow an explicit future retry.
+            diagnostics = nil
+            errorMessage = nil
         } catch {
             diagnostics = nil
             // Do not expose error payloads or raw identifiers in the UI.
