@@ -75,10 +75,15 @@ public actor FocusReminderNotificationDiagnosticsReader {
 
     public func load(maximumEvidenceCount: Int = 2_048) async throws
         -> FocusReminderNotificationDiagnostics {
+        // View disappearance cancels SwiftUI's task. Fail closed rather
+        // than publishing a completed OS read into a cancelled session.
+        try Task.checkCancellation()
         let snapshot = try await store.load()
+        try Task.checkCancellation()
         let inspection = try await gateway.inspect(
             snapshot, maximumEvidenceCount: maximumEvidenceCount
         )
+        try Task.checkCancellation()
         // OS reads suspend the actor; another owner may have modified the
         // durable inventory in the meantime. Re-read before publishing.
         // This is a conservative drift check, NOT a cross-process lock or
@@ -87,6 +92,7 @@ public actor FocusReminderNotificationDiagnosticsReader {
         guard current == snapshot else {
             throw FocusReminderNotificationDiagnosticsError.durableSnapshotChanged
         }
+        try Task.checkCancellation()
         return FocusReminderNotificationDiagnostics(inspection: inspection)
     }
 }
