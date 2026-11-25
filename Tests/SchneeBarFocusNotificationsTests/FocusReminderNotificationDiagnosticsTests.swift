@@ -423,3 +423,80 @@ private actor FocusDiagnosticsInterleavingPort: FocusReminderNotificationCenterP
         #expect(calls[3] == 0 && calls[4] == 0)
     }
 }
+
+private actor FocusDiagnosticsCancellationCenter: FocusReminderNotificationCenterPort {
+    private var authorizationReads = 0
+    private var reads = 0
+    private var mutations = 0
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+    private var firstReadStarted = false
+    private var firstReadRelease: CheckedContinuation<Void, Never>?
+
+    func authorizationStatus() async -> FocusReminderNotificationAuthorization {
+        authorizationReads += 1
+        if authorizationReads == 1 {
+            firstReadStarted = true
+            for waiter in waiters { waiter.resume() }
+            waiters.removeAll()
+            await withCheckedContinuation { continuation in
+                firstReadRelease = continuation
+            }
+        }
+        return .authorized
+    }
+
+    func pendingIdentifiers() async -> [String] {
+        reads += 1
+        return []
+    }
+
+    func deliveredIdentifiers() async -> [String] {
+        reads += 1
+        return []
+    }
+
+    func add(_ request: FocusReminderNotificationRequest) async throws {
+        mutations += 1
+    }
+
+    func remove(identifiers: [String]) async {
+        mutations += 1
+    }
+
+    func awaitFirstAuthorizationRead() async {
+        if firstReadStarted { return }
+        await withCheckedContinuation { continuation in
+            waiters.append(continuation)
+        }
+    }
+
+    func releaseFirstAuthorizationRead() {
+        firstReadRelease?.resume()
+        firstReadRelease = nil
+    }
+
+    func counts() -> (authorization: Int, reads: Int, mutations: Int) {
+        (authorizationReads, reads, mutations)
+    }
+}
+
+@Test func focusDiagnosticsCancelledDuringAuthorizationReadReturnsNoEvidence() async throws {
+    try await withDiagnosticsStore { store, file in
+        let center = FocusDiagnosticsCancellationCenter()
+        let reader = FocusReminderNotificationDiagnosticsReader(
+            store: store, gateway: FocusReminderNotificationGateway(center: center)
+        )
+        let task = Task { try await reader.load() }
+        await center.awaitFirstAuthorizationRead()
+        task.cancel()
+        await center.releaseFirstAuthorizationRead()
+        await #expect(throws: CancellationError.self) {
+            _ = try await task.value
+        }
+        #expect(!FileManager.default.fileExists(atPath: file.path))
+        let counts = await center.counts()
+        #expect(counts.authorization == 2)
+        #expect(counts.reads == 2)
+        #expect(counts.mutations == 0)
+    }
+}
