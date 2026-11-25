@@ -31,10 +31,13 @@ public struct FocusReminderNotificationDiagnostics: Equatable, Sendable {
         observedOutboxCount + missingSystemEvidenceCount
     }
 
+    /// Review is needed only if an actual Focus record or owned OS
+    /// identifier requires investigation. Restricted authorization alone
+    /// remains a separate warning, even with an empty inventory.
     public var requiresManualReview: Bool {
-        evidenceQuality == .authorizationRestricted
-            || missingSystemEvidenceCount > 0
+        missingSystemEvidenceCount > 0
             || untrackedOwnedIdentifierCount > 0
+            || (evidenceQuality == .authorizationRestricted && observedOutboxCount > 0)
     }
 
     public init(inspection: FocusReminderNotificationInspection) {

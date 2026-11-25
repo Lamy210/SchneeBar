@@ -343,3 +343,83 @@ private actor FocusDiagnosticsInterleavingPort: FocusReminderNotificationCenterP
         #expect(state.submitted == 0 && state.removed == 0)
     }
 }
+
+
+@Test func focusDiagnosticsRestrictedPermissionWithoutFocusRecordsNeedsNoManualReview() async throws {
+    try await withDiagnosticsStore { store, file in
+        let port = FocusDiagnosticsCenterStub(authorization: .denied)
+        let reader = FocusReminderNotificationDiagnosticsReader(
+            store: store, gateway: FocusReminderNotificationGateway(center: port)
+        )
+        let summary = try await reader.load()
+        #expect(summary.evidenceQuality == .authorizationRestricted)
+        #expect(summary.durableOutboxCount == 0)
+        #expect(summary.untrackedOwnedIdentifierCount == 0)
+        #expect(!summary.requiresManualReview)
+        #expect(!FileManager.default.fileExists(atPath: file.path))
+        let calls = await port.counts()
+        #expect(calls[3] == 0 && calls[4] == 0)
+    }
+}
+
+@Test func focusDiagnosticsRestrictedPermissionAndUnrelatedIDNeedsNoManualReview() async throws {
+    try await withDiagnosticsStore { store, file in
+        let port = FocusDiagnosticsCenterStub(
+            authorization: .notDetermined, pending: ["other.app.private.identifier"]
+        )
+        let reader = FocusReminderNotificationDiagnosticsReader(
+            store: store, gateway: FocusReminderNotificationGateway(center: port)
+        )
+        let summary = try await reader.load()
+        #expect(summary.evidenceQuality == .authorizationRestricted)
+        #expect(summary.ignoredIdentifierCount == 1)
+        #expect(summary.durableOutboxCount == 0)
+        #expect(summary.untrackedOwnedIdentifierCount == 0)
+        #expect(!summary.requiresManualReview)
+        #expect(!FileManager.default.fileExists(atPath: file.path))
+        let calls = await port.counts()
+        #expect(calls[3] == 0 && calls[4] == 0)
+    }
+}
+
+@Test func focusDiagnosticsRestrictedPermissionWithOwnedOSIdentifierRequiresReview() async throws {
+    try await withDiagnosticsStore { store, file in
+        let owned = FocusReminderNotificationIdentity.identifier(for: UUID())
+        let port = FocusDiagnosticsCenterStub(
+            authorization: .unsupported, delivered: [owned]
+        )
+        let reader = FocusReminderNotificationDiagnosticsReader(
+            store: store, gateway: FocusReminderNotificationGateway(center: port)
+        )
+        let summary = try await reader.load()
+        #expect(summary.evidenceQuality == .authorizationRestricted)
+        #expect(summary.durableOutboxCount == 0)
+        #expect(summary.untrackedOwnedIdentifierCount == 1)
+        #expect(summary.requiresManualReview)
+        #expect(!FileManager.default.fileExists(atPath: file.path))
+        let calls = await port.counts()
+        #expect(calls[3] == 0 && calls[4] == 0)
+    }
+}
+
+@Test func focusDiagnosticsRestrictedPermissionWithObservedOutboxRequiresReview() async throws {
+    try await withDiagnosticsStore { store, file in
+        let record = try await makeDiagnosticsOutbox(store: store)
+        let owned = FocusReminderNotificationIdentity.identifier(for: record.id)
+        let port = FocusDiagnosticsCenterStub(
+            authorization: .denied, pending: [owned]
+        )
+        let reader = FocusReminderNotificationDiagnosticsReader(
+            store: store, gateway: FocusReminderNotificationGateway(center: port)
+        )
+        let before = try Data(contentsOf: file)
+        let summary = try await reader.load()
+        #expect(summary.evidenceQuality == .authorizationRestricted)
+        #expect(summary.observedOutboxCount == 1)
+        #expect(summary.missingSystemEvidenceCount == 0)
+        #expect(summary.requiresManualReview)
+        #expect(try Data(contentsOf: file) == before)
+        let calls = await port.counts()
+        #expect(calls[3] == 0 && calls[4] == 0)
+    }
+}
