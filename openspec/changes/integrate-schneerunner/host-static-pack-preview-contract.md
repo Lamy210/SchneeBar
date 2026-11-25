@@ -1,0 +1,7 @@
+# C3w draft: explicit static pack preview
+
+Based on merged #426–428. Explicitly preview the selected UUID using the existing bounded acquisition queue and existing full pack validation. No eager decoding of the inventory. After validation, retain only the default clip's first frame as an independently allocated RGBA8 bitmap, at most 128 pixels on either axis, no upscaling, preserve aspect ratio. The thumbnail itself retains at most 65,536 bytes of pixel data, not a full catalogue; this is not a process-wide or transient decode memory bound. Existing decoder budgets and one worker still apply.
+
+The read request requires an idle worker and current host asset session. Completion checks ticket/session and does not adopt a catalogue, replace the menu image, change persisted selection, restart CPU or local events on an unchanged host, or schedule an animation. During other asset operations or lifecycle revocation discard the image. The editor hides the preview on candidate edit, even if the same ID is re-entered later; a new preview requires an explicit action. No automatic retry, network, import, or shipping target wiring.
+
+Three fixtures cover thumbnail aspect ratio/default-state/format bounds, active character and event-session preservation, rejected candidate and stale UI state, and revoked non-cooperative worker drain. Native CI, actual Mac visual/accessibility and power/peak memory, approved artwork, ADR and main promotion remain outstanding.

@@ -21,6 +21,183 @@ let project = Project(
             sources: ["Sources/SchneeBarCore/**"]
         ),
         .target(
+            name: "SchneeBarFocusPersistence",
+            destinations: .macOS,
+            product: .staticFramework,
+            bundleId: "dev.lamy.schneebar.focus-persistence",
+            deploymentTargets: deploymentTarget,
+            sources: ["Sources/SchneeBarFocusPersistence/**"],
+            dependencies: [
+                .target(name: "SchneeBarCore"),
+                .target(name: "SchneeBarFocusCore"),
+            ]
+        ),
+        .target(
+            name: "SchneeBarFocusNotifications",
+            destinations: .macOS,
+            product: .staticFramework,
+            bundleId: "dev.lamy.schneebar.focus-notifications",
+            deploymentTargets: deploymentTarget,
+            sources: ["Sources/SchneeBarFocusNotifications/**"],
+            dependencies: [.target(name: "SchneeBarFocusPersistence")]
+        ),
+        .target(
+            name: "SchneeBarFocusNotificationsTests",
+            destinations: .macOS,
+            product: .unitTests,
+            bundleId: "dev.lamy.schneebar.focus-notifications-tests",
+            deploymentTargets: deploymentTarget,
+            sources: ["Tests/SchneeBarFocusNotificationsTests/**"],
+            dependencies: [
+                .target(name: "SchneeBarFocusCore"),
+                .target(name: "SchneeBarFocusPersistence"),
+                .target(name: "SchneeBarFocusNotifications"),
+            ]
+        ),
+        .target(
+            name: "SchneeBarFocusFeature",
+            destinations: .macOS,
+            product: .staticFramework,
+            bundleId: "dev.lamy.schneebar.focus-feature",
+            deploymentTargets: deploymentTarget,
+            sources: ["Sources/SchneeBarFocusFeature/**"],
+            dependencies: [
+                .target(name: "SchneeBarFocusPersistence"),
+                .target(name: "SchneeBarFocusNotifications"),
+            ]
+        ),
+        .target(
+            name: "SchneeBarFocusFeatureTests",
+            destinations: .macOS,
+            product: .unitTests,
+            bundleId: "dev.lamy.schneebar.focus-feature-tests",
+            deploymentTargets: deploymentTarget,
+            sources: ["Tests/SchneeBarFocusFeatureTests/**"],
+            dependencies: [
+                .target(name: "SchneeBarFocusCore"),
+                .target(name: "SchneeBarFocusPersistence"),
+                .target(name: "SchneeBarFocusNotifications"),
+                .target(name: "SchneeBarFocusFeature"),
+            ]
+        ),
+        .target(
+            name: "SchneeBarFocusPersistenceTests",
+            destinations: .macOS,
+            product: .unitTests,
+            bundleId: "dev.lamy.schneebar.focus-persistence-tests",
+            deploymentTargets: deploymentTarget,
+            sources: ["Tests/SchneeBarFocusPersistenceTests/**"],
+            dependencies: [
+                .target(name: "SchneeBarFocusCore"),
+                .target(name: "SchneeBarFocusPersistence"),
+            ]
+        ),
+        .target(
+            name: "SchneeBarFocusCore",
+            destinations: .macOS,
+            product: .staticFramework,
+            bundleId: "dev.lamy.schneebar.focus-core",
+            deploymentTargets: deploymentTarget,
+            sources: ["Sources/SchneeBarFocusCore/**"]
+        ),
+        .target(
+            name: "SchneeBarFocusCoreTests",
+            destinations: .macOS,
+            product: .unitTests,
+            bundleId: "dev.lamy.schneebar.focus-core-tests",
+            deploymentTargets: deploymentTarget,
+            sources: ["Tests/SchneeBarFocusCoreTests/**"],
+            dependencies: [.target(name: "SchneeBarFocusCore")]
+        ),
+        .target(
+            name: "SchneeBarCompanionCore",
+            destinations: .macOS,
+            product: .staticFramework,
+            bundleId: "dev.lamy.schneebar.companion-core",
+            deploymentTargets: deploymentTarget,
+            sources: ["Sources/SchneeBarCompanionCore/**"]
+        ),
+        .target(
+            name: "SchneeBarCompanionCoreTests",
+            destinations: .macOS,
+            product: .unitTests,
+            bundleId: "dev.lamy.schneebar.companion-core-tests",
+            deploymentTargets: deploymentTarget,
+            sources: ["Tests/SchneeBarCompanionCoreTests/**"],
+            dependencies: [.target(name: "SchneeBarCompanionCore")]
+        ),
+        .target(
+            name: "SchneeBarCompanionEvents",
+            destinations: .macOS,
+            product: .staticFramework,
+            bundleId: "dev.lamy.schneebar.companion-events",
+            deploymentTargets: deploymentTarget,
+            sources: ["Sources/SchneeBarCompanionEvents/**"],
+            dependencies: [.target(name: "SchneeBarCompanionCore")]
+        ),
+        .target(
+            name: "SchneeBarCompanionEventsTests",
+            destinations: .macOS,
+            product: .unitTests,
+            bundleId: "dev.lamy.schneebar.companion-events-tests",
+            deploymentTargets: deploymentTarget,
+            sources: ["Tests/SchneeBarCompanionEventsTests/**"],
+            dependencies: [
+                .target(name: "SchneeBarCompanionEvents"),
+                .target(name: "SchneeBarCompanionCore"),
+            ]
+        ),
+        .target(
+            name: "SchneeBarCompanionAssets",
+            destinations: .macOS,
+            product: .staticFramework,
+            bundleId: "dev.lamy.schneebar.companion-assets",
+            deploymentTargets: deploymentTarget,
+            sources: ["Sources/SchneeBarCompanionAssets/**"],
+            dependencies: [.target(name: "SchneeBarCompanionCore")]
+        ),
+        .target(
+            name: "SchneeBarCompanionFeature",
+            destinations: .macOS,
+            product: .staticFramework,
+            bundleId: "dev.lamy.schneebar.companion-feature",
+            deploymentTargets: deploymentTarget,
+            sources: ["Sources/SchneeBarCompanionFeature/**"],
+            dependencies: [
+                .target(name: "SchneeBarSystemProvider"),
+                .target(name: "SchneeBarCompanionEvents"),
+                .target(name: "SchneeBarCompanionCore"),
+                .target(name: "SchneeBarCompanionAssets"),
+                .target(name: "SchneeBarDesignSystem"),
+            ]
+        ),
+        .target(
+            name: "SchneeBarCompanionAssetsTests",
+            destinations: .macOS,
+            product: .unitTests,
+            bundleId: "dev.lamy.schneebar.companion-assets-tests",
+            deploymentTargets: deploymentTarget,
+            sources: ["Tests/SchneeBarCompanionAssetsTests/**"],
+            dependencies: [
+                .target(name: "SchneeBarCompanionAssets"),
+                .target(name: "SchneeBarCompanionCore"),
+            ]
+        ),
+        .target(
+            name: "SchneeBarCompanionFeatureTests",
+            destinations: .macOS,
+            product: .unitTests,
+            bundleId: "dev.lamy.schneebar.companion-feature-tests",
+            deploymentTargets: deploymentTarget,
+            sources: ["Tests/SchneeBarCompanionFeatureTests/**"],
+            dependencies: [
+                .target(name: "SchneeBarCompanionEvents"),
+                .target(name: "SchneeBarCompanionFeature"),
+                .target(name: "SchneeBarCompanionAssets"),
+                .target(name: "SchneeBarCompanionCore"),
+            ]
+        ),
+        .target(
             name: "SchneeBarDesignSystem",
             destinations: .macOS,
             product: .staticFramework,
@@ -185,6 +362,41 @@ let project = Project(
                     "ASSETCATALOG_COMPILER_APPICON_NAME": "AppIcon",
                 ]
             )
+        ),
+        .target(
+            name: "SchneeBarCompanionPreview",
+            destinations: .macOS,
+            product: .app,
+            bundleId: "dev.lamy.schneebar.companion-preview",
+            deploymentTargets: deploymentTarget,
+            infoPlist: .extendingDefault(with: [
+                "CFBundleDisplayName": "SchneeBar Companion Preview",
+            ]),
+            sources: ["Sources/SchneeBarCompanionPreview/**"],
+            dependencies: [
+                .target(name: "SchneeBarCompanionEvents"),
+                .target(name: "SchneeBarCompanionCore"),
+                .target(name: "SchneeBarCompanionAssets"),
+                .target(name: "SchneeBarCompanionFeature"),
+                .target(name: "SchneeBarSystemProvider"),
+                .target(name: "SchneeBarCore"),
+                .target(name: "SchneeBarDesignSystem"),
+            ]
+        ),
+        .target(
+            name: "SchneeBarCompanionPreviewTests",
+            destinations: .macOS,
+            product: .unitTests,
+            bundleId: "dev.lamy.schneebar.companion-preview-tests",
+            deploymentTargets: deploymentTarget,
+            sources: ["Tests/SchneeBarCompanionPreviewTests/**"],
+            dependencies: [
+                .target(name: "SchneeBarCompanionEvents"),
+                .target(name: "SchneeBarCompanionPreview"),
+                .target(name: "SchneeBarCompanionAssets"),
+                .target(name: "SchneeBarCompanionCore"),
+                .target(name: "SchneeBarSystemProvider"),
+            ]
         ),
         .target(
             name: "SchneeBarVisualHarness",

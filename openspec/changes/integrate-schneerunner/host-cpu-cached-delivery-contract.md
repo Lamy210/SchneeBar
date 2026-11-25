@@ -1,0 +1,7 @@
+# C3m draft: per-lease cached CPU result delivery
+
+Based on merged #418. Physical acquisition deadline and consumer delivery are separate. Only a current lease consuming a current cache ID marks delivery. Fresh successes and failures may be consumed once by each consumer without further counter I/O; a replacement lease does not inherit a delivery receipt. Old/cancelled waiters cannot acknowledge a different cache or lease. While any active lease has an unconsumed fresh result, the host plan requests its minimum 50ms wake interval; otherwise keep the existing acquisition and ordinary widget deadlines. Expired cache, no demand and sleep do not advertise pending delivery.
+
+MenuBarController uses requiresRefresh(.widget), which includes either physical acquisition due or pending cached delivery. The receipt describes sampler consumption, not a guaranteed rendered UI commit; existing widget presentation generation checks still apply. Future host composition must refresh all enabled consumers, including companion-only and cached delivery after the widget has acquired a sample. Do not subscribe a consumer without a connected refresh path. The production companion lease remains false; no additional loop, App dependency, event transport, asset activation or release authorization.
+
+Two deterministic tests cover dual-consumer delivery in either order, lease replacement, no extra physical reads, expiry, sleep and cached failure/recovery. Actual host scheduler with both consumers and real-Mac performance remain to be verified. ADR/rights/main gates are unchanged.

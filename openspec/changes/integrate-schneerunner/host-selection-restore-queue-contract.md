@@ -1,0 +1,7 @@
+# C3r draft: explicit saved selection restoration through the host worker
+
+Based on merged #420–423. Use the same existing single-flight CompanionImportQueue and bridge publication ticket for explicit installed-ID requests and read-only saved selection restoration. Both modes share cancellation, latest-only publication, and the retained worker slot across sleep/stop. No independent restore task or automatic retry. An installed valid choice admits its verified catalogue; no record, unavailable pack, or failed read clears the admitted catalogue and leaves the original host image, with distinct result status. Built-in character artwork remains gated; no saved record is not permission to activate unapproved assets. The explicit restore operation does not write or repair disk, and ordinary installed-ID display requests do not persist selection.
+
+The host entry point checks terminal state and image ownership before requesting restoration, then publishes demand after admission/revocation. Existing committed preference/release/sleep policy and notification and CPU revocation remain in effect. Host must call restore explicitly (including after wake if desired); no picker, automatic startup restore, persist-selection control or shipping target wiring.
+
+Two fixtures exercise one worker across restore cancellation and new UUID request, plus temporary owned pack valid restore, corrupted asset preserving selection bytes, explicit clearing and fallback. Native CI, real Mac display/power, approved artwork, ADR and promotion remain required.

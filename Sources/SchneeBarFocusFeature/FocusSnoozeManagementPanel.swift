@@ -1,0 +1,186 @@
+import Foundation
+import SchneeBarFocusPersistence
+import SwiftUI
+
+extension FocusSnoozeStatusRow {
+    /// Presentation hint only; the store revalidates the ticket on commit.
+    var offersPendingOnlyCancellation: Bool { phase == .pending }
+}
+
+/// Explicit local owner boundary for a future developer preview. The store
+/// re-reads the durable snapshot at the moment of each cancellation; a row
+/// presented earlier is never used as authorization.
+public actor FocusSnoozeManagementCoordinator {
+    private let store: FocusReminderCollectionStore
+
+    public init(store: FocusReminderCollectionStore) {
+        self.store = store
+    }
+
+    public func load() async throws -> FocusSnoozeStatusPresentation {
+        let snapshot = try await store.load()
+        return FocusSnoozeStatusPresentation(snapshot: snapshot)
+    }
+
+    /// Only a still-pending Snooze can be removed. No OS requests are sent,
+    /// retracted, or acknowledged here.
+    public func cancelPending(reminderID: UUID, ticketID: UUID) async throws
+        -> FocusSnoozeStatusPresentation {
+        let snapshot = try await store.cancelPendingSnooze(reminderID: reminderID, ticketID: ticketID)
+        return FocusSnoozeStatusPresentation(snapshot: snapshot)
+    }
+}
+
+/// Isolated developer-only UI. This is intentionally not connected to
+/// SchneeBarApp or UserNotifications. Only local pending Snoozes get a
+/// destructive control; queued/outbox entries have NO cancel action.
+@MainActor
+public struct FocusSnoozeManagementPanel: View {
+    private let coordinator: FocusSnoozeManagementCoordinator
+
+    @State private var rows: [FocusSnoozeStatusRow] = []
+    @State private var busy = false
+    @State private var hasLoaded = false
+    @State private var feedback: String?
+    @State private var pendingConfirmation: FocusSnoozeStatusRow?
+
+    public init(coordinator: FocusSnoozeManagementCoordinator) {
+        self.coordinator = coordinator
+    }
+
+    public var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .firstTextBaseline, spacing: 12) {
+                Text("Manage scheduled Snoozes")
+                    .font(.headline)
+                Spacer(minLength: 0)
+                Button("Refresh Snoozes") {
+                    Task { await refresh() }
+                }
+                .disabled(busy)
+                .accessibilityHint("Reloads current local Snooze state without cancelling anything.")
+            }
+            Text("Only Snoozes not yet submitted for notification can be removed here.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            FocusSnoozeStatusSummaryView(summary: FocusSnoozeStatusSummary(rows: rows))
+
+            if let feedback {
+                Text(feedback)
+                    .font(.caption)
+                    .accessibilityLabel(feedback)
+            }
+
+            if busy && !hasLoaded {
+                ProgressView("Loading Snoozes")
+            } else if hasLoaded && rows.isEmpty {
+                Text("No cancellable or unconfirmed Snoozes")
+                    .foregroundStyle(.secondary)
+            } else if hasLoaded {
+                if busy {
+                    ProgressView("Refreshing Snoozes")
+                        .controlSize(.small)
+                }
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 12) {
+                        ForEach(rows) { row in
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text(row.title)
+                                    .font(.body)
+                                Text(row.statusLabel)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                Text(row.deadline, format: .dateTime.year().month().day().hour().minute())
+                                    .font(.caption)
+                                if row.offersPendingOnlyCancellation {
+                                    Button("Remove pending Snooze") {
+                                        guard !busy else { return }
+                                        pendingConfirmation = row
+                                    }
+                                    .disabled(busy)
+                                    .accessibilityLabel("Remove pending Snooze for \(row.title)")
+                                    .accessibilityHint("Removes only the local unsubmitted Snooze schedule.")
+                                } else {
+                                    Text("No cancellation action: system submission may have occurred.")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.vertical, 4)
+                        }
+                    }
+                }
+                .frame(maxHeight: 420)
+            }
+        }
+        .padding()
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .task { await refresh() }
+        .confirmationDialog(
+            "Remove pending Snooze?",
+            isPresented: Binding(
+                get: { pendingConfirmation != nil },
+                set: { if !$0 { pendingConfirmation = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            if let candidate = pendingConfirmation {
+                Button("Remove local Snooze", role: .destructive) {
+                    pendingConfirmation = nil
+                    Task { await cancel(candidate) }
+                }
+            }
+            Button("Keep Snooze", role: .cancel) {
+                pendingConfirmation = nil
+            }
+        } message: {
+            Text("Only a pending local schedule is removed. An OS-accepted notification cannot be recalled here.")
+        }
+    }
+
+    private func refresh() async {
+        guard !busy else { return }
+        // Refresh invalidates the confirmation currently on screen; the
+        // actionable candidate may have changed outside this view.
+        pendingConfirmation = nil
+        busy = true
+        defer { busy = false }
+        do {
+            rows = try await coordinator.load().rows
+            hasLoaded = true
+            feedback = nil
+        } catch {
+            // Never leave an old actionable row visible after load failure.
+            pendingConfirmation = nil
+            rows = []
+            hasLoaded = false
+            feedback = "Unable to load Snoozes. No changes were made."
+        }
+    }
+
+    private func cancel(_ row: FocusSnoozeStatusRow) async {
+        guard !busy, row.offersPendingOnlyCancellation else { return }
+        busy = true
+        defer { busy = false }
+        do {
+            let updated = try await coordinator.cancelPending(
+                reminderID: row.id.reminderID, ticketID: row.id.ticketID
+            )
+            rows = updated.rows
+            feedback = "Pending Snooze removed from the local schedule."
+        } catch {
+            // State could have advanced into Outbox since the UI rendered.
+            // Reload and show a neutral failure, never falsely claim OS cancel.
+            do {
+                rows = try await coordinator.load().rows
+                hasLoaded = true
+                feedback = "Snooze changed or cancellation failed. Review the current status."
+            } catch {
+                rows = []
+                hasLoaded = false
+                feedback = "Unable to verify Snooze state. No cancellation is confirmed."
+            }
+        }
+    }
+}
