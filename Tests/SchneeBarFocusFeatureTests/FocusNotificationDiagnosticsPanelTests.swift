@@ -306,3 +306,30 @@ private actor FocusPreviewPausedEvidencePort: FocusReminderNotificationCenterPor
         #expect(after.mutations == 0)
     }
 }
+
+@Test @MainActor func focusDiagnosticsViewStateCancellationClearsStaleEvidenceSilently() async throws {
+    try await withFocusPreview { store, file in
+        let center = FocusPreviewPausedEvidencePort()
+        let reader = FocusReminderNotificationDiagnosticsReader(
+            store: store, gateway: FocusReminderNotificationGateway(center: center)
+        )
+        let state = FocusNotificationDiagnosticsViewState(reader: reader)
+        let task = Task { await state.refresh() }
+        await center.waitUntilAuthorizationStarted()
+        #expect(state.isLoading)
+        #expect(state.diagnostics == nil)
+
+        // Closing the view cancels its SwiftUI task. Release the injected
+        // OS read and verify the cancelled result is never published.
+        task.cancel()
+        await center.releaseAuthorization()
+        await task.value
+        #expect(!state.isLoading)
+        #expect(state.diagnostics == nil)
+        #expect(state.errorMessage == nil)
+        #expect(!FileManager.default.fileExists(atPath: file.path))
+        let counts = await center.counts()
+        #expect((1...2).contains(counts.authorization))
+        #expect(counts.mutations == 0)
+    }
+}
